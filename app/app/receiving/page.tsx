@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button, Input, Alert, Card, Badge } from "@/lib/ui/components";
 
 type Unit = {
   id: string;
@@ -156,81 +157,124 @@ export default function ReceivingPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Приёмка</h2>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-lg)" }}>
+      <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "var(--color-text)" }}>Приёмка</h2>
 
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-        <input
-          placeholder="Введите цифры для создания заказа"
-          value={digits}
-          onChange={(e) => setDigits(e.target.value)}
-          style={{ width: 280 }}
-        />
-        <button onClick={createUnit} disabled={loading}>
-          {loading ? "Создание..." : "Создать заказ"}
-        </button>
-        {error && <div style={{ color: "crimson" }}>{error}</div>}
-      </div>
+      <Card>
+        <div style={{ display: "flex", gap: "var(--spacing-md)", alignItems: "center", flexWrap: "wrap" }}>
+          <Input
+            placeholder="Введите цифры для создания заказа"
+            value={digits}
+            onChange={(e) => setDigits(e.target.value)}
+            style={{ width: 280 }}
+          />
+          <Button onClick={createUnit} disabled={loading} variant="primary">
+            {loading ? "Создание..." : "Создать заказ"}
+          </Button>
+          {error && (
+            <div style={{ flex: "1 1 100%" }}>
+              <Alert variant="error">{error}</Alert>
+            </div>
+          )}
+        </div>
+      </Card>
 
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Последние заказы</div>
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: "var(--spacing-md)", fontSize: "16px", color: "var(--color-text)" }}>
+          Последние заказы
+        </div>
 
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Штрихкод</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Статус</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Создан</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Действие</th>
-            </tr>
-          </thead>
-          <tbody>
-            {units.map((u) => (
-              <tr key={u.id}>
-                <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>{u.barcode}</td>
-                <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>{u.status}</td>
-                <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
-                  {new Date(u.created_at).toLocaleString()}
-                </td>
-                <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
-                  {u.status === "receiving" && (
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <select
-                        value={selectedCellIds[u.id] || ""}
-                        onChange={(e) => {
-                          setSelectedCellIds((prev) => ({
-                            ...prev,
-                            [u.id]: e.target.value,
-                          }));
-                        }}
-                        style={{ padding: 6, minWidth: 200 }}
-                      >
-                        <option value="">Выберите ячейку...</option>
-                        {cells.map((cell) => (
-                          <option key={cell.id} value={cell.id}>
-                            {cell.code} — {cell.units_count}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => moveToStored(u.id)}
-                        disabled={loading || !selectedCellIds[u.id]}
-                      >
-                        Разместить в приёмку
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {!units.length && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+            <thead>
               <tr>
-                <td colSpan={4} style={{ padding: 8, color: "#666" }}>Пока нет заказов</td>
+                <th style={{ textAlign: "left", borderBottom: "1px solid var(--color-border)", padding: "var(--spacing-md)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                  Штрихкод
+                </th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid var(--color-border)", padding: "var(--spacing-md)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                  Статус
+                </th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid var(--color-border)", padding: "var(--spacing-md)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                  Создан
+                </th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid var(--color-border)", padding: "var(--spacing-md)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                  Действие
+                </th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {units.map((u) => (
+                <tr key={u.id} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
+                  <td style={{ padding: "var(--spacing-md)", color: "var(--color-text)" }}>{u.barcode}</td>
+                  <td style={{ padding: "var(--spacing-md)" }}>
+                    <Badge variant={u.status === "receiving" ? "info" : "default"}>{u.status}</Badge>
+                  </td>
+                  <td style={{ padding: "var(--spacing-md)", color: "var(--color-text-secondary)", fontSize: "13px" }}>
+                    {new Date(u.created_at).toLocaleString("ru-RU")}
+                  </td>
+                  <td style={{ padding: "var(--spacing-md)" }}>
+                    {u.status === "receiving" && (
+                      <div style={{ display: "flex", gap: "var(--spacing-md)", alignItems: "center", flexWrap: "wrap" }}>
+                        <select
+                          value={selectedCellIds[u.id] || ""}
+                          onChange={(e) => {
+                            setSelectedCellIds((prev) => ({
+                              ...prev,
+                              [u.id]: e.target.value,
+                            }));
+                          }}
+                          style={{
+                            padding: "var(--spacing-sm) var(--spacing-md)",
+                            minWidth: 200,
+                            border: "1px solid var(--color-border)",
+                            borderRadius: "var(--radius-md)",
+                            fontSize: "14px",
+                            background: "var(--color-bg)",
+                            color: "var(--color-text)",
+                            fontFamily: "var(--font-sans)",
+                            outline: "none",
+                            transition: "all var(--transition-base)",
+                          }}
+                          onFocus={(e) => {
+                            e.target.style.borderColor = "var(--color-primary)";
+                            e.target.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.1)";
+                          }}
+                          onBlur={(e) => {
+                            e.target.style.borderColor = "var(--color-border)";
+                            e.target.style.boxShadow = "none";
+                          }}
+                        >
+                          <option value="">Выберите ячейку...</option>
+                          {cells.map((cell) => (
+                            <option key={cell.id} value={cell.id}>
+                              {cell.code} — {cell.units_count}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => moveToStored(u.id)}
+                          disabled={loading || !selectedCellIds[u.id]}
+                        >
+                          Разместить в приёмку
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!units.length && (
+                <tr>
+                  <td colSpan={4} style={{ padding: "var(--spacing-lg)", color: "var(--color-text-tertiary)", textAlign: "center" }}>
+                    Пока нет заказов
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }

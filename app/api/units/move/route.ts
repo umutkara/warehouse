@@ -50,6 +50,13 @@ export async function POST(req: Request) {
 
     if (rpcError) {
       console.error("units/move RPC error:", rpcError);
+      // Проверка на блокировку инвентаризации
+      if (rpcError.message && rpcError.message.includes('INVENTORY_ACTIVE')) {
+        return NextResponse.json(
+          { error: "Инвентаризация активна. Перемещения заблокированы." },
+          { status: 423 }
+        );
+      }
       return NextResponse.json(
         { 
           error: rpcError.message || "RPC call failed",

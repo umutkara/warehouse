@@ -21,13 +21,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data, error } = await supabase.rpc("move_unit", {
+    // Use move_unit_to_cell for consistency (supports NULL status)
+    // If cellId is provided, assign to cell with status
+    // If no cellId, this is an error (assign requires a cell)
+    if (!cellId) {
+      return NextResponse.json({ error: "cellId is required for assignment" }, { status: 400 });
+    }
+
+    const { data, error } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
-      p_to_status: toStatus ?? "stored",
-      p_to_cell_id: cellId ?? null,
+      p_to_cell_id: cellId,
+      p_to_status: toStatus ?? "stored", // Default to "stored" for assignment
     });
 
     if (error) {
+      // Проверка на блокировку инвентаризации
+      if (error.message && error.message.includes('INVENTORY_ACTIVE')) {
+        return NextResponse.json(
+          { error: "Инвентаризация активна. Перемещения заблокированы." },
+          { status: 423 }
+        );
+      }
       // ВАЖНО: возвращаем текст ошибки из Postgres
       return NextResponse.json(
         { error: error.message, details: error },
@@ -38,7 +52,7 @@ export async function POST(req: Request) {
     // если RPC вернул null — тоже считаем ошибкой
     if (!data) {
       return NextResponse.json(
-        { error: "RPC returned null (move_unit)" },
+        { error: "RPC returned null (move_unit_to_cell)" },
         { status: 500 }
       );
     }

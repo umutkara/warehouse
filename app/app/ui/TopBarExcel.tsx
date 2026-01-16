@@ -22,20 +22,33 @@ function StatPill({
       type="button"
       onClick={onClick}
       style={{
-        border: "1px solid #e6e6e6",
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 12,
-        background: active ? "#111" : "#fafafa",
-        color: active ? "#fff" : "#111",
+        border: active ? "none" : "1px solid var(--color-border)",
+        borderRadius: "var(--radius-full)",
+        padding: "6px 12px",
+        fontSize: "12px",
+        fontWeight: 600,
+        background: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: active ? "#ffffff" : "var(--color-text)",
         display: "inline-flex",
-        gap: 6,
+        gap: "6px",
         alignItems: "center",
         cursor: onClick ? "pointer" : "default",
         whiteSpace: "nowrap",
+        transition: "all var(--transition-base)",
+        boxShadow: active ? "var(--shadow-sm)" : "none",
+      }}
+      onMouseEnter={(e) => {
+        if (onClick && !active) {
+          e.currentTarget.style.background = "var(--color-bg-tertiary)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (onClick && !active) {
+          e.currentTarget.style.background = "var(--color-bg-secondary)";
+        }
       }}
     >
-      <span style={{ opacity: active ? 1 : 0.7 }}>{label}</span>
+      <span style={{ opacity: active ? 1 : 0.8 }}>{label}</span>
       <b>{typeof value === "number" ? value : "-"}</b>
     </button>
   );
@@ -137,20 +150,21 @@ export default function TopBarExcel() {
   return (
     <header
       style={{
-        height: 160, // еще увеличена для размещения всех элементов внизу
+        height: 160,
         width: "100%",
         boxSizing: "border-box",
         display: "grid",
-        gridTemplateRows: "44px 116px", // Row 1: pills, Row 2: all tools in one row
-        borderBottom: "1px solid #ddd",
-        background: "#fff",
+        gridTemplateRows: "48px 112px",
+        borderBottom: "1px solid var(--color-border)",
+        background: "var(--color-bg)",
+        boxShadow: "var(--shadow-sm)",
       }}
     >
       {/* ROW 1 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 12px", width: "100%" }}>
-        <div style={{ fontWeight: 700 }}>Control Panel</div>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-md)", padding: "0 var(--spacing-lg)", width: "100%" }}>
+        <div style={{ fontWeight: 700, fontSize: "16px", color: "var(--color-text)" }}>Control Panel</div>
 
-        <div style={{ display: "flex", gap: 8, overflow: "auto", minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", gap: "var(--spacing-sm)", overflow: "auto", minWidth: 0, flex: 1, padding: "var(--spacing-xs) 0" }}>
           <StatPill label="Все" value={zoneStats?.total} onClick={() => resetZones()} active={Object.values(zoneFilters).every(Boolean)} />
           <StatPill label="Приёмка" value={zoneStats?.counts?.receiving} onClick={() => setOnlyZone("receiving")} active={zoneFilters.receiving} />
           <StatPill label="Сортировка" value={zoneStats?.counts?.bin} onClick={() => setOnlyZone("bin")} active={zoneFilters.bin} />
@@ -166,8 +180,8 @@ export default function TopBarExcel() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          padding: "0 12px 10px 12px",
+          gap: "var(--spacing-md)",
+          padding: "0 var(--spacing-lg) var(--spacing-md) var(--spacing-lg)",
           width: "100%",
           flexWrap: "nowrap",
           minWidth: 0,
@@ -180,11 +194,24 @@ export default function TopBarExcel() {
           onChange={(e) => setDigits(e.target.value)}
           style={{
             width: 200,
-            height: 38,
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            padding: "0 10px",
+            height: 40,
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-md)",
+            padding: "0 var(--spacing-md)",
             outline: "none",
+            fontSize: "14px",
+            fontFamily: "var(--font-sans)",
+            background: "var(--color-bg)",
+            color: "var(--color-text)",
+            transition: "all var(--transition-base)",
+          }}
+          onFocus={(e) => {
+            e.target.style.borderColor = "var(--color-primary)";
+            e.target.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.1)";
+          }}
+          onBlur={(e) => {
+            e.target.style.borderColor = "var(--color-border)";
+            e.target.style.boxShadow = "none";
           }}
         />
 
@@ -193,13 +220,27 @@ export default function TopBarExcel() {
           onClick={copyDigits}
           disabled={!sanitized}
           style={{
-            height: 38,
-            padding: "0 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: sanitized ? "#111" : "#f3f3f3",
-            color: sanitized ? "#fff" : "#777",
+            height: 40,
+            padding: "0 var(--spacing-md)",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border)",
+            background: sanitized ? "var(--color-primary)" : "var(--color-bg-tertiary)",
+            color: sanitized ? "#ffffff" : "var(--color-text-tertiary)",
             cursor: sanitized ? "pointer" : "not-allowed",
+            fontSize: "14px",
+            fontWeight: 600,
+            transition: "all var(--transition-base)",
+            opacity: sanitized ? 1 : 0.6,
+          }}
+          onMouseEnter={(e) => {
+            if (sanitized) {
+              e.currentTarget.style.background = "var(--color-primary-hover)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (sanitized) {
+              e.currentTarget.style.background = "var(--color-primary)";
+            }
           }}
         >
           Copy
@@ -209,13 +250,27 @@ export default function TopBarExcel() {
           onClick={printBarcode}
           disabled={!sanitized}
           style={{
-            height: 38,
-            padding: "0 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: sanitized ? "#fff" : "#f3f3f3",
-            color: sanitized ? "#111" : "#777",
+            height: 40,
+            padding: "0 var(--spacing-md)",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border)",
+            background: sanitized ? "var(--color-bg)" : "var(--color-bg-tertiary)",
+            color: sanitized ? "var(--color-text)" : "var(--color-text-tertiary)",
             cursor: sanitized ? "pointer" : "not-allowed",
+            fontSize: "14px",
+            fontWeight: 600,
+            transition: "all var(--transition-base)",
+            opacity: sanitized ? 1 : 0.6,
+          }}
+          onMouseEnter={(e) => {
+            if (sanitized) {
+              e.currentTarget.style.background = "var(--color-bg-tertiary)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (sanitized) {
+              e.currentTarget.style.background = "var(--color-bg)";
+            }
           }}
         >
           Print
@@ -226,12 +281,13 @@ export default function TopBarExcel() {
           style={{
             width: 300,
             height: 86,
-            border: "1px solid #e6e6e6",
-            borderRadius: 12,
-            padding: "8px 10px",
-            background: "#fff",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--spacing-sm) var(--spacing-md)",
+            background: "var(--color-bg)",
             display: "grid",
             alignItems: "center",
+            boxShadow: "var(--shadow-sm)",
           }}
           title={sanitized ? `CODE128: ${sanitized}` : "Нет штрихкода"}
         >
@@ -243,15 +299,16 @@ export default function TopBarExcel() {
           style={{
             width: 70,
             height: 86,
-            border: "1px solid #e6e6e6",
-            borderRadius: 12,
-            background: "#fff",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            background: "var(--color-bg)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            boxShadow: "var(--shadow-sm)",
           }}
         >
-          <div style={{ fontSize: 11, color: "#999", textAlign: "center" }}>
+          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)", textAlign: "center", lineHeight: 1.4 }}>
             QR<br />(скоро)
           </div>
         </div>

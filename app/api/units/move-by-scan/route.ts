@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
 function normalizeCellCode(v: any) {
@@ -152,6 +152,13 @@ export async function POST(req: Request) {
 
     if (rpcError) {
       console.error("move-by-scan RPC error:", rpcError);
+      // Проверка на блокировку инвентаризации
+      if (rpcError.message && rpcError.message.includes('INVENTORY_ACTIVE')) {
+        return NextResponse.json(
+          { error: "Инвентаризация активна. Перемещения заблокированы." },
+          { status: 423 }
+        );
+      }
       return NextResponse.json({ error: rpcError.message || "Ошибка перемещения" }, { status: 500 });
     }
 
@@ -221,6 +228,13 @@ export async function POST(req: Request) {
 
     if (rpcError) {
       console.error("move-by-scan RPC error:", rpcError);
+      // Проверка на блокировку инвентаризации
+      if (rpcError.message && rpcError.message.includes('INVENTORY_ACTIVE')) {
+        return NextResponse.json(
+          { error: "Инвентаризация активна. Перемещения заблокированы." },
+          { status: 423 }
+        );
+      }
       return NextResponse.json({ error: rpcError.message || "Move failed" }, { status: 500 });
     }
 

@@ -11,24 +11,28 @@ function NavButton({ href, children }: { href: string; children: React.ReactNode
     <Link
       href={href}
       style={{
-        display: "block",
-        background: "#111",
-        color: "#fff",
-        fontWeight: 600,
-        padding: "10px 12px",
-        borderRadius: 10,
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--spacing-sm)",
+        padding: "var(--spacing-md) var(--spacing-md)",
+        borderRadius: "var(--radius-md)",
         textDecoration: "none",
-        transition: "all 0.2s ease",
-        outline: isActive ? "2px solid #444" : "none",
-        transform: "translateY(0)",
+        fontWeight: 600,
+        fontSize: "14px",
+        color: isActive ? "#ffffff" : "var(--color-text)",
+        background: isActive ? "var(--color-primary)" : "transparent",
+        transition: "all var(--transition-base)",
+        border: isActive ? "none" : "1px solid transparent",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#2b2b2b";
-        e.currentTarget.style.transform = "translateY(-1px)";
+        if (!isActive) {
+          e.currentTarget.style.background = "var(--color-bg-tertiary)";
+        }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = "#111";
-        e.currentTarget.style.transform = "translateY(0)";
+        if (!isActive) {
+          e.currentTarget.style.background = "transparent";
+        }
       }}
     >
       {children}
@@ -40,11 +44,32 @@ export default function LeftNav({ role }: { role: string }) {
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
 
   return (
-    <aside style={{ borderRight: "1px solid #ddd", background: "#fff", padding: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 12 }}>WMS</div>
-      <div style={{ fontSize: 12, color: "#666", marginBottom: 12 }}>Роль: {role}</div>
+    <aside
+      style={{
+        borderRight: "1px solid var(--color-border)",
+        background: "var(--color-bg)",
+        padding: "var(--spacing-lg)",
+        minWidth: 240,
+        maxWidth: 240,
+        height: "100%",
+        overflowY: "auto",
+      }}
+    >
+      <div style={{ marginBottom: "var(--spacing-lg)" }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: "18px",
+            color: "var(--color-text)",
+            marginBottom: "var(--spacing-xs)",
+          }}
+        >
+          WMS
+        </div>
+        <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>Роль: {role}</div>
+      </div>
 
-      <nav style={{ display: "grid", gap: 8 }}>
+      <nav style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-xs)" }}>
         {canWork && <NavButton href="/app/receiving">Приёмка</NavButton>}
         {canWork && <NavButton href="/app/putaway">Размещение</NavButton>}
         {canWork && <NavButton href="/app/picking">Сборка</NavButton>}
@@ -54,6 +79,7 @@ export default function LeftNav({ role }: { role: string }) {
         {/* guest/read-only future */}
         <NavButton href="/app/warehouse-map">Карта склада</NavButton>
         {canWork && <NavButton href="/app/cells/labels">Этикетки ячеек</NavButton>}
+        <NavButton href="/app/inventory">Инвентаризация</NavButton>
       </nav>
     </aside>
   );

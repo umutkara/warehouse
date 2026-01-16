@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
+import { Alert, Button } from "@/lib/ui/components";
 
 type CellInfo = {
   id: string;
@@ -16,7 +17,7 @@ type UnitInfo = {
   barcode: string;
 };
 
-type Mode = "receiving" | "moving";
+type Mode = "receiving" | "moving" | "inventory";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -31,17 +32,54 @@ export default function TsdPage() {
   const [unit, setUnit] = useState<UnitInfo | null>(null);
   const [toCell, setToCell] = useState<CellInfo | null>(null);
   
+  // Для режима Инвентаризация
+  const [inventoryCell, setInventoryCell] = useState<CellInfo | null>(null);
+  const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
+  const [inventoryActive, setInventoryActive] = useState<boolean | null>(null);
+  const [scanResult, setScanResult] = useState<{
+    diff: { missing: string[]; extra: string[]; unknown: string[] };
+    expected: { count: number };
+    scanned: { count: number };
+  } | null>(null);
+  
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Проверка статуса инвентаризации при загрузке и смене режима
+  useEffect(() => {
+    async function checkInventoryStatus() {
+      if (mode === "inventory") {
+        try {
+          const res = await fetch("/api/inventory/status", { cache: "no-store" });
+          if (res.ok) {
+            const json = await res.json();
+            setInventoryActive(json.active || false);
+            if (!json.active) {
+              setInventoryError("Инвентаризация не активна. Обратитесь к менеджеру.");
+            } else {
+              setInventoryError(null);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to check inventory status:", e);
+        }
+      } else {
+        setInventoryActive(null);
+        setInventoryError(null);
+      }
+    }
+    checkInventoryStatus();
+  }, [mode]);
 
   // Автофокус на input
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, unit, toCell, error, success, mode]);
+  }, [binCell, fromCell, unit, toCell, error, success, mode, inventoryCell, scannedBarcodes]);
 
   // Обработка Enter/CR
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -49,8 +87,10 @@ export default function TsdPage() {
       e.preventDefault();
       if (mode === "receiving") {
         handleReceivingScan();
-      } else {
+      } else if (mode === "moving") {
         handleMovingScan();
+      } else if (mode === "inventory") {
+        handleInventoryScan();
       }
     }
   }
@@ -66,9 +106,18 @@ export default function TsdPage() {
       if (code) return { type: "cell", code };
     }
 
+    // Для режима инвентаризации: если нет активной ячейки, попробуем распознать код ячейки
+    if (mode === "inventory" && !inventoryCell) {
+      // Код ячейки: буквы+цифры, длина 2-10
+      const cellPattern = /^[A-Z0-9]{2,10}$/i;
+      if (cellPattern.test(trimmed)) {
+        return { type: "cell", code: trimmed.toUpperCase() };
+      }
+    }
+
     // Иначе это barcode unit (только цифры)
     const digits = trimmed.replace(/\D/g, "");
-    if (digits.length >= 3) {
+    if (digits.length >= 1) {
       return { type: "unit", code: digits };
     }
 
@@ -279,6 +328,11 @@ export default function TsdPage() {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Проверка на ошибку инвентаризации (423 Locked)
+        if (res.status === 423 && json.error) {
+          setInventoryError(json.error);
+          throw new Error(json.error);
+        }
         throw new Error(json.error || "Ошибка перемещения");
       }
 
@@ -293,9 +347,133 @@ export default function TsdPage() {
       }, 2000);
     } catch (e: any) {
       setError(e.message || "Ошибка перемещения");
+      // Если ошибка инвентаризации - очищаем через 5 секунд
+      if (inventoryError) {
+        setTimeout(() => setInventoryError(null), 5000);
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  // Обработка скана в режиме инвентаризации
+  async function handleInventoryScan() {
+    if (!inventoryActive) {
+      setError("Инвентаризация не активна");
+      setScanValue("");
+      return;
+    }
+
+    const parsed = parseScan(scanValue);
+    if (!parsed) {
+      setError("Некорректный скан");
+      setScanValue("");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+
+    if (parsed.type === "cell") {
+      // Сканирование ячейки
+      const cellInfo = await loadCellInfo(parsed.code);
+      if (!cellInfo) {
+        setError(`Ячейка "${parsed.code}" не найдена`);
+        setScanValue("");
+        return;
+      }
+
+      setInventoryCell(cellInfo);
+      setScannedBarcodes([]);
+      setScanResult(null);
+      setSuccess(`Ячейка: ${cellInfo.code} (${cellInfo.cell_type})`);
+      setScanValue("");
+    } else {
+      // Сканирование unit barcode
+      if (!inventoryCell) {
+        setError("Сначала отсканируйте ячейку");
+        setScanValue("");
+        return;
+      }
+
+      const barcode = parsed.code;
+      if (scannedBarcodes.includes(barcode)) {
+        setError(`Штрихкод "${barcode}" уже добавлен`);
+        setScanValue("");
+        return;
+      }
+
+      setScannedBarcodes([...scannedBarcodes, barcode].slice(-10)); // Последние 10
+      setSuccess(`Добавлен: ${barcode} (всего: ${scannedBarcodes.length + 1})`);
+      setScanValue("");
+    }
+  }
+
+  // Сохранение результатов сканирования ячейки
+  async function handleSaveCell() {
+    if (!inventoryCell || !inventoryActive) {
+      setError("Выберите ячейку и убедитесь что инвентаризация активна");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch("/api/inventory/cell-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cellCode: inventoryCell.code,
+          unitBarcodes: scannedBarcodes,
+        }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || "Ошибка сохранения");
+      }
+
+      setScanResult(json);
+      const hasDiff = json.diff.missing.length > 0 || json.diff.extra.length > 0 || json.diff.unknown.length > 0;
+
+      if (hasDiff) {
+        setError(
+          `Расхождение: missing=${json.diff.missing.length}, extra=${json.diff.extra.length}, unknown=${json.diff.unknown.length}`
+        );
+      } else {
+        setSuccess(`✓ ОК: отсканировано ${json.scanned.count}, ожидалось ${json.expected.count}`);
+      }
+
+      // Очистить список после сохранения
+      setScannedBarcodes([]);
+    } catch (e: any) {
+      setError(e.message || "Ошибка сохранения");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Очистить список штрихкодов
+  function handleClearBarcodes() {
+    setScannedBarcodes([]);
+    setSuccess(null);
+    setError(null);
+  }
+
+  // Сменить ячейку (сброс)
+  function handleChangeCell() {
+    setInventoryCell(null);
+    setScannedBarcodes([]);
+    setScanResult(null);
+    setSuccess(null);
+    setError(null);
   }
 
   // Сброс состояния
@@ -303,13 +481,20 @@ export default function TsdPage() {
     if (mode === "receiving") {
       setBinCell(null);
       setLastReceivedUnit(null);
-    } else {
+    } else if (mode === "moving") {
       setFromCell(null);
       setUnit(null);
       setToCell(null);
+    } else if (mode === "inventory") {
+      setInventoryCell(null);
+      setScannedBarcodes([]);
+      setScanResult(null);
     }
     setError(null);
     setSuccess(null);
+    if (mode !== "inventory") {
+      setInventoryError(null);
+    }
     setScanValue("");
     if (inputRef.current) {
       inputRef.current.focus();
@@ -330,92 +515,108 @@ export default function TsdPage() {
     <>
       {/* Sticky header с кнопкой возврата */}
       <header
-        style={{
-          position: "sticky",
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 100,
-          background: "#fff",
-          borderBottom: "1px solid #ddd",
-          padding: "12px 16px",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-        }}
+          style={{
+            position: "sticky",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 100,
+            background: "var(--color-bg)",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "var(--spacing-md) var(--spacing-lg)",
+            boxShadow: "var(--shadow-sm)",
+          }}
       >
         <Link
           href="/app/warehouse-map"
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 8,
-            padding: "8px 16px",
+            gap: "var(--spacing-sm)",
+            padding: "var(--spacing-sm) var(--spacing-lg)",
             fontSize: "16px",
             fontWeight: 600,
-            color: "#2563eb",
+            color: "var(--color-primary)",
             textDecoration: "none",
-            borderRadius: 6,
-            border: "1px solid #2563eb",
-            background: "#fff",
-            transition: "all 0.2s",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-primary)",
+            background: "var(--color-bg)",
+            transition: "all var(--transition-base)",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#eff6ff";
+            e.currentTarget.style.background = "var(--color-primary-light)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#fff";
+            e.currentTarget.style.background = "var(--color-bg)";
           }}
         >
           ← Вернуться
         </Link>
       </header>
 
+      {inventoryError && (
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 200,
+            padding: "var(--spacing-xl)",
+            fontSize: "20px",
+            fontWeight: 700,
+            textAlign: "center",
+            boxShadow: "var(--shadow-lg)",
+          }}
+        >
+          <Alert variant="error" style={{ fontSize: "18px", padding: "var(--spacing-lg)" }}>
+            {inventoryError}
+          </Alert>
+        </div>
+      )}
+
       <div
         style={{
-          padding: "16px",
+          padding: "var(--spacing-lg)",
           maxWidth: 560,
           margin: "0 auto",
           width: "100%",
           boxSizing: "border-box",
         }}
       >
-        <h1 style={{ margin: "0 0 20px 0", fontSize: "24px", fontWeight: 700 }}>ТСД</h1>
+        <h1 style={{ margin: "0 0 var(--spacing-xl) 0", fontSize: "24px", fontWeight: 700, color: "var(--color-text)" }}>
+          ТСД
+        </h1>
 
         {/* Переключатель режимов */}
-        <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
-          <button
+        <div style={{ marginBottom: "var(--spacing-lg)", display: "flex", gap: "var(--spacing-sm)", flexWrap: "wrap" }}>
+          <Button
+            variant={mode === "receiving" ? "primary" : "secondary"}
+            size="lg"
             onClick={() => handleModeChange("receiving")}
-            style={{
-              flex: 1,
-              padding: "14px",
-              minHeight: 48,
-              fontSize: "16px",
-              fontWeight: 600,
-              background: mode === "receiving" ? "#2563eb" : "#f3f4f6",
-              color: mode === "receiving" ? "#fff" : "#111",
-              border: mode === "receiving" ? "2px solid #2563eb" : "2px solid #ddd",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
           >
             Приемка
-          </button>
-          <button
+          </Button>
+          <Button
+            variant={mode === "moving" ? "primary" : "secondary"}
+            size="lg"
             onClick={() => handleModeChange("moving")}
-            style={{
-              flex: 1,
-              padding: "14px",
-              minHeight: 48,
-              fontSize: "16px",
-              fontWeight: 600,
-              background: mode === "moving" ? "#2563eb" : "#f3f4f6",
-              color: mode === "moving" ? "#fff" : "#111",
-              border: mode === "moving" ? "2px solid #2563eb" : "2px solid #ddd",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
           >
             Перемещение
-          </button>
+          </Button>
+          <Button
+            variant={mode === "inventory" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("inventory")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Инвентаризация
+          </Button>
         </div>
 
         {/* Главный input для сканирования */}
@@ -430,25 +631,29 @@ export default function TsdPage() {
             disabled={busy}
             style={{
               width: "100%",
-              padding: "16px",
-              minHeight: 48,
+              padding: "var(--spacing-lg)",
+              minHeight: 56,
               fontSize: "20px",
-              border: "2px solid #2563eb",
-              borderRadius: 8,
+              border: "2px solid var(--color-primary)",
+              borderRadius: "var(--radius-md)",
               outline: "none",
               fontWeight: 600,
               boxSizing: "border-box",
+              background: "var(--color-bg)",
+              color: "var(--color-text)",
+              fontFamily: "var(--font-sans)",
+              transition: "all var(--transition-base)",
             }}
             autoFocus
           />
           {error && (
-            <div style={{ marginTop: 8, padding: 12, background: "#fee", color: "#c00", borderRadius: 6, fontSize: "15px" }}>
-              {error}
+            <div style={{ marginTop: "var(--spacing-sm)" }}>
+              <Alert variant="error">{error}</Alert>
             </div>
           )}
           {success && (
-            <div style={{ marginTop: 8, padding: 12, background: "#efe", color: "#060", borderRadius: 6, fontSize: "15px" }}>
-              {success}
+            <div style={{ marginTop: "var(--spacing-sm)" }}>
+              <Alert variant="success">{success}</Alert>
             </div>
           )}
         </div>
@@ -503,6 +708,98 @@ export default function TsdPage() {
                 <div style={{ fontSize: "18px", fontWeight: 700 }}>
                   {lastReceivedUnit.barcode} → {lastReceivedUnit.binCode}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Режим ИНВЕНТАРИЗАЦИЯ */}
+        {mode === "inventory" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* Ячейка */}
+            <div
+              style={{
+                padding: 16,
+                background: inventoryCell ? getCellColor(inventoryCell.cell_type, inventoryCell.meta) : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: inventoryCell ? "#2563eb" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Ячейка</div>
+              {inventoryCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(inventoryCell.cell_type, inventoryCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{inventoryCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{inventoryCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* Список штрихкодов */}
+            {scannedBarcodes.length > 0 && (
+              <div
+                style={{
+                  padding: 16,
+                  background: "#fff",
+                  borderRadius: 8,
+                  border: "1px solid #ddd",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                  Отсканировано: {scannedBarcodes.length}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 200, overflowY: "auto" }}>
+                  {scannedBarcodes.slice(-10).reverse().map((barcode: string, idx: number) => (
+                    <div key={idx} style={{ fontSize: "16px", padding: "4px 8px", background: "#f9fafb", borderRadius: 4 }}>
+                      {barcode}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Результат последнего сохранения */}
+            {scanResult && (
+              <div
+                style={{
+                  padding: 16,
+                  background: scanResult.diff.missing.length > 0 || scanResult.diff.extra.length > 0 || scanResult.diff.unknown.length > 0
+                    ? "#fee"
+                    : "#efe",
+                  borderRadius: 8,
+                  border: "2px solid",
+                  borderColor: scanResult.diff.missing.length > 0 || scanResult.diff.extra.length > 0 || scanResult.diff.unknown.length > 0
+                    ? "#f00"
+                    : "#0c0",
+                }}
+              >
+                <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: 8 }}>
+                  {scanResult.diff.missing.length > 0 || scanResult.diff.extra.length > 0 || scanResult.diff.unknown.length > 0
+                    ? "Расхождение"
+                    : "ОК"}
+                </div>
+                <div style={{ fontSize: "14px", color: "#666" }}>
+                  Ожидалось: {scanResult.expected.count}, Отсканировано: {scanResult.scanned.count}
+                </div>
+                {(scanResult.diff.missing.length > 0 || scanResult.diff.extra.length > 0 || scanResult.diff.unknown.length > 0) && (
+                  <div style={{ fontSize: "12px", marginTop: 8, color: "#666" }}>
+                    Missing: {scanResult.diff.missing.length}, Extra: {scanResult.diff.extra.length}, Unknown: {scanResult.diff.unknown.length}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -599,43 +896,68 @@ export default function TsdPage() {
 
         {/* Кнопки */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
-            onClick={handleReset}
-            disabled={busy}
-            style={{
-              width: "100%",
-              padding: "14px",
-              minHeight: 48,
-              fontSize: "16px",
-              fontWeight: 600,
-              background: "#f3f4f6",
-              color: "#111",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
+              {mode === "inventory" && (
+            <>
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={handleSaveCell}
+                disabled={busy || !inventoryCell || !inventoryActive}
+                fullWidth
+                style={{
+                  background: inventoryCell && inventoryActive && !busy ? "var(--color-success)" : undefined,
+                }}
+                onMouseEnter={(e) => {
+                  if (inventoryCell && inventoryActive && !busy) {
+                    e.currentTarget.style.background = "#15803d";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (inventoryCell && inventoryActive && !busy) {
+                    e.currentTarget.style.background = "var(--color-success)";
+                  }
+                }}
+              >
+                Сохранить ячейку
+              </Button>
+              {scannedBarcodes.length > 0 && (
+                <Button variant="secondary" size="lg" onClick={handleClearBarcodes} disabled={busy} fullWidth>
+                  Очистить список
+                </Button>
+              )}
+              {inventoryCell && (
+                <Button variant="secondary" size="lg" onClick={handleChangeCell} disabled={busy} fullWidth>
+                  Сменить ячейку
+                </Button>
+              )}
+            </>
+          )}
+          <Button variant="secondary" size="lg" onClick={handleReset} disabled={busy} fullWidth>
             Сброс
-          </button>
+          </Button>
           {mode === "moving" && (
-            <button
+            <Button
+              variant="primary"
+              size="lg"
               onClick={executeMove}
               disabled={!canMove}
+              fullWidth
               style={{
-                width: "100%",
-                padding: "14px",
-                minHeight: 48,
-                fontSize: "16px",
-                fontWeight: 600,
-                background: canMove ? "#16a34a" : "#ccc",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                cursor: canMove ? "pointer" : "not-allowed",
+                background: canMove ? "var(--color-success)" : undefined,
+              }}
+              onMouseEnter={(e) => {
+                if (canMove) {
+                  e.currentTarget.style.background = "#15803d";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (canMove) {
+                  e.currentTarget.style.background = "var(--color-success)";
+                }
               }}
             >
               Переместить
-            </button>
+            </Button>
           )}
         </div>
 
@@ -649,12 +971,19 @@ export default function TsdPage() {
               <li>Заказ будет создан (если нового нет) и размещён в BIN</li>
               <li>BIN останется выбранным для приёма пачки заказов</li>
             </ol>
-          ) : (
+          ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
               <li>Отсканируйте FROM ячейку (или введите код)</li>
               <li>Отсканируйте UNIT (штрихкод заказа)</li>
               <li>Отсканируйте TO ячейку (или введите код)</li>
               <li>Перемещение выполнится автоматически</li>
+            </ol>
+          ) : (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Отсканируйте ячейку (или введите код)</li>
+              <li>Отсканируйте штрихкоды unit'ов подряд (каждый Enter добавляет в список)</li>
+              <li>Нажмите "Сохранить ячейку" для отправки результатов</li>
+              <li>Проверьте результат: ОК или расхождение</li>
             </ol>
           )}
         </div>
