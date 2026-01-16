@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
 
 type CellInfo = {
@@ -326,278 +327,338 @@ export default function TsdPage() {
   const canMove = fromCell && unit && toCell && !busy;
 
   return (
-    <div style={{ padding: 20, maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ margin: "0 0 24px 0", fontSize: 28 }}>ТСД</h1>
-
-      {/* Переключатель режимов */}
-      <div style={{ marginBottom: 24, display: "flex", gap: 12 }}>
-        <button
-          onClick={() => handleModeChange("receiving")}
+    <>
+      {/* Sticky header с кнопкой возврата */}
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 100,
+          background: "#fff",
+          borderBottom: "1px solid #ddd",
+          padding: "12px 16px",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+        }}
+      >
+        <Link
+          href="/app/warehouse-map"
           style={{
-            flex: 1,
-            padding: "12px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 16px",
             fontSize: "16px",
             fontWeight: 600,
-            background: mode === "receiving" ? "#2563eb" : "#f3f4f6",
-            color: mode === "receiving" ? "#fff" : "#111",
-            border: mode === "receiving" ? "2px solid #2563eb" : "2px solid #ddd",
-            borderRadius: 8,
-            cursor: "pointer",
+            color: "#2563eb",
+            textDecoration: "none",
+            borderRadius: 6,
+            border: "1px solid #2563eb",
+            background: "#fff",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#eff6ff";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#fff";
           }}
         >
-          Приемка
-        </button>
-        <button
-          onClick={() => handleModeChange("moving")}
-          style={{
-            flex: 1,
-            padding: "12px",
-            fontSize: "16px",
-            fontWeight: 600,
-            background: mode === "moving" ? "#2563eb" : "#f3f4f6",
-            color: mode === "moving" ? "#fff" : "#111",
-            border: mode === "moving" ? "2px solid #2563eb" : "2px solid #ddd",
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-        >
-          Перемещение
-        </button>
-      </div>
+          ← Вернуться
+        </Link>
+      </header>
 
-      {/* Главный input для сканирования */}
-      <div style={{ marginBottom: 24 }}>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Сканируй здесь"
-          value={scanValue}
-          onChange={(e) => setScanValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={busy}
-          style={{
-            width: "100%",
-            padding: "20px",
-            fontSize: "24px",
-            border: "2px solid #2563eb",
-            borderRadius: "8px",
-            outline: "none",
-            fontWeight: 600,
-          }}
-          autoFocus
-        />
-        {error && (
-          <div style={{ marginTop: 12, padding: 12, background: "#fee", color: "#c00", borderRadius: 6, fontSize: 16 }}>
-            {error}
-          </div>
-        )}
-        {success && (
-          <div style={{ marginTop: 12, padding: 12, background: "#efe", color: "#060", borderRadius: 6, fontSize: 16 }}>
-            {success}
-          </div>
-        )}
-      </div>
+      <div
+        style={{
+          padding: "16px",
+          maxWidth: 560,
+          margin: "0 auto",
+          width: "100%",
+          boxSizing: "border-box",
+        }}
+      >
+        <h1 style={{ margin: "0 0 20px 0", fontSize: "24px", fontWeight: 700 }}>ТСД</h1>
 
-      {/* Режим ПРИЕМКА */}
-      {mode === "receiving" && (
-        <div style={{ display: "grid", gap: 16, marginBottom: 24 }}>
-          {/* BIN */}
-          <div
+        {/* Переключатель режимов */}
+        <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
+          <button
+            onClick={() => handleModeChange("receiving")}
             style={{
-              padding: 20,
-              background: binCell ? "#fff8e1" : "#f5f5f5",
+              flex: 1,
+              padding: "14px",
+              minHeight: 48,
+              fontSize: "16px",
+              fontWeight: 600,
+              background: mode === "receiving" ? "#2563eb" : "#f3f4f6",
+              color: mode === "receiving" ? "#fff" : "#111",
+              border: mode === "receiving" ? "2px solid #2563eb" : "2px solid #ddd",
               borderRadius: 8,
-              border: "2px solid",
-              borderColor: binCell ? "#ffc107" : "#ddd",
+              cursor: "pointer",
             }}
           >
-            <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>BIN (ячейка приёмки)</div>
-            {binCell ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    backgroundColor: getCellColor(binCell.cell_type, binCell.meta),
-                    border: "1px solid #ccc",
-                    borderRadius: 4,
-                  }}
-                />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{binCell.code}</div>
-                  <div style={{ fontSize: 14, color: "#666" }}>{binCell.cell_type}</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: 18, color: "#999" }}>—</div>
-            )}
-          </div>
+            Приемка
+          </button>
+          <button
+            onClick={() => handleModeChange("moving")}
+            style={{
+              flex: 1,
+              padding: "14px",
+              minHeight: 48,
+              fontSize: "16px",
+              fontWeight: 600,
+              background: mode === "moving" ? "#2563eb" : "#f3f4f6",
+              color: mode === "moving" ? "#fff" : "#111",
+              border: mode === "moving" ? "2px solid #2563eb" : "2px solid #ddd",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            Перемещение
+          </button>
+        </div>
 
-          {/* Последний принятый */}
-          {lastReceivedUnit && (
-            <div
-              style={{
-                padding: 16,
-                background: "#e8f5e9",
-                borderRadius: 8,
-                border: "2px solid #4caf50",
-              }}
-            >
-              <div style={{ fontSize: 14, color: "#666", marginBottom: 4 }}>Последний принятый:</div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {lastReceivedUnit.barcode} → {lastReceivedUnit.binCode}
-              </div>
+        {/* Главный input для сканирования */}
+        <div style={{ marginBottom: 16 }}>
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Сканируй здесь"
+            value={scanValue}
+            onChange={(e) => setScanValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={busy}
+            style={{
+              width: "100%",
+              padding: "16px",
+              minHeight: 48,
+              fontSize: "20px",
+              border: "2px solid #2563eb",
+              borderRadius: 8,
+              outline: "none",
+              fontWeight: 600,
+              boxSizing: "border-box",
+            }}
+            autoFocus
+          />
+          {error && (
+            <div style={{ marginTop: 8, padding: 12, background: "#fee", color: "#c00", borderRadius: 6, fontSize: "15px" }}>
+              {error}
+            </div>
+          )}
+          {success && (
+            <div style={{ marginTop: 8, padding: 12, background: "#efe", color: "#060", borderRadius: 6, fontSize: "15px" }}>
+              {success}
             </div>
           )}
         </div>
-      )}
 
-      {/* Режим ПЕРЕМЕЩЕНИЕ */}
-      {mode === "moving" && (
-        <div style={{ display: "grid", gap: 16, marginBottom: 24 }}>
-          {/* FROM */}
-          <div
-            style={{
-              padding: 20,
-              background: fromCell ? "#e3f2fd" : "#f5f5f5",
-              borderRadius: 8,
-              border: "2px solid",
-              borderColor: fromCell ? "#2196f3" : "#ddd",
-            }}
-          >
-            <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
-            {fromCell ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    backgroundColor: getCellColor(fromCell.cell_type, fromCell.meta),
-                    border: "1px solid #ccc",
-                    borderRadius: 4,
-                  }}
-                />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{fromCell.code}</div>
-                  <div style={{ fontSize: 14, color: "#666" }}>{fromCell.cell_type}</div>
+        {/* Режим ПРИЕМКА */}
+        {mode === "receiving" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* BIN */}
+            <div
+              style={{
+                padding: 16,
+                background: binCell ? "#fff8e1" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: binCell ? "#ffc107" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>BIN (ячейка приёмки)</div>
+              {binCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(binCell.cell_type, binCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{binCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{binCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* Последний принятый */}
+            {lastReceivedUnit && (
+              <div
+                style={{
+                  padding: 16,
+                  background: "#e8f5e9",
+                  borderRadius: 8,
+                  border: "2px solid #4caf50",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#666", marginBottom: 4 }}>Последний принятый:</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {lastReceivedUnit.barcode} → {lastReceivedUnit.binCode}
                 </div>
               </div>
-            ) : (
-              <div style={{ fontSize: 18, color: "#999" }}>—</div>
             )}
           </div>
+        )}
 
-          {/* UNIT */}
-          <div
-            style={{
-              padding: 20,
-              background: unit ? "#fff8e1" : "#f5f5f5",
-              borderRadius: 8,
-              border: "2px solid",
-              borderColor: unit ? "#ffc107" : "#ddd",
-            }}
-          >
-            <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>UNIT (что перемещаем)</div>
-            {unit ? (
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{unit.barcode}</div>
-            ) : (
-              <div style={{ fontSize: 18, color: "#999" }}>—</div>
-            )}
-          </div>
-
-          {/* TO */}
-          <div
-            style={{
-              padding: 20,
-              background: toCell ? "#e8f5e9" : "#f5f5f5",
-              borderRadius: 8,
-              border: "2px solid",
-              borderColor: toCell ? "#4caf50" : "#ddd",
-            }}
-          >
-            <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>TO (куда)</div>
-            {toCell ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    backgroundColor: getCellColor(toCell.cell_type, toCell.meta),
-                    border: "1px solid #ccc",
-                    borderRadius: 4,
-                  }}
-                />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{toCell.code}</div>
-                  <div style={{ fontSize: 14, color: "#666" }}>{toCell.cell_type}</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: 18, color: "#999" }}>—</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Кнопки */}
-      <div style={{ display: "flex", gap: 12 }}>
-        <button
-          onClick={handleReset}
-          disabled={busy}
-          style={{
-            flex: 1,
-            padding: "16px",
-            fontSize: "18px",
-            fontWeight: 600,
-            background: "#f3f4f6",
-            color: "#111",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            cursor: busy ? "not-allowed" : "pointer",
-          }}
-        >
-          Сброс
-        </button>
+        {/* Режим ПЕРЕМЕЩЕНИЕ */}
         {mode === "moving" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* FROM */}
+            <div
+              style={{
+                padding: 16,
+                background: fromCell ? "#e3f2fd" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: fromCell ? "#2196f3" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
+              {fromCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(fromCell.cell_type, fromCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{fromCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{fromCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* UNIT */}
+            <div
+              style={{
+                padding: 16,
+                background: unit ? "#fff8e1" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: unit ? "#ffc107" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>UNIT (что перемещаем)</div>
+              {unit ? (
+                <div style={{ fontSize: "20px", fontWeight: 700 }}>{unit.barcode}</div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* TO */}
+            <div
+              style={{
+                padding: 16,
+                background: toCell ? "#e8f5e9" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: toCell ? "#4caf50" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>TO (куда)</div>
+              {toCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(toCell.cell_type, toCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{toCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{toCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Кнопки */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <button
-            onClick={executeMove}
-            disabled={!canMove}
+            onClick={handleReset}
+            disabled={busy}
             style={{
-              flex: 1,
-              padding: "16px",
-              fontSize: "18px",
+              width: "100%",
+              padding: "14px",
+              minHeight: 48,
+              fontSize: "16px",
               fontWeight: 600,
-              background: canMove ? "#16a34a" : "#ccc",
-              color: "#fff",
-              border: "none",
+              background: "#f3f4f6",
+              color: "#111",
+              border: "1px solid #ddd",
               borderRadius: 8,
-              cursor: canMove ? "pointer" : "not-allowed",
+              cursor: busy ? "not-allowed" : "pointer",
             }}
           >
-            Переместить
+            Сброс
           </button>
-        )}
-      </div>
+          {mode === "moving" && (
+            <button
+              onClick={executeMove}
+              disabled={!canMove}
+              style={{
+                width: "100%",
+                padding: "14px",
+                minHeight: 48,
+                fontSize: "16px",
+                fontWeight: 600,
+                background: canMove ? "#16a34a" : "#ccc",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                cursor: canMove ? "pointer" : "not-allowed",
+              }}
+            >
+              Переместить
+            </button>
+          )}
+        </div>
 
-      {/* Инструкция */}
-      <div style={{ marginTop: 24, padding: 16, background: "#f9fafb", borderRadius: 8, fontSize: 14, color: "#666" }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Инструкция:</div>
-        {mode === "receiving" ? (
-          <ol style={{ margin: 0, paddingLeft: 20 }}>
-            <li>Отсканируйте BIN-ячейку (или введите код)</li>
-            <li>Отсканируйте штрихкод заказа</li>
-            <li>Заказ будет создан (если нового нет) и размещён в BIN</li>
-            <li>BIN останется выбранным для приёма пачки заказов</li>
-          </ol>
-        ) : (
-          <ol style={{ margin: 0, paddingLeft: 20 }}>
-            <li>Отсканируйте FROM ячейку (или введите код)</li>
-            <li>Отсканируйте UNIT (штрихкод заказа)</li>
-            <li>Отсканируйте TO ячейку (или введите код)</li>
-            <li>Перемещение выполнится автоматически</li>
-          </ol>
-        )}
+        {/* Инструкция */}
+        <div style={{ marginTop: 16, padding: 12, background: "#f9fafb", borderRadius: 8, fontSize: "13px", color: "#666" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Инструкция:</div>
+          {mode === "receiving" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Отсканируйте BIN-ячейку (или введите код)</li>
+              <li>Отсканируйте штрихкод заказа</li>
+              <li>Заказ будет создан (если нового нет) и размещён в BIN</li>
+              <li>BIN останется выбранным для приёма пачки заказов</li>
+            </ol>
+          ) : (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Отсканируйте FROM ячейку (или введите код)</li>
+              <li>Отсканируйте UNIT (штрихкод заказа)</li>
+              <li>Отсканируйте TO ячейку (или введите код)</li>
+              <li>Перемещение выполнится автоматически</li>
+            </ol>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

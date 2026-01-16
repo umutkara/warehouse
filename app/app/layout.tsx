@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import { supabaseServer } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import LeftNav from "./ui/LeftNav";
-import TopBarExcel from "./ui/TopBarExcel";
+import ConditionalLayout from "./ui/ConditionalLayout";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const supabase = await supabaseServer();
@@ -20,12 +19,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (!profile?.warehouse_id || !profile?.role) redirect("/login");
 
   return (
-    <div style={{ height: "100vh", display: "grid", gridTemplateRows: "160px 1fr" }}>
-      <TopBarExcel />
-      <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", minHeight: 0 }}>
-        <LeftNav role={profile.role} />
-        <main style={{ background: "#f5f6f7", padding: 16, overflow: "auto" }}>{children}</main>
-      </div>
-    </div>
+    <ConditionalLayout role={profile.role}>
+      {children}
+    </ConditionalLayout>
   );
 }
