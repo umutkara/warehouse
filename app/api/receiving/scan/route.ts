@@ -210,6 +210,60 @@ export async function POST(req: Request) {
       );
     }
 
+    // Check if unit has active OUT shipment and close it automatically
+    const { data: activeShipment, error: shipmentCheckError } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select("id, status, courier_name, out_at")
+      .eq("unit_id", unitId)
+      .eq("status", "out")
+      .maybeSingle();
+
+    if (shipmentCheckError) {
+      console.error("Error checking outbound_shipments:", shipmentCheckError);
+      // Don't fail the request, just log the error
+    }
+
+    // If active shipment exists, close it automatically (return from OUT)
+    if (activeShipment) {
+      // Update shipment status to 'returned' and record return info
+      const { error: closeShipmentError } = await supabaseAdmin
+        .from("outbound_shipments")
+        .update({
+          status: "returned",
+          returned_by: user.id,
+          returned_at: new Date().toISOString(),
+          return_reason: "Автоматический возврат при приемке в bin",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", activeShipment.id);
+
+      if (closeShipmentError) {
+        console.error("Error closing outbound_shipments:", closeShipmentError);
+        // Don't fail the request, just log the error
+      }
+
+      // Audit log for return from OUT
+      const { error: auditError } = await supabase.rpc("audit_log_event", {
+        p_action: "logistics.auto_return_from_out",
+        p_entity_type: "unit",
+        p_entity_id: unitId,
+        p_summary: `Автовозврат из OUT: ${digits} принят в ${binCell.code}`,
+        p_meta: {
+          shipment_id: activeShipment.id,
+          unit_barcode: digits,
+          courier_name: activeShipment.courier_name,
+          out_at: activeShipment.out_at,
+          returned_to_cell: binCell.code,
+          return_reason: "Автоматический возврат при приемке в bin",
+        },
+      });
+
+      if (auditError) {
+        console.error("Audit log error for auto return:", auditError);
+        // Don't fail the request if audit logging fails
+      }
+    }
+
     // Success response
     return NextResponse.json({
       ok: true,

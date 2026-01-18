@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import JsBarcode from "jsbarcode";
 import { useUIStore } from "@/lib/ui/store";
 
@@ -55,6 +56,7 @@ function StatPill({
 }
 
 export default function TopBarExcel() {
+  const router = useRouter();
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const [digits, setDigits] = useState("");
@@ -173,6 +175,39 @@ export default function TopBarExcel() {
           <StatPill label="Передача" value={zoneStats?.counts?.transfer} onClick={() => setOnlyZone("transfer")} active={zoneFilters.transfer} />
           <StatPill label="Не размещено" value={zoneStats?.unplaced} />
         </div>
+
+        {/* SLA Button */}
+        <button
+          onClick={() => router.push("/app/sla")}
+          style={{
+            padding: "8px 16px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg)",
+            color: "var(--color-text)",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            transition: "all var(--transition-base)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--color-primary)";
+            e.currentTarget.style.color = "#ffffff";
+            e.currentTarget.style.borderColor = "var(--color-primary)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--color-bg)";
+            e.currentTarget.style.color = "var(--color-text)";
+            e.currentTarget.style.borderColor = "var(--color-border)";
+          }}
+        >
+          📊 SLA
+        </button>
       </div>
 
       {/* ROW 2: All tools in one row */}
