@@ -29,6 +29,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'picking-units/route.ts:33',message:'Before units query',data:{warehouseId:profile.warehouse_id,role:profile.role},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
+  // #endregion
+
   // Get all units in picking cells (use admin to bypass RLS)
   const { data: units, error: unitsError } = await supabaseAdmin
     .from("units")
@@ -37,14 +41,20 @@ export async function GET(req: Request) {
       barcode,
       status,
       cell_id,
-      created_at,
-      meta
+      created_at
     `)
     .eq("warehouse_id", profile.warehouse_id)
     .eq("status", "picking")
     .order("created_at", { ascending: false });
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'picking-units/route.ts:50',message:'After units query',data:{hasError:!!unitsError,errorMsg:unitsError?.message,unitsCount:units?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
+  // #endregion
+
   if (unitsError) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'picking-units/route.ts:55',message:'Units query error',data:{error:unitsError.message,code:unitsError.code},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
+    // #endregion
     return NextResponse.json({ error: unitsError.message }, { status: 400 });
   }
 

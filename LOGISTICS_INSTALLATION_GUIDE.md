@@ -42,7 +42,7 @@ WHERE table_name = 'profiles' AND column_name = 'role';
 - Создаёт таблицу `outbound_shipments`
 - Создаёт индексы
 - Настраивает RLS политики
-- Создаёт RPC функции: `ship_unit_out`, `return_unit_from_out`
+- Создаёт RPC функции: `ship_unit_out`, `return_unit_from_out` (примечание: API endpoint для return удален, используйте приемку на ТСД)
 - Даёт GRANT EXECUTE для authenticated users
 
 **Применение:**

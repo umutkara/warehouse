@@ -144,23 +144,16 @@ CREATE TABLE public.outbound_shipments (
 **Query params:**
 - `status` - фильтр по статусу ('out' | 'returned'), default: 'out'
 
-#### `POST /api/logistics/return-from-out`
+#### ~~`POST /api/logistics/return-from-out`~~ (УДАЛЕНО)
 
-**Доступ:** logistics, admin, head
+**Причина удаления:** Возвраты заказов из OUT должны обрабатываться через обычную приемку на ТСД, а не через логистику. Это обеспечивает единый процесс приемки и избегает дублирования логики.
 
-**Body:**
-```json
-{
-  "shipmentId": "uuid",
-  "targetCellCode": "string",
-  "returnReason": "string (optional)"
-}
-```
+**Альтернатива:** Когда заказ возвращается курьером, склад принимает его через:
+1. ТСД → Режим "Приёмка"
+2. Сканирование штрихкода заказа
+3. Размещение в ячейку обычным способом
 
-**Действия:**
-1. Вызывает RPC `return_unit_from_out`
-2. Создаёт audit log с action `logistics.return_from_out`
-3. Возвращает result info
+**Примечание:** RPC функция `return_unit_from_out` остается в БД для возможного использования администраторами через SQL, но API endpoint удален.
 
 ### 1.5. UI Страницы
 
