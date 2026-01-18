@@ -4,7 +4,8 @@ import { supabaseServer } from "@/lib/supabase/server";
 export async function GET() {
   const supabase = await supabaseServer();
 
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData, error: authError } = await supabase.auth.getUser();
+  
   if (!userData?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

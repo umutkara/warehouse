@@ -17,7 +17,7 @@ type UnitInfo = {
   barcode: string;
 };
 
-type Mode = "receiving" | "moving" | "inventory";
+type Mode = "receiving" | "moving" | "inventory" | "shipping";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -42,6 +42,14 @@ export default function TsdPage() {
     scanned: { count: number };
   } | null>(null);
   
+  // Для режима Отгрузка (Shipping Tasks)
+  const [shippingTasks, setShippingTasks] = useState<any[]>([]);
+  const [currentTask, setCurrentTask] = useState<any | null>(null);
+  const [shippingFromCell, setShippingFromCell] = useState<CellInfo | null>(null);
+  const [shippingUnit, setShippingUnit] = useState<UnitInfo | null>(null);
+  const [shippingToCell, setShippingToCell] = useState<CellInfo | null>(null);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,6 +62,7 @@ export default function TsdPage() {
       if (mode === "inventory") {
         try {
           const res = await fetch("/api/inventory/status", { cache: "no-store" });
+          
           if (res.ok) {
             const json = await res.json();
             setInventoryActive(json.active || false);
@@ -63,7 +72,7 @@ export default function TsdPage() {
               setInventoryError(null);
             }
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error("Failed to check inventory status:", e);
         }
       } else {
@@ -79,7 +88,60 @@ export default function TsdPage() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, unit, toCell, error, success, mode, inventoryCell, scannedBarcodes]);
+  }, [binCell, fromCell, unit, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnit, shippingToCell]);
+  
+  // Load shipping tasks when mode is shipping
+  useEffect(() => {
+    if (mode === "shipping") {
+      loadShippingTasks();
+    }
+  }, [mode]);
+  
+  // Auto-load next task after completion or when tasks change
+  useEffect(() => {
+    if (mode === "shipping") {
+      // If no current task and tasks available, take first
+      if (!currentTask && shippingTasks.length > 0) {
+        setCurrentTask(shippingTasks[0]);
+        setShippingFromCell(null);
+        setShippingUnit(null);
+        setShippingToCell(null);
+      }
+      // If current task is done/canceled, remove it and take next
+      if (currentTask && !shippingTasks.find((t: any) => t.id === currentTask.id)) {
+        // Current task no longer in list (completed/canceled), take next
+        if (shippingTasks.length > 0) {
+          setCurrentTask(shippingTasks[0]);
+          setShippingFromCell(null);
+          setShippingUnit(null);
+          setShippingToCell(null);
+        } else {
+          setCurrentTask(null);
+          setShippingFromCell(null);
+          setShippingUnit(null);
+          setShippingToCell(null);
+        }
+      }
+    }
+  }, [mode, currentTask, shippingTasks]);
+  
+  async function loadShippingTasks() {
+    setLoadingTasks(true);
+    try {
+      const res = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok) {
+        setShippingTasks(json.tasks || []);
+        if (json.tasks && json.tasks.length > 0 && !currentTask) {
+          setCurrentTask(json.tasks[0]);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load shipping tasks:", e);
+    } finally {
+      setLoadingTasks(false);
+    }
+  }
 
   // Обработка Enter/CR
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -91,11 +153,13 @@ export default function TsdPage() {
         handleMovingScan();
       } else if (mode === "inventory") {
         handleInventoryScan();
+      } else if (mode === "shipping") {
+        handleShippingScan();
       }
     }
   }
 
-  // Распознавание скана
+  // Распознавание скана (поддерживает CELL:CODE и CODE, case-insensitive)
   function parseScan(value: string): { type: "cell" | "unit"; code: string } | null {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -216,9 +280,14 @@ export default function TsdPage() {
           }),
         });
 
-        const json = await res.json().catch(() => ({}));
+        const rawText = await res.text().catch(() => '');
+        let json: any = null;
+        try {
+          json = rawText ? JSON.parse(rawText) : null;
+        } catch {}
+        
         if (!res.ok) {
-          throw new Error(json.error || "Ошибка приёмки");
+          throw new Error(json?.error || rawText || "Ошибка приёмки");
         }
 
         // Успех
@@ -326,14 +395,19 @@ export default function TsdPage() {
         }),
       });
 
-      const json = await res.json().catch(() => ({}));
+      const rawText = await res.text().catch(() => '');
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch {}
+      
       if (!res.ok) {
         // Проверка на ошибку инвентаризации (423 Locked)
-        if (res.status === 423 && json.error) {
+        if (res.status === 423 && json?.error) {
           setInventoryError(json.error);
           throw new Error(json.error);
         }
-        throw new Error(json.error || "Ошибка перемещения");
+        throw new Error(json?.error || rawText || "Ошибка перемещения");
       }
 
       setSuccess(`✓ Перемещено: ${unit.barcode} из ${fromCell.code} в ${toCell.code}`);
@@ -435,13 +509,20 @@ export default function TsdPage() {
         return;
       }
 
-      const json = await res.json().catch(() => ({}));
+      const rawText = await res.text();
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch (parseError: any) {
+        // Ignore parse errors
+      }
+      
       if (!res.ok) {
-        throw new Error(json.error || "Ошибка сохранения");
+        throw new Error(json?.error || rawText || "Ошибка сохранения");
       }
 
       setScanResult(json);
-      const hasDiff = json.diff.missing.length > 0 || json.diff.extra.length > 0 || json.diff.unknown.length > 0;
+      const hasDiff = json?.diff?.missing?.length > 0 || json?.diff?.extra?.length > 0 || json?.diff?.unknown?.length > 0;
 
       if (hasDiff) {
         setError(
@@ -476,6 +557,196 @@ export default function TsdPage() {
     setError(null);
   }
 
+  // Обработка сканирования для режима Shipping
+  async function handleShippingScan() {
+    if (!scanValue.trim()) return;
+
+    const parsed = parseScan(scanValue.trim());
+    if (!parsed) {
+      setError("Не удалось распознать сканирование");
+      setScanValue("");
+      return;
+    }
+
+    // Шаг 1: Сканирование FROM cell
+    if (!shippingFromCell) {
+      if (parsed.type === "cell") {
+        // Normalize cell code: remove "CELL:" prefix, uppercase, trim
+        const normalizedCode = parsed.code.replace(/^CELL:/i, "").trim().toUpperCase();
+        
+        // Найти ячейку
+        const res = await fetch(`/api/cells/list`, { cache: "no-store" });
+        const json = await res.json();
+        if (res.ok) {
+          const cell = (json.cells || []).find((c: CellInfo) => 
+            c.code.toUpperCase() === normalizedCode
+          );
+          if (cell) {
+            // Verify cell is storage or shipping (not bin, not picking)
+            if (cell.cell_type !== "storage" && cell.cell_type !== "shipping") {
+              setError(`Ячейка "${cell.code}" имеет тип "${cell.cell_type}". FROM должна быть storage или shipping.`);
+              setScanValue("");
+              return;
+            }
+            
+            setShippingFromCell(cell);
+            setSuccess(`FROM: ${cell.code} (${cell.cell_type})`);
+            setScanValue("");
+          } else {
+            setError(`Ячейка "${normalizedCode}" не найдена`);
+            setScanValue("");
+          }
+        } else {
+          setError("Ошибка загрузки ячеек");
+          setScanValue("");
+        }
+      } else {
+        setError("Сначала отсканируйте FROM ячейку (storage/shipping)");
+        setScanValue("");
+      }
+      return;
+    }
+
+    // Шаг 2: Сканирование UNIT
+    if (!shippingUnit) {
+      if (parsed.type === "unit") {
+        // Проверить, что unit совпадает с текущей задачей
+        if (!currentTask) {
+          setError("Нет активной задачи");
+          setScanValue("");
+          return;
+        }
+
+        if (currentTask.unit.barcode !== parsed.code) {
+          setError(`Штрихкод не совпадает с задачей. Ожидается: ${currentTask.unit.barcode}`);
+          setScanValue("");
+          return;
+        }
+
+        setShippingUnit({ id: currentTask.unit.id, barcode: parsed.code });
+        setSuccess(`UNIT: ${parsed.code}`);
+        setScanValue("");
+      } else {
+        setError("Отсканируйте штрихкод заказа");
+        setScanValue("");
+      }
+      return;
+    }
+
+    // Шаг 3: Сканирование TO cell
+    if (!shippingToCell) {
+      if (parsed.type === "cell") {
+        // Normalize cell code: remove "CELL:" prefix, uppercase, trim
+        const normalizedCode = parsed.code.replace(/^CELL:/i, "").trim().toUpperCase();
+        
+        // Проверить, что toCell совпадает с target cell задачи
+        if (!currentTask) {
+          setError("Нет активной задачи");
+          setScanValue("");
+          return;
+        }
+
+        if (!currentTask.targetCell) {
+          setError("Целевая ячейка не найдена в задаче");
+          setScanValue("");
+          return;
+        }
+
+        if (currentTask.targetCell.code.toUpperCase() !== normalizedCode) {
+          setError(`Ячейка не совпадает с задачей. Ожидается: ${currentTask.targetCell.code}`);
+          setScanValue("");
+          return;
+        }
+
+        // Verify target cell is picking type
+        if (currentTask.targetCell.cell_type !== "picking") {
+          setError(`Ячейка "${currentTask.targetCell.code}" имеет тип "${currentTask.targetCell.cell_type}". TO должна быть picking.`);
+          setScanValue("");
+          return;
+        }
+
+        setShippingToCell({
+          id: currentTask.targetCell.id,
+          code: currentTask.targetCell.code, // Use original code from task
+          cell_type: currentTask.targetCell.cell_type,
+        });
+        setSuccess(`TO: ${currentTask.targetCell.code} (${currentTask.targetCell.cell_type})`);
+        setScanValue("");
+
+        // Автоматически выполняем задачу
+        handleCompleteShippingTask();
+      } else {
+        setError("Отсканируйте целевую ячейку picking");
+        setScanValue("");
+      }
+      return;
+    }
+  }
+
+  // Выполнение задачи shipping
+  async function handleCompleteShippingTask() {
+    if (!currentTask || !shippingFromCell || !shippingUnit || !shippingToCell) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch("/api/tsd/shipping-tasks/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: currentTask.id,
+          fromCellCode: shippingFromCell.code,
+          toCellCode: shippingToCell.code,
+          unitBarcode: shippingUnit.barcode,
+        }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const rawText = await res.text();
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch (parseError: any) {
+        // Ignore parse errors
+      }
+
+      if (res.status === 423) {
+        // Inventory active - show prominent error notification
+        setError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+        // Don't clear scan state - user might want to retry after inventory ends
+        // Task status will remain open (rolled back in API if was updated to in_progress)
+        setBusy(false);
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(json?.error || rawText || "Ошибка выполнения задачи");
+      }
+
+      setSuccess(`✓ Задача выполнена: ${shippingUnit.barcode} → ${shippingToCell.code}`);
+
+      // Сброс состояния сканирования
+      setShippingFromCell(null);
+      setShippingUnit(null);
+      setShippingToCell(null);
+
+      // Перезагрузить задачи (useEffect автоматически выберет следующую)
+      await loadShippingTasks();
+    } catch (e: any) {
+      setError(e.message || "Ошибка выполнения задачи");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Сброс состояния
   function handleReset() {
     if (mode === "receiving") {
@@ -489,6 +760,11 @@ export default function TsdPage() {
       setInventoryCell(null);
       setScannedBarcodes([]);
       setScanResult(null);
+    } else if (mode === "shipping") {
+      setShippingFromCell(null);
+      setShippingUnit(null);
+      setShippingToCell(null);
+      // Не сбрасываем currentTask - он загружается автоматически
     }
     setError(null);
     setSuccess(null);
@@ -575,6 +851,37 @@ export default function TsdPage() {
         </div>
       )}
 
+      {/* Prominent 423 error for shipping tasks */}
+      {mode === "shipping" && error && error.includes("ИНВЕНТАРИЗАЦИЯ АКТИВНА") && (
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 200,
+            padding: "var(--spacing-xl)",
+            fontSize: "24px",
+            fontWeight: 700,
+            textAlign: "center",
+            boxShadow: "var(--shadow-lg)",
+            background: "#fff",
+          }}
+        >
+          <Alert
+            variant="error"
+            style={{
+              fontSize: "20px",
+              padding: "var(--spacing-xl)",
+              background: "#ffebee",
+              border: "3px solid #f44336",
+            }}
+          >
+            {error}
+          </Alert>
+        </div>
+      )}
+
       <div
         style={{
           padding: "var(--spacing-lg)",
@@ -616,6 +923,15 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Инвентаризация
+          </Button>
+          <Button
+            variant={mode === "shipping" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("shipping")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Отгрузка
           </Button>
         </div>
 
@@ -805,6 +1121,198 @@ export default function TsdPage() {
           </div>
         )}
 
+        {/* Режим ОТГРУЗКА (Shipping Tasks) */}
+        {mode === "shipping" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {loadingTasks ? (
+              <div style={{ padding: 16, textAlign: "center", color: "#666" }}>Загрузка задач...</div>
+            ) : !currentTask ? (
+              <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8, textAlign: "center" }}>
+                <div style={{ fontSize: "18px", color: "#666" }}>Нет активных задач</div>
+                <div style={{ fontSize: "14px", color: "#999", marginTop: 8 }}>Создайте задачу в разделе Ops</div>
+              </div>
+            ) : (
+              <>
+                {/* Текущая задача */}
+                <div
+                  style={{
+                    padding: 16,
+                    background: "#e3f2fd",
+                    borderRadius: 8,
+                    border: "2px solid #2196f3",
+                  }}
+                >
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Задача</div>
+                  <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
+                    Заказ: {currentTask.unit.barcode}
+                  </div>
+                  {currentTask.scenario && (
+                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>Сценарий: {currentTask.scenario}</div>
+                  )}
+                  {currentTask.fromCell && (
+                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>
+                      FROM: {currentTask.fromCell.code} ({currentTask.fromCell.cell_type})
+                    </div>
+                  )}
+                  {currentTask.targetCell && (
+                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>
+                      TO: {currentTask.targetCell.code} ({currentTask.targetCell.cell_type})
+                    </div>
+                  )}
+                </div>
+
+                {/* FROM */}
+                <div
+                  style={{
+                    padding: 16,
+                    background: shippingFromCell ? "#e3f2fd" : "#f5f5f5",
+                    borderRadius: 8,
+                    border: "2px solid",
+                    borderColor: shippingFromCell ? "#2196f3" : "#ddd",
+                  }}
+                >
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
+                  {shippingFromCell ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          backgroundColor: getCellColor(shippingFromCell.cell_type, shippingFromCell.meta),
+                          border: "1px solid #ccc",
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingFromCell.code}</div>
+                        <div style={{ fontSize: "14px", color: "#666" }}>{shippingFromCell.cell_type}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+                  )}
+                </div>
+
+                {/* UNIT */}
+                <div
+                  style={{
+                    padding: 16,
+                    background: shippingUnit ? "#fff8e1" : "#f5f5f5",
+                    borderRadius: 8,
+                    border: "2px solid",
+                    borderColor: shippingUnit ? "#ffc107" : "#ddd",
+                  }}
+                >
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>UNIT (заказ)</div>
+                  {shippingUnit ? (
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingUnit.barcode}</div>
+                  ) : (
+                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+                  )}
+                </div>
+
+                {/* TO */}
+                <div
+                  style={{
+                    padding: 16,
+                    background: shippingToCell ? "#e8f5e9" : "#f5f5f5",
+                    borderRadius: 8,
+                    border: "2px solid",
+                    borderColor: shippingToCell ? "#4caf50" : "#ddd",
+                  }}
+                >
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>TO (picking ячейка)</div>
+                  {shippingToCell ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          backgroundColor: getCellColor(shippingToCell.cell_type, shippingToCell.meta),
+                          border: "1px solid #ccc",
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingToCell.code}</div>
+                        <div style={{ fontSize: "14px", color: "#666" }}>{shippingToCell.cell_type}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+                  )}
+                </div>
+
+                {/* Инструкции */}
+                <div style={{ padding: 16, background: "#f9fafb", borderRadius: 8, fontSize: "14px", color: "#666", border: "2px solid #e0e0e0" }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8, fontSize: "16px", color: "#333" }}>📋 Инструкция:</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ 
+                        display: "inline-flex", 
+                        alignItems: "center", 
+                        justifyContent: "center",
+                        width: 24, 
+                        height: 24, 
+                        borderRadius: "50%", 
+                        background: shippingFromCell ? "#4caf50" : "#e0e0e0",
+                        color: shippingFromCell ? "#fff" : "#666",
+                        fontWeight: 700,
+                        fontSize: 12
+                      }}>1</span>
+                      <span style={{ flex: 1 }}>
+                        Отсканируйте <strong>FROM</strong> ячейку (storage/shipping)
+                      </span>
+                      {shippingFromCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ 
+                        display: "inline-flex", 
+                        alignItems: "center", 
+                        justifyContent: "center",
+                        width: 24, 
+                        height: 24, 
+                        borderRadius: "50%", 
+                        background: shippingUnit ? "#4caf50" : "#e0e0e0",
+                        color: shippingUnit ? "#fff" : "#666",
+                        fontWeight: 700,
+                        fontSize: 12
+                      }}>2</span>
+                      <span style={{ flex: 1 }}>
+                        Отсканируйте <strong>штрихкод заказа</strong>
+                      </span>
+                      {shippingUnit && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ 
+                        display: "inline-flex", 
+                        alignItems: "center", 
+                        justifyContent: "center",
+                        width: 24, 
+                        height: 24, 
+                        borderRadius: "50%", 
+                        background: shippingToCell ? "#4caf50" : "#e0e0e0",
+                        color: shippingToCell ? "#fff" : "#666",
+                        fontWeight: 700,
+                        fontSize: 12
+                      }}>3</span>
+                      <span style={{ flex: 1 }}>
+                        Отсканируйте <strong>TO</strong> (picking) ячейку
+                      </span>
+                      {shippingToCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12, padding: 8, background: "#e8f5e9", borderRadius: 6, color: "#2e7d32", fontWeight: 600, fontSize: 13 }}>
+                    ✓ Задача выполнится автоматически после 3-го скана
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Режим ПЕРЕМЕЩЕНИЕ */}
         {mode === "moving" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
@@ -896,6 +1404,28 @@ export default function TsdPage() {
 
         {/* Кнопки */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {mode === "shipping" && (
+            <>
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={handleReset}
+                disabled={busy}
+                fullWidth
+              >
+                Сброс
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={loadShippingTasks}
+                disabled={loadingTasks || busy}
+                fullWidth
+              >
+                Обновить список задач
+              </Button>
+            </>
+          )}
               {mode === "inventory" && (
             <>
               <Button

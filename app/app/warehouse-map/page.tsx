@@ -142,6 +142,7 @@ export default function WarehouseMapPage() {
     }
   }
 
+
   async function loadUnitMoves(unitId: string) {
     setLoadingMoves(true);
     try {

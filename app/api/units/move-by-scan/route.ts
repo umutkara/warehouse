@@ -28,6 +28,7 @@ export async function POST(req: Request) {
   const supabase = await supabaseServer();
 
   const { data: auth, error: authError } = await supabase.auth.getUser();
+  
   if (authError) return NextResponse.json({ error: authError.message }, { status: 401 });
 
   const user = auth?.user;
@@ -71,9 +72,9 @@ export async function POST(req: Request) {
 
     if (unitError || !unit) return NextResponse.json({ error: "Unit не найден" }, { status: 404 });
 
-    // from cell
+    // from cell через view (обходит проблему "stack depth limit exceeded")
     const { data: fromCell, error: fromCellError } = await supabase
-      .from("warehouse_cells")
+      .from("warehouse_cells_map")
       .select("id, code, cell_type, warehouse_id, meta, is_active")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", fromCellCode)
@@ -83,9 +84,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `FROM ячейка "${fromCellCode}" не найдена` }, { status: 404 });
     }
 
-    // to cell
+    // to cell через view (обходит проблему "stack depth limit exceeded")
     const { data: toCell, error: toCellError } = await supabase
-      .from("warehouse_cells")
+      .from("warehouse_cells_map")
       .select("id, code, cell_type, warehouse_id, meta, is_active")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", toCellCode)
@@ -204,8 +205,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // cell через view (обходит проблему "stack depth limit exceeded")
     const { data: cell, error: cellError } = await supabase
-      .from("warehouse_cells")
+      .from("warehouse_cells_map")
       .select("id, code, cell_type, warehouse_id, meta, is_active")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", cellCode)

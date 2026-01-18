@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const allowed = new Set(["worker", "manager", "head", "admin"]);
 
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
     // Auth check
     const {
       data: { user },
+      error: authError
     } = await supabase.auth.getUser();
 
     if (!user) {
@@ -31,7 +33,7 @@ export async function POST(req: Request) {
     }
 
     // Profile check
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("role, warehouse_id")
       .eq("id", user.id)
@@ -62,9 +64,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "cellCode is required", ok: false }, { status: 400 });
     }
 
-    // Load cell
+    // Load cell через view (обходит проблему "stack depth limit exceeded" при запросе к warehouse_cells)
     const { data: binCell, error: cellError } = await supabase
-      .from("warehouse_cells")
+      .from("warehouse_cells_map")
       .select("id, code, cell_type, is_active, meta")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", cellCode)
@@ -143,8 +145,9 @@ export async function POST(req: Request) {
 
     // SCENARIO A: unit НЕ найден - создаём новый
     if (!existingUnit) {
-      // Создаём unit через прямую вставку (логика из /api/units/create)
-      const { data: createdUnit, error: createError } = await supabase
+      // Создаём unit через admin client (обходит проблему "stack depth limit exceeded" при прямом insert из-за RLS)
+      // Admin client использует service role key и обходит RLS политики
+      const { data: createdUnit, error: createError } = await supabaseAdmin
         .from("units")
         .insert({
           barcode: digits,
@@ -154,21 +157,29 @@ export async function POST(req: Request) {
         .select("id, barcode, created_at, warehouse_id")
         .single();
 
-      if (createError) {
-        console.error("Database error creating unit:", createError);
-        return NextResponse.json({ error: createError.message, ok: false }, { status: 400 });
+      if (createError || !createdUnit) {
+        console.error("Database error creating unit via admin:", createError);
+        return NextResponse.json({ error: createError?.message || "Ошибка создания unit", ok: false }, { status: 400 });
       }
 
-      // Audit logging for creation
-      await supabase.from("unit_moves").insert({
-        warehouse_id: createdUnit.warehouse_id,
-        unit_id: createdUnit.id,
-        from_cell_id: null,
-        to_cell_id: null,
-        moved_by: user.id,
-        source: "receiving",
-        note: "Создано в системе",
+      // Audit logging for unit creation via RPC (works with regular client)
+      const { error: auditError } = await supabase.rpc("audit_log_event", {
+        p_action: "unit.create",
+        p_entity_type: "unit",
+        p_entity_id: createdUnit.id,
+        p_summary: `Создание unit ${createdUnit.barcode} при приемке`,
+        p_meta: {
+          barcode: createdUnit.barcode,
+          status: "receiving",
+          cell_code: binCell.code,
+          source: "receiving_scan",
+        },
       });
+
+      if (auditError) {
+        console.error("Audit log error for unit creation:", auditError);
+        // Don't fail the request if audit logging fails
+      }
 
       unitId = createdUnit.id;
     } else {

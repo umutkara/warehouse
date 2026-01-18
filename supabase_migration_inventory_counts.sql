@@ -170,3 +170,8 @@ COMMENT ON COLUMN public.inventory_cell_units.session_id IS 'References the inve
 COMMENT ON COLUMN public.inventory_cell_units.cell_id IS 'The cell where this unit was found';
 COMMENT ON COLUMN public.inventory_cell_units.unit_id IS 'Reference to unit if it exists in the system (can be NULL for unknown units)';
 COMMENT ON COLUMN public.inventory_cell_units.unit_barcode IS 'Barcode of the unit (always stored as text)';
+
+-- 7. Reload PostgREST schema cache
+-- ============================================
+-- This ensures PostgREST picks up the new table and columns
+NOTIFY pgrst, 'reload schema';

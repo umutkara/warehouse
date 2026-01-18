@@ -19,7 +19,8 @@ export async function POST(req: Request) {
   try {
     const supabase = await supabaseServer();
 
-    const { data: authData } = await supabase.auth.getUser();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    
     if (!authData?.user) {
       return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
     }
@@ -35,25 +36,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Профиль не найден" }, { status: 404 });
     }
 
-    // Проверить что инвентаризация активна
-    const { data: warehouse, error: warehouseError } = await supabase
-      .from("warehouses")
-      .select("id, inventory_active, inventory_session_id")
-      .eq("id", profile.warehouse_id)
-      .single();
+    // Проверить что инвентаризация активна через RPC (обходит проблему "stack depth limit exceeded" при запросе к warehouses)
+    const { data: statusResult, error: statusError } = await supabase.rpc("inventory_status");
 
-    if (warehouseError || !warehouse) {
-      return NextResponse.json({ error: "Склад не найден" }, { status: 404 });
+    if (statusError) {
+      return NextResponse.json(
+        { error: statusError.message || "Ошибка проверки статуса инвентаризации" },
+        { status: 400 }
+      );
     }
 
-    if (!warehouse.inventory_active || !warehouse.inventory_session_id) {
+    const status = typeof statusResult === "string" ? JSON.parse(statusResult) : statusResult;
+
+    if (!status?.ok) {
+      return NextResponse.json(
+        { error: status?.error || "Ошибка проверки статуса инвентаризации" },
+        { status: 400 }
+      );
+    }
+
+    if (!status.active || !status.sessionId) {
       return NextResponse.json(
         { error: "Инвентаризация не активна" },
         { status: 409 }
       );
     }
 
+    const inventorySessionId = status.sessionId;
+
     const body = await req.json().catch(() => null);
+    
     if (!body) {
       return NextResponse.json({ error: "Тело запроса отсутствует" }, { status: 400 });
     }
@@ -63,9 +75,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "cellCode обязателен" }, { status: 400 });
     }
 
-    // Найти ячейку
+    // Найти ячейку через view (обходит проблему "stack depth limit exceeded" при запросе к warehouse_cells)
     const { data: cell, error: cellError } = await supabase
-      .from("warehouse_cells")
+      .from("warehouse_cells_map")
       .select("id, code, cell_type, warehouse_id")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", cellCode)
@@ -101,69 +113,70 @@ export async function POST(req: Request) {
       }
     }
 
-    // Upsert inventory_cell_counts
-    const { error: countError } = await supabase
-      .from("inventory_cell_counts")
-      .upsert(
-        {
-          session_id: warehouse.inventory_session_id,
-          cell_id: cell.id,
-          scanned_by: authData.user.id,
-          scanned_at: new Date().toISOString(),
-          status: "scanned",
-          meta: {},
+    // Use RPC function to bypass PostgREST schema cache issues
+    // This function uses direct SQL and doesn't rely on table schema cache
+    const { data: rpcResult, error: rpcError } = await supabase.rpc("inventory_save_cell_scan", {
+      p_session_id: inventorySessionId,
+      p_cell_id: cell.id,
+      p_scanned_by: authData.user.id,
+      p_unit_barcodes: normalizedBarcodes,
+    });
+
+    if (rpcError) {
+      console.error("inventory_save_cell_scan RPC error:", rpcError);
+      return NextResponse.json(
+        { error: "Ошибка сохранения результата сканирования", details: rpcError.message, code: rpcError.code },
+        { status: 500 }
+      );
+    }
+
+    const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+    if (!result?.ok) {
+      return NextResponse.json(
+        { error: result?.error || "Ошибка сохранения результата сканирования" },
+        { status: 400 }
+      );
+    }
+
+    // RPC function already handled upsert and units insertion
+    
+    // CRITICAL: Apply changes to actual units.cell_id by calling inventory_close_cell
+    // This function updates units table based on scanned barcodes
+    const { data: closeResult, error: closeError } = await supabase.rpc("inventory_close_cell", {
+      p_cell_code: cell.code,
+      p_scanned_barcodes: normalizedBarcodes,
+    });
+
+    if (closeError) {
+      console.error("inventory_close_cell RPC error:", closeError);
+      // Log error but don't fail - scan was saved, just not applied
+      // Return warning that changes were saved but not applied
+      return NextResponse.json(
+        { 
+          error: "Ошибка применения изменений к юнитам", 
+          details: closeError.message,
+          warning: "Сканирование сохранено, но изменения не применены к реальным юнитам",
+          code: closeError.code 
         },
-        {
-          onConflict: "session_id,cell_id",
-        }
-      );
-
-    if (countError) {
-      console.error("inventory_cell_counts upsert error:", countError);
-      return NextResponse.json(
-        { error: "Ошибка сохранения результата сканирования" },
         { status: 500 }
       );
     }
 
-    // Удалить старые записи inventory_cell_units для этой ячейки
-    const { error: deleteError } = await supabase
-      .from("inventory_cell_units")
-      .delete()
-      .eq("session_id", warehouse.inventory_session_id)
-      .eq("cell_id", cell.id);
-
-    if (deleteError) {
-      console.error("inventory_cell_units delete error:", deleteError);
+    const closeData = typeof closeResult === "string" ? JSON.parse(closeResult) : closeResult;
+    
+    if (!closeData?.ok) {
+      console.error("inventory_close_cell returned error:", closeData);
       return NextResponse.json(
-        { error: "Ошибка очистки предыдущих записей" },
-        { status: 500 }
+        { 
+          error: closeData?.error || "Ошибка применения изменений к юнитам",
+          warning: "Сканирование сохранено, но изменения не применены к реальным юнитам"
+        },
+        { status: 400 }
       );
     }
 
-    // Вставить новые записи inventory_cell_units
-    if (normalizedBarcodes.length > 0) {
-      const unitsToInsert = normalizedBarcodes.map((barcode: string) => ({
-        session_id: warehouse.inventory_session_id,
-        cell_id: cell.id,
-        unit_id: unitsMap.get(barcode) || null,
-        unit_barcode: barcode,
-      }));
-
-      const { error: insertError } = await supabase
-        .from("inventory_cell_units")
-        .insert(unitsToInsert);
-
-      if (insertError) {
-        console.error("inventory_cell_units insert error:", insertError);
-        return NextResponse.json(
-          { error: "Ошибка сохранения списка unit'ов" },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Получить expected units (что должно быть в ячейке по БД)
+    // Changes applied successfully
+    // Get expected units (что должно быть в ячейке по БД) AFTER applying changes
     const { data: expectedUnits } = await supabase
       .from("units")
       .select("barcode")
@@ -175,14 +188,39 @@ export async function POST(req: Request) {
       .filter((b): b is string => Boolean(b));
     const scannedBarcodes = normalizedBarcodes;
 
-    // Вычислить diff
+    // Вычислить diff (после применения изменений diff должен быть пустым если всё правильно)
     const missing = expectedBarcodes.filter((b: string) => !scannedBarcodes.includes(b));
     const extra = scannedBarcodes.filter((b: string) => !expectedBarcodes.includes(b));
     const unknown = scannedBarcodes.filter((b: string) => !unitsMap.has(b));
 
+    // Audit logging: log cell scan with results
+    const { error: auditError } = await supabase.rpc("audit_log_event", {
+      p_action: "inventory.cell_scan",
+      p_entity_type: "cell",
+      p_entity_id: cell.id,
+      p_summary: `Сканирование ячейки ${cell.code}: добавлено ${closeData.added || 0}, удалено ${closeData.removed || 0}`,
+      p_meta: {
+        cell_id: cell.id,
+        cell_code: cell.code,
+        session_id: inventorySessionId,
+        scanned_count: scannedBarcodes.length,
+        expected_count: expectedBarcodes.length,
+        added: closeData.added || 0,
+        removed: closeData.removed || 0,
+        missing,
+        extra,
+        unknown,
+      },
+    });
+
+    if (auditError) {
+      console.error("Audit log error:", auditError);
+      // Don't fail the request if audit logging fails
+    }
+
     return NextResponse.json({
       ok: true,
-      sessionId: warehouse.inventory_session_id,
+      sessionId: inventorySessionId,
       cell: {
         id: cell.id,
         code: cell.code,
@@ -200,6 +238,12 @@ export async function POST(req: Request) {
         missing,
         extra,
         unknown,
+      },
+      applied: {
+        added: closeData.added || 0,
+        removed: closeData.removed || 0,
+        addedBarcodes: closeData.addedBarcodes || [],
+        removedBarcodes: closeData.removedBarcodes || [],
       },
     });
   } catch (e: any) {

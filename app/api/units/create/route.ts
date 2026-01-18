@@ -61,19 +61,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message, ok: false }, { status: 400 });
     }
 
-    // audit logging for creation
-    console.log("Creating audit log...");
-    const auditResult = await supabase.from("unit_moves").insert({
-      warehouse_id: createdUnit.warehouse_id,
-      unit_id: createdUnit.id,
-      from_cell_id: null,
-      to_cell_id: null,
-      moved_by: user.id,
-      source: "receiving",
-      note: "Создано в системе",
+    // Audit logging for unit creation
+    const { error: auditError } = await supabase.rpc("audit_log_event", {
+      p_action: "unit.create",
+      p_entity_type: "unit",
+      p_entity_id: createdUnit.id,
+      p_summary: `Создание unit ${createdUnit.barcode}`,
+      p_meta: {
+        barcode: createdUnit.barcode,
+        status: "receiving",
+      },
     });
 
-    console.log("Audit result:", { error: auditResult.error });
+    if (auditError) {
+      console.error("Audit log error:", auditError);
+      // Don't fail the request if audit logging fails
+    }
 
     console.log("Unit creation successful:", createdUnit);
 

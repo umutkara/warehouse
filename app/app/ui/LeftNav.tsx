@@ -42,6 +42,8 @@ function NavButton({ href, children }: { href: string; children: React.ReactNode
 
 export default function LeftNav({ role }: { role: string }) {
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
+  const canOps = ["ops", "manager", "head", "admin"].includes(role);
+  const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
 
   return (
     <aside
@@ -74,12 +76,26 @@ export default function LeftNav({ role }: { role: string }) {
         {canWork && <NavButton href="/app/putaway">Размещение</NavButton>}
         {canWork && <NavButton href="/app/picking">Сборка</NavButton>}
         {canWork && <NavButton href="/app/shipping">Отгрузка</NavButton>}
-        {canWork && <NavButton href="/app/tsd">ТСД</NavButton>}
+        {canViewTasks && <NavButton href="/app/tsd">ТСД</NavButton>}
+
+        {/* Ops section */}
+        {canOps && (
+          <>
+            <div style={{ marginTop: "var(--spacing-md)", marginBottom: "var(--spacing-xs)", fontSize: "12px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
+              OPS
+            </div>
+            <NavButton href="/app/ops-shipping">Создать задания</NavButton>
+          </>
+        )}
 
         {/* guest/read-only future */}
+        <div style={{ marginTop: "var(--spacing-md)", marginBottom: "var(--spacing-xs)", fontSize: "12px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
+          ОБЩЕЕ
+        </div>
         <NavButton href="/app/warehouse-map">Карта склада</NavButton>
         {canWork && <NavButton href="/app/cells/labels">Этикетки ячеек</NavButton>}
         <NavButton href="/app/inventory">Инвентаризация</NavButton>
+        <NavButton href="/app/archive">Архив</NavButton>
       </nav>
     </aside>
   );

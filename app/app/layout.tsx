@@ -3,6 +3,9 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ConditionalLayout from "./ui/ConditionalLayout";
 
+// Force dynamic rendering - all pages under /app require authentication
+export const dynamic = 'force-dynamic';
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const supabase = await supabaseServer();
 
