@@ -20,8 +20,13 @@ type Cell = {
   calc_status: string;
 };
 
+// Grid constants
+const CELL_SIZE = 70; // Размер одной ячейки в пикселях (квадратная)
+const GRID_SIZE = 70; // Размер одной клетки сетки
+const GRID_COLOR = "#e5e7eb";
+const GRID_BACKGROUND = "#fafbfc";
+
 function cellBg(cell: any) {
-  // Используем общий helper для цветов
   return getCellColor(cell.cell_type, cell.meta);
 }
 
@@ -50,24 +55,15 @@ function StatPill({ label, value, onClick }: { label: string; value?: number; on
   );
 }
 
-function cellColor(cellType: string, status: string) {
-  // blocked всегда важнее
-  if (status === "blocked") return "#ffdddd";
-
-  // DúD_D«¥<
-  switch (cellType) {
-    case "receiving": return "#dbeafe"; // ¥?D,D«D,D1
-    case "transfer":  return "#f3e8ff"; // ¥,D,D_D¯Dæ¥,
-    case "storage":   return "#dcfce7"; // зелёный
-    case "shipping":  return "#ffedd5"; // оранжевый
-    default:          return "#f3f4f6"; // серый
-  }
-}
-
 function borderColor(status: string) {
   if (status === "occupied") return "#2563eb";
   if (status === "blocked") return "#dc2626";
   return "#9ca3af";
+}
+
+// Snap to grid helper
+function snapToGrid(value: number, gridSize: number): number {
+  return Math.round(value / gridSize) * gridSize;
 }
 
 export default function WarehouseMapPage() {
@@ -91,6 +87,7 @@ export default function WarehouseMapPage() {
   const [moveMsg, setMoveMsg] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [zoneStats, setZoneStats] = useState<any>(null);
+  const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
   const ZONES: Zone[] = ["receiving", "bin", "storage", "shipping", "transfer"];
 
   const ZONE_LABEL: Record<string, string> = {
@@ -110,9 +107,9 @@ export default function WarehouseMapPage() {
   const canEdit = ["manager", "head", "admin"].includes(role);
 
   const [dragId, setDragId] = useState<string | null>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const mapRef = useRef<HTMLDivElement>(null);
   
-  // Используем useRef для отслеживания последнего загруженного cellId, чтобы избежать повторных загрузок
   const lastLoadedCellIdRef = useRef<string | null>(null);
 
   async function loadCells() {
@@ -141,7 +138,6 @@ export default function WarehouseMapPage() {
       setLoadingUnits(false);
     }
   }
-
 
   async function loadUnitMoves(unitId: string) {
     setLoadingMoves(true);
@@ -174,11 +170,9 @@ export default function WarehouseMapPage() {
       return;
     }
 
-    // Подсветка
     setHighlightCellId(j.cell.id);
     setSearchMsg(`Найдено: ${j.unit.barcode} → ${j.cell.code} (${j.cell.cell_type})`);
 
-    // Подтянуть список/панель справа
     setSelectedCell(j.cell);
     await loadCellUnits(j.cell.id);
 
@@ -204,7 +198,6 @@ export default function WarehouseMapPage() {
     loadCells();
     loadRole();
     loadZoneStats();
-    // Увеличиваем интервал до 30 секунд, чтобы значительно уменьшить нагрузку
     const t = setInterval(() => {
       loadCells();
       loadZoneStats();
@@ -212,7 +205,6 @@ export default function WarehouseMapPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Handle cellId query param after cells are loaded
   useEffect(() => {
     const cellIdParam = searchParams.get("cellId");
     if (cellIdParam && cells.length > 0) {
@@ -228,16 +220,65 @@ export default function WarehouseMapPage() {
         loadUnassigned();
       }
     } else if (!cellIdParam) {
-      // Сбрасываем ref, если cellIdParam отсутствует
       lastLoadedCellIdRef.current = null;
     }
   }, [searchParams, cells]);
 
   const visibleCells = cells.filter((c) => zoneFilters[c.cell_type as Zone] !== false);
 
+  // Mouse move handler for dragging
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragId || !mapRef.current) return;
+    
+    const rect = mapRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    setCells((prev) =>
+      prev.map((c) =>
+        c.id === dragId
+          ? { ...c, x: mouseX - dragOffset.x, y: mouseY - dragOffset.y }
+          : c
+      )
+    );
+  };
+
+  // Mouse up handler - snap to grid and save
+  const handleMouseUp = async () => {
+    if (!dragId) return;
+    
+    const cell = cells.find((c) => c.id === dragId);
+    if (!cell) {
+      setDragId(null);
+      return;
+    }
+
+    // Snap to grid
+    const snappedX = snapToGrid(cell.x, GRID_SIZE);
+    const snappedY = snapToGrid(cell.y, GRID_SIZE);
+
+    // Update local state with snapped position
+    setCells((prev) =>
+      prev.map((c) =>
+        c.id === dragId
+          ? { ...c, x: snappedX, y: snappedY }
+          : c
+      )
+    );
+
+    // Save to backend
+    await fetch("/api/cells/update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: cell.id, x: snappedX, y: snappedY }),
+    });
+
+    setDragId(null);
+  };
+
   return (
     <div style={{ height: "calc(100vh - 120px)", display: "flex" }}>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <input
             placeholder="Поиск по штрихкоду"
@@ -279,153 +320,182 @@ export default function WarehouseMapPage() {
           ))}
         </div>
 
-      {["manager", "head", "admin"].includes(role) && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          <input
-            placeholder="Cell code (A1, B2...)"
-            value={newCode}
-            onChange={(e) => setNewCode(e.target.value)}
-            style={{ padding: 8 }}
-          />
-          <select
-            value={newCellType}
-            onChange={(e) => setNewCellType(e.target.value as typeof newCellType)}
-            style={{ padding: 8 }}
-          >
-            <option value="bin">Bin</option>
-            <option value="storage">Storage</option>
-            <option value="picking">Picking</option>
-            <option value="shipping">Shipping</option>
-          </select>
-          <button
-            onClick={async () => {
-              if (!newCode.trim()) return;
-              const r = await fetch("/api/cells/create", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ code: newCode, cellType: newCellType }),
-              });
-              const j = await r.json().catch(() => ({}));
-              if (r.ok) {
-                await loadCells(); // Refresh from API
-                setNewCode("");
-              } else {
-                alert(j.error ?? "Ошибка создания ячейки");
-              }
-            }}
-          >
-            Add cell
-          </button>
-        </div>
-      )}
-
-      {err && <div style={{ color: "crimson" }}>{err}</div>}
-
-      <div
-        onMouseMove={(e) => {
-          if (!dragId) return;
-          setCells((prev) =>
-            prev.map((c) =>
-              c.id === dragId
-                ? { ...c, x: e.clientX - offset.x, y: e.clientY - offset.y }
-                : c
-            )
-          );
-        }}
-        onMouseUp={async () => {
-          if (!dragId) return;
-          const cell = cells.find((c) => c.id === dragId);
-          setDragId(null);
-          if (!cell) return;
-
-          await fetch("/api/cells/update", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ id: cell.id, x: cell.x, y: cell.y }),
-          });
-        }}
-        style={{
-          position: "relative",
-          background: "#fff",
-          border: "1px solid #ddd",
-          height: "100%",
-          borderRadius: 12,
-        }}
-      >
-        {visibleCells.map((c) => (
-          <div
-            key={c.id}
-            onMouseDown={(e) => {
-              if (!canEdit) return;
-              setDragId(c.id);
-              setOffset({
-                x: e.clientX - c.x,
-                y: e.clientY - c.y,
-              });
-            }}
-            onClick={(e) => {
-              setMoveMsg(null);
-
-              if (selectedUnit) {
-                setMoveTargetCell(c);
-                return;
-              }
-
-              // Двойной клик - переход на страницу ячейки
-              if (e.detail === 2) {
-                router.push(`/app/cells/${c.id}`);
-                return;
-              }
-
-              // Одинарный клик - выбор ячейки в панели
-              setSelectedCell(c);
-              setMoveTargetCell(null);
-              setSelectedUnit(null);
-              setUnitMoves([]);
-              setHighlightCellId(c.id); // Подсветка при клике
-              loadCellUnits(c.id);
-              loadUnassigned();
-            }}
-            style={{
-              position: "absolute",
-              left: c.x,
-              top: c.y,
-              width: c.w,
-              height: c.h,
-              background: cellBg(c),
-              border: `2px solid ${borderColor(c.calc_status)}`,
-              outline: highlightCellId === c.id ? "3px solid #ff9800" : "none",
-              boxShadow: highlightCellId === c.id ? "0 0 0 3px rgba(255,152,0,0.25)" : "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 700,
-              cursor: canEdit ? "move" : "pointer",
-              userSelect: "none",
-              borderRadius: 8,
-            }}
-            title={`${c.code} (${c.cell_type}) - ${c.units_count} units (${c.calc_status})`}
-          >
-            <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 4 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.code}</div>
-              <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{c.cell_type}</div>
-              {c.units_count > 0 && (
-                <div style={{
-                  marginTop: 4,
-                  background: "#111", color: "#fff",
-                  fontSize: 11, padding: "2px 6px", borderRadius: 999
-                }}>
-                  {c.units_count}
-                </div>
-              )}
-            </div>
+        {canEdit && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+            <input
+              placeholder="Cell code (A1, B2...)"
+              value={newCode}
+              onChange={(e) => setNewCode(e.target.value)}
+              style={{ padding: 8 }}
+            />
+            <select
+              value={newCellType}
+              onChange={(e) => setNewCellType(e.target.value as typeof newCellType)}
+              style={{ padding: 8 }}
+            >
+              <option value="bin">Bin</option>
+              <option value="storage">Storage</option>
+              <option value="picking">Picking</option>
+              <option value="shipping">Shipping</option>
+            </select>
+            <button
+              onClick={async () => {
+                if (!newCode.trim()) return;
+                const r = await fetch("/api/cells/create", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ code: newCode, cellType: newCellType }),
+                });
+                const j = await r.json().catch(() => ({}));
+                if (r.ok) {
+                  await loadCells();
+                  setNewCode("");
+                } else {
+                  alert(j.error ?? "Ошибка создания ячейки");
+                }
+              }}
+            >
+              Add cell
+            </button>
           </div>
-        ))}
-      </div>
+        )}
+
+        {err && <div style={{ color: "crimson" }}>{err}</div>}
+
+        {/* Warehouse Map Grid */}
+        <div
+          ref={mapRef}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          style={{
+            position: "relative",
+            background: GRID_BACKGROUND,
+            backgroundImage: `
+              linear-gradient(${GRID_COLOR} 1px, transparent 1px),
+              linear-gradient(90deg, ${GRID_COLOR} 1px, transparent 1px)
+            `,
+            backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+            border: "2px solid #d1d5db",
+            borderRadius: 12,
+            flex: 1,
+            overflow: "auto",
+            minHeight: 500,
+            cursor: dragId ? "grabbing" : "default",
+          }}
+        >
+          {visibleCells.map((c) => {
+            const isHighlighted = highlightCellId === c.id;
+            const isHovered = hoveredCellId === c.id;
+            const isDragging = dragId === c.id;
+
+            return (
+              <div
+                key={c.id}
+                onMouseDown={(e) => {
+                  if (!canEdit) return;
+                  e.preventDefault();
+                  const rect = mapRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  
+                  const mouseX = e.clientX - rect.left;
+                  const mouseY = e.clientY - rect.top;
+                  
+                  setDragId(c.id);
+                  setDragOffset({
+                    x: mouseX - c.x,
+                    y: mouseY - c.y,
+                  });
+                }}
+                onMouseEnter={() => setHoveredCellId(c.id)}
+                onMouseLeave={() => setHoveredCellId(null)}
+                onClick={(e) => {
+                  if (isDragging) return;
+                  
+                  setMoveMsg(null);
+
+                  if (selectedUnit) {
+                    setMoveTargetCell(c);
+                    return;
+                  }
+
+                  if (e.detail === 2) {
+                    router.push(`/app/cells/${c.id}`);
+                    return;
+                  }
+
+                  setSelectedCell(c);
+                  setMoveTargetCell(null);
+                  setSelectedUnit(null);
+                  setUnitMoves([]);
+                  setHighlightCellId(c.id);
+                  loadCellUnits(c.id);
+                  loadUnassigned();
+                }}
+                style={{
+                  position: "absolute",
+                  left: c.x,
+                  top: c.y,
+                  width: CELL_SIZE,
+                  height: CELL_SIZE,
+                  background: cellBg(c),
+                  border: `3px solid ${borderColor(c.calc_status)}`,
+                  boxShadow: isHighlighted
+                    ? "0 0 0 4px rgba(255, 152, 0, 0.4), 0 4px 12px rgba(0,0,0,0.2)"
+                    : isHovered || isDragging
+                    ? "0 4px 12px rgba(0,0,0,0.15)"
+                    : "0 2px 4px rgba(0,0,0,0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  cursor: canEdit ? (isDragging ? "grabbing" : "grab") : "pointer",
+                  userSelect: "none",
+                  borderRadius: 8,
+                  transition: isDragging ? "none" : "all 0.2s ease",
+                  transform: isHovered && !isDragging ? "scale(1.05)" : "scale(1)",
+                  zIndex: isDragging ? 1000 : isHighlighted ? 100 : isHovered ? 50 : 1,
+                  opacity: isDragging ? 0.8 : 1,
+                }}
+                title={`${c.code} (${c.cell_type}) - ${c.units_count} units (${c.calc_status})`}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 4,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{c.code}</div>
+                  <div style={{ fontSize: 9, color: "#666", marginTop: 1 }}>{c.cell_type}</div>
+                  {c.units_count > 0 && (
+                    <div
+                      style={{
+                        marginTop: 3,
+                        background: "#111",
+                        color: "#fff",
+                        fontSize: 10,
+                        padding: "2px 5px",
+                        borderRadius: 999,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {c.units_count}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {selectedCell && (
-        <div style={{ width: 360, borderLeft: "1px solid #ddd", padding: 12, background: "#fff" }}>
+        <div style={{ width: 360, borderLeft: "1px solid #ddd", padding: 12, background: "#fff", overflow: "auto" }}>
           <div style={{ fontWeight: 800, marginBottom: 6 }}>
             Ячейка: {selectedCell.code}
           </div>
@@ -451,8 +521,7 @@ export default function WarehouseMapPage() {
             </button>
           </div>
 
-          {/* Block/Unblock button for managers */}
-          {["manager", "head", "admin"].includes(role) && (
+          {canEdit && (
             <div style={{ marginBottom: 12 }}>
               {(() => {
                 const isBlocked = selectedCell?.meta?.blocked === true;
@@ -469,7 +538,7 @@ export default function WarehouseMapPage() {
                         alert(j.error ?? "Не удалось");
                         return;
                       }
-                      await loadCells(); // Обновляем цвета/счётчики
+                      await loadCells();
                       const fresh = (await fetch("/api/cells/list").then(r=>r.json())).cells?.find((x:any)=>x.id===selectedCell.id);
                       if (fresh) setSelectedCell(fresh);
                     }}
@@ -490,7 +559,6 @@ export default function WarehouseMapPage() {
             </div>
           )}
 
-          {/* Delete button for admin and head only */}
           {["head", "admin"].includes(role) && (
             <div style={{ marginBottom: 12 }}>
               <button
@@ -514,7 +582,7 @@ export default function WarehouseMapPage() {
                   
                   alert("Ячейка успешно удалена");
                   setSelectedCell(null);
-                  await loadCells(); // Refresh
+                  await loadCells();
                 }}
                 style={{
                   padding: "8px 16px",
@@ -581,7 +649,7 @@ export default function WarehouseMapPage() {
                 <div key={m.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#111" }}>{m.note ?? "Событие"}</div>
                   <div style={{ fontSize: 12, color: "#666" }}>
-                    {new Date(m.created_at).toLocaleString()} ƒ?› {m.source}
+                    {new Date(m.created_at).toLocaleString()} • {m.source}
                   </div>
                 </div>
               ))}
@@ -617,14 +685,11 @@ export default function WarehouseMapPage() {
 
                     setMoveMsg(`Готово: перемещено в ${moveTargetCell.code}`);
 
-                    // Обновляем карту и список заказов
                     await loadCells();
 
-                    // Обновляем список заказов выбранной ячейки
                     if (selectedCell?.id) await loadCellUnits(selectedCell.id);
                     if (moveTargetCell?.id) await loadCellUnits(moveTargetCell.id);
 
-                    // Сбрасываем цель
                     setMoveTargetCell(null);
                     setSelectedUnit(null);
                   } finally {
@@ -632,7 +697,7 @@ export default function WarehouseMapPage() {
                   }
                 }}
               >
-                Отмена
+                Переместить
               </button>
 
               {moveMsg && (
@@ -655,13 +720,11 @@ export default function WarehouseMapPage() {
             </div>
           )}
 
-          {/* Assign unassigned units */}
           <div style={{ display: "grid", gap: 6, maxHeight: 200, overflow: "auto" }}>
             {unassigned.map((u) => (
               <button
                 key={u.id}
                 onClick={async () => {
-                  // Ручной перенос (карта): move_unit(unitId, null, toCellId)
                   const r = await fetch("/api/units/assign", {
                     method: "POST",
                     headers: { "content-type": "application/json" },
@@ -672,7 +735,6 @@ export default function WarehouseMapPage() {
                     alert(j.error ?? "Assign failed");
                     return;
                   }
-                  // После назначения: обновляем карту, список ячейки и неразмещенные
                   await loadCells();
                   await loadCellUnits(selectedCell.id);
                   await loadUnassigned();

@@ -3,57 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import JsBarcode from "jsbarcode";
-import { useUIStore } from "@/lib/ui/store";
-
-type Zone = "receiving" | "bin" | "storage" | "shipping" | "transfer";
-
-function StatPill({
-  label,
-  value,
-  onClick,
-  active,
-}: {
-  label: string;
-  value?: number;
-  onClick?: () => void;
-  active?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: active ? "none" : "1px solid var(--color-border)",
-        borderRadius: "var(--radius-full)",
-        padding: "6px 12px",
-        fontSize: "12px",
-        fontWeight: 600,
-        background: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
-        color: active ? "#ffffff" : "var(--color-text)",
-        display: "inline-flex",
-        gap: "6px",
-        alignItems: "center",
-        cursor: onClick ? "pointer" : "default",
-        whiteSpace: "nowrap",
-        transition: "all var(--transition-base)",
-        boxShadow: active ? "var(--shadow-sm)" : "none",
-      }}
-      onMouseEnter={(e) => {
-        if (onClick && !active) {
-          e.currentTarget.style.background = "var(--color-bg-tertiary)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (onClick && !active) {
-          e.currentTarget.style.background = "var(--color-bg-secondary)";
-        }
-      }}
-    >
-      <span style={{ opacity: active ? 1 : 0.8 }}>{label}</span>
-      <b>{typeof value === "number" ? value : "-"}</b>
-    </button>
-  );
-}
 
 export default function TopBarExcel() {
   const router = useRouter();
@@ -62,23 +11,17 @@ export default function TopBarExcel() {
   const [digits, setDigits] = useState("");
   const sanitized = useMemo(() => digits.replace(/\D/g, ""), [digits]);
 
-  // zones
-  const zoneFilters = useUIStore((s) => s.zoneFilters);
-  const setOnlyZone = useUIStore((s) => s.setOnlyZone);
-  const resetZones = useUIStore((s) => s.resetZones);
+  const [activeTasks, setActiveTasks] = useState<number>(0);
 
-  const [zoneStats, setZoneStats] = useState<any>(null);
-
-  async function loadZoneStats() {
-    const r = await fetch("/api/stats/zones", { cache: "no-store" });
+  async function loadActiveTasks() {
+    const r = await fetch("/api/stats/active-tasks", { cache: "no-store" });
     const j = await r.json().catch(() => ({}));
-    if (r.ok) setZoneStats(j);
+    if (r.ok && j.ok) setActiveTasks(j.count || 0);
   }
 
   useEffect(() => {
-    loadZoneStats();
-    // Увеличиваем интервал до 30 секунд, чтобы значительно уменьшить нагрузку
-    const t = setInterval(loadZoneStats, 30000);
+    loadActiveTasks();
+    const t = setInterval(loadActiveTasks, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -166,14 +109,36 @@ export default function TopBarExcel() {
       <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-md)", padding: "0 var(--spacing-lg)", width: "100%" }}>
         <div style={{ fontWeight: 700, fontSize: "16px", color: "var(--color-text)" }}>Control Panel</div>
 
-        <div style={{ display: "flex", gap: "var(--spacing-sm)", overflow: "auto", minWidth: 0, flex: 1, padding: "var(--spacing-xs) 0" }}>
-          <StatPill label="Все" value={zoneStats?.total} onClick={() => resetZones()} active={Object.values(zoneFilters).every(Boolean)} />
-          <StatPill label="Приёмка" value={zoneStats?.counts?.receiving} onClick={() => setOnlyZone("receiving")} active={zoneFilters.receiving} />
-          <StatPill label="Сортировка" value={zoneStats?.counts?.bin} onClick={() => setOnlyZone("bin")} active={zoneFilters.bin} />
-          <StatPill label="Хранение" value={zoneStats?.counts?.storage} onClick={() => setOnlyZone("storage")} active={zoneFilters.storage} />
-          <StatPill label="Отгрузка" value={zoneStats?.counts?.shipping} onClick={() => setOnlyZone("shipping")} active={zoneFilters.shipping} />
-          <StatPill label="Передача" value={zoneStats?.counts?.transfer} onClick={() => setOnlyZone("transfer")} active={zoneFilters.transfer} />
-          <StatPill label="Не размещено" value={zoneStats?.unplaced} />
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Active Tasks Counter */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "8px 16px",
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "var(--radius-md)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
+          <span style={{ fontSize: "14px", color: "#6b7280", fontWeight: 600 }}>
+            Активные задачи на отгрузку:
+          </span>
+          <span
+            style={{
+              fontSize: "18px",
+              fontWeight: 700,
+              color: activeTasks > 0 ? "#2563eb" : "#9ca3af",
+              minWidth: "24px",
+              textAlign: "center",
+            }}
+          >
+            {activeTasks}
+          </span>
         </div>
 
         {/* SLA Button */}
