@@ -97,33 +97,29 @@ export default function TsdPage() {
     }
   }, [mode]);
   
-  // Auto-load next task after completion or when tasks change
+  // Auto-load next task after completion
   useEffect(() => {
     if (mode === "shipping") {
-      // If no current task and tasks available, take first
-      if (!currentTask && shippingTasks.length > 0) {
-        setCurrentTask(shippingTasks[0]);
+      // If current task is done/canceled, remove it
+      if (currentTask && !shippingTasks.find((t: any) => t.id === currentTask.id)) {
+        // Current task no longer in list (completed/canceled)
+        setCurrentTask(null);
         setShippingFromCell(null);
         setShippingUnit(null);
         setShippingToCell(null);
       }
-      // If current task is done/canceled, remove it and take next
-      if (currentTask && !shippingTasks.find((t: any) => t.id === currentTask.id)) {
-        // Current task no longer in list (completed/canceled), take next
-        if (shippingTasks.length > 0) {
-          setCurrentTask(shippingTasks[0]);
-          setShippingFromCell(null);
-          setShippingUnit(null);
-          setShippingToCell(null);
-        } else {
-          setCurrentTask(null);
-          setShippingFromCell(null);
-          setShippingUnit(null);
-          setShippingToCell(null);
-        }
-      }
     }
   }, [mode, currentTask, shippingTasks]);
+
+  // Select task handler
+  function handleSelectTask(task: any) {
+    setCurrentTask(task);
+    setShippingFromCell(null);
+    setShippingUnit(null);
+    setShippingToCell(null);
+    setError(null);
+    setSuccess(null);
+  }
   
   async function loadShippingTasks() {
     setLoadingTasks(true);
@@ -571,35 +567,39 @@ export default function TsdPage() {
     // Шаг 1: Сканирование FROM cell
     if (!shippingFromCell) {
       if (parsed.type === "cell") {
+        // Проверить, что есть активная задача
+        if (!currentTask) {
+          setError("Нет активной задачи");
+          setScanValue("");
+          return;
+        }
+
+        if (!currentTask.fromCell) {
+          setError("Ячейка FROM не найдена в задаче");
+          setScanValue("");
+          return;
+        }
+
         // Normalize cell code: remove "CELL:" prefix, uppercase, trim
         const normalizedCode = parsed.code.replace(/^CELL:/i, "").trim().toUpperCase();
         
-        // Найти ячейку
-        const res = await fetch(`/api/cells/list`, { cache: "no-store" });
-        const json = await res.json();
-        if (res.ok) {
-          const cell = (json.cells || []).find((c: CellInfo) => 
-            c.code.toUpperCase() === normalizedCode
-          );
-          if (cell) {
-            // Verify cell is storage or shipping (not bin, not picking)
-            if (cell.cell_type !== "storage" && cell.cell_type !== "shipping") {
-              setError(`Ячейка "${cell.code}" имеет тип "${cell.cell_type}". FROM должна быть storage или shipping.`);
-              setScanValue("");
-              return;
-            }
-            
-            setShippingFromCell(cell);
-            setSuccess(`FROM: ${cell.code} (${cell.cell_type})`);
-            setScanValue("");
-          } else {
-            setError(`Ячейка "${normalizedCode}" не найдена`);
-            setScanValue("");
-          }
-        } else {
-          setError("Ошибка загрузки ячеек");
+        // СТРОГАЯ ПРОВЕРКА: FROM ячейка должна совпадать с задачей
+        if (currentTask.fromCell.code.toUpperCase() !== normalizedCode) {
+          setError(`Ячейка не совпадает с задачей. Ожидается FROM: ${currentTask.fromCell.code}`);
           setScanValue("");
+          return;
         }
+
+        // Verify cell is storage or shipping (not bin, not picking)
+        if (currentTask.fromCell.cell_type !== "storage" && currentTask.fromCell.cell_type !== "shipping") {
+          setError(`Ячейка "${currentTask.fromCell.code}" имеет тип "${currentTask.fromCell.cell_type}". FROM должна быть storage или shipping.`);
+          setScanValue("");
+          return;
+        }
+        
+        setShippingFromCell(currentTask.fromCell);
+        setSuccess(`FROM: ${currentTask.fromCell.code} (${currentTask.fromCell.cell_type})`);
+        setScanValue("");
       } else {
         setError("Сначала отсканируйте FROM ячейку (storage/shipping)");
         setScanValue("");
@@ -665,16 +665,18 @@ export default function TsdPage() {
           return;
         }
 
-        setShippingToCell({
+        const toCellObj = {
           id: currentTask.targetCell.id,
           code: currentTask.targetCell.code, // Use original code from task
           cell_type: currentTask.targetCell.cell_type,
-        });
+        };
+        
+        setShippingToCell(toCellObj);
         setSuccess(`TO: ${currentTask.targetCell.code} (${currentTask.targetCell.cell_type})`);
         setScanValue("");
 
-        // Автоматически выполняем задачу
-        handleCompleteShippingTask();
+        // Автоматически выполняем задачу (передаем toCell напрямую, не полагаясь на async state)
+        handleCompleteShippingTask(toCellObj);
       } else {
         setError("Отсканируйте целевую ячейку picking");
         setScanValue("");
@@ -684,8 +686,11 @@ export default function TsdPage() {
   }
 
   // Выполнение задачи shipping
-  async function handleCompleteShippingTask() {
-    if (!currentTask || !shippingFromCell || !shippingUnit || !shippingToCell) {
+  // toCell: optional override (used when called immediately after setState to avoid async race condition)
+  async function handleCompleteShippingTask(toCell?: { id: string; code: string; cell_type: string }) {
+    const effectiveToCell = toCell || shippingToCell;
+    
+    if (!currentTask || !shippingFromCell || !shippingUnit || !effectiveToCell) {
       return;
     }
 
@@ -700,7 +705,7 @@ export default function TsdPage() {
         body: JSON.stringify({
           taskId: currentTask.id,
           fromCellCode: shippingFromCell.code,
-          toCellCode: shippingToCell.code,
+          toCellCode: effectiveToCell.code,
           unitBarcode: shippingUnit.barcode,
         }),
       });
@@ -731,7 +736,7 @@ export default function TsdPage() {
         throw new Error(json?.error || rawText || "Ошибка выполнения задачи");
       }
 
-      setSuccess(`✓ Задача выполнена: ${shippingUnit.barcode} → ${shippingToCell.code}`);
+      setSuccess(`✓ Задача выполнена: ${shippingUnit.barcode} → ${effectiveToCell.code}`);
 
       // Сброс состояния сканирования
       setShippingFromCell(null);
@@ -1126,10 +1131,101 @@ export default function TsdPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
             {loadingTasks ? (
               <div style={{ padding: 16, textAlign: "center", color: "#666" }}>Загрузка задач...</div>
-            ) : !currentTask ? (
+            ) : shippingTasks.length === 0 ? (
               <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ fontSize: "18px", color: "#666" }}>Нет активных задач</div>
                 <div style={{ fontSize: "14px", color: "#999", marginTop: 8 }}>Создайте задачу в разделе Ops</div>
+              </div>
+            ) : !currentTask ? (
+              /* Список задач для выбора */
+              <div style={{ padding: 16 }}>
+                <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: 16 }}>
+                  Доступные задачи ({shippingTasks.length})
+                </h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {shippingTasks.map((task: any) => (
+                    <div
+                      key={task.id}
+                      style={{
+                        padding: 16,
+                        background: "#fff",
+                        borderRadius: 8,
+                        border: "2px solid #e0e0e0",
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                      onClick={() => handleSelectTask(task)}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "#2196f3";
+                        e.currentTarget.style.background = "#f5f5f5";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "#e0e0e0";
+                        e.currentTarget.style.background = "#fff";
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
+                            {task.unit.barcode}
+                          </div>
+                          {task.status === "in_progress" && (
+                            <div style={{ 
+                              display: "inline-block",
+                              padding: "4px 8px",
+                              background: "#fff3e0",
+                              color: "#e65100",
+                              borderRadius: 4,
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              marginBottom: 4
+                            }}>
+                              В РАБОТЕ
+                            </div>
+                          )}
+                        </div>
+                        <div style={{
+                          padding: "8px 16px",
+                          background: "#2196f3",
+                          color: "#fff",
+                          borderRadius: 6,
+                          fontSize: "14px",
+                          fontWeight: 600,
+                        }}>
+                          Выбрать →
+                        </div>
+                      </div>
+                      {task.scenario && (
+                        <div style={{ fontSize: "13px", color: "#666", marginBottom: 4 }}>
+                          📦 {task.scenario}
+                        </div>
+                      )}
+                      <div style={{ fontSize: "13px", color: "#666" }}>
+                        {task.fromCell && `FROM: ${task.fromCell.code}`}
+                        {task.fromCell && task.targetCell && " → "}
+                        {task.targetCell && `TO: ${task.targetCell.code}`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  <button
+                    onClick={loadShippingTasks}
+                    disabled={loadingTasks}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      background: "#fff",
+                      border: "2px solid #e0e0e0",
+                      borderRadius: 8,
+                      fontSize: "16px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {loadingTasks ? "Загрузка..." : "🔄 Обновить список"}
+                  </button>
+                </div>
               </div>
             ) : (
               <>
@@ -1142,7 +1238,31 @@ export default function TsdPage() {
                     border: "2px solid #2196f3",
                   }}
                 >
-                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Задача</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: "14px", color: "#666" }}>Текущая задача</div>
+                    <button
+                      onClick={() => {
+                        setCurrentTask(null);
+                        setShippingFromCell(null);
+                        setShippingUnit(null);
+                        setShippingToCell(null);
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        background: "#fff",
+                        border: "1px solid #2196f3",
+                        borderRadius: 6,
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#2196f3",
+                      }}
+                    >
+                      ← Назад к списку
+                    </button>
+                  </div>
                   <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
                     Заказ: {currentTask.unit.barcode}
                   </div>

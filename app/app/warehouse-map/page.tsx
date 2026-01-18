@@ -479,13 +479,55 @@ export default function WarehouseMapPage() {
                       color: "#fff",
                       border: "none",
                       borderRadius: 6,
-                      cursor: "pointer"
+                      cursor: "pointer",
+                      width: "100%",
                     }}
                   >
                     {isBlocked ? "Разблокировать" : "Заблокировать"}
                   </button>
                 );
               })()}
+            </div>
+          )}
+
+          {/* Delete button for admin and head only */}
+          {["head", "admin"].includes(role) && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Удалить ячейку ${selectedCell.code}? Это действие нельзя отменить.`)) {
+                    return;
+                  }
+                  
+                  const r = await fetch("/api/cells/delete", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ cellId: selectedCell.id }),
+                  });
+                  
+                  const j = await r.json().catch(() => ({}));
+                  
+                  if (!r.ok) {
+                    alert(j.error ?? "Ошибка удаления ячейки");
+                    return;
+                  }
+                  
+                  alert("Ячейка успешно удалена");
+                  setSelectedCell(null);
+                  await loadCells(); // Refresh
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "#dc2626",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  width: "100%",
+                }}
+              >
+                🗑️ Удалить ячейку
+              </button>
             </div>
           )}
 

@@ -1,17 +1,7 @@
-import { supabaseServer } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
 export default async function RootPage() {
-  const supabase = await supabaseServer();
-  
-  // Проверка авторизации
-  const { data: authData } = await supabase.auth.getUser();
-  
-  if (!authData?.user) {
-    // Если не авторизован - редирект на страницу логина
-    redirect("/login");
-  }
-
-  // Если авторизован - редирект на основную страницу приложения
+  // Простой редирект на основную страницу
+  // Проверка авторизации выполняется в middleware для /app путей
   redirect("/app/warehouse-map");
 }

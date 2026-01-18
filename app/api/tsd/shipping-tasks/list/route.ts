@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
  * GET /api/tsd/shipping-tasks/list
@@ -29,8 +30,8 @@ export async function GET(req: Request) {
   }
 
   // Get open and in_progress tasks with joined data
-  // Avoid direct join to warehouse_cells to prevent RLS recursion
-  const { data: tasks, error: tasksError } = await supabase
+  // Use supabaseAdmin to bypass RLS (avoid recursive policies)
+  const { data: tasks, error: tasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select(`
       id,
@@ -57,19 +58,23 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: tasksError.message }, { status: 400 });
   }
 
+  // Filter: show only tasks that are "open" OR "in_progress" by current user
+  // Hide "in_progress" tasks by other users
+  const filteredTasks = (tasks || []).filter((t: any) => {
+    if (t.status === "open") return true;
+    if (t.status === "in_progress" && t.picked_by === userData.user.id) return true;
+    return false;
+  });
+
   // Sort: in_progress for current user first, then by created_at
-  const sortedTasks = (tasks || []).sort((a: any, b: any) => {
+  const sortedTasks = filteredTasks.sort((a: any, b: any) => {
     // Priority 1: in_progress for current user
     const aIsMyInProgress = a.status === "in_progress" && a.picked_by === userData.user.id;
     const bIsMyInProgress = b.status === "in_progress" && b.picked_by === userData.user.id;
     if (aIsMyInProgress && !bIsMyInProgress) return -1;
     if (!aIsMyInProgress && bIsMyInProgress) return 1;
     
-    // Priority 2: in_progress (any user) before open
-    if (a.status === "in_progress" && b.status === "open") return -1;
-    if (a.status === "open" && b.status === "in_progress") return 1;
-    
-    // Priority 3: by created_at (already sorted by query, but ensure)
+    // Priority 2: by created_at
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
 
@@ -84,10 +89,10 @@ export async function GET(req: Request) {
   
   const allCellIds = [...new Set([...unitCellIds, ...targetCellIds])];
 
-  // Fetch all cells via warehouse_cells_map (avoids RLS recursion)
+  // Fetch all cells via warehouse_cells_map (use admin to avoid RLS recursion)
   let cellsMap = new Map();
   if (allCellIds.length > 0) {
-    const { data: cells } = await supabase
+    const { data: cells } = await supabaseAdmin
       .from("warehouse_cells_map")
       .select("id, code, cell_type")
       .in("id", allCellIds);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function GET(req: Request) {
   try {
@@ -29,8 +30,8 @@ export async function GET(req: Request) {
     const actor = url.searchParams.get("actor");
     const q = url.searchParams.get("q");
 
-    // Build query
-    let query = supabase
+    // Build query (use admin to bypass RLS and avoid recursion)
+    let query = supabaseAdmin
       .from("audit_events")
       .select("id, created_at, action, entity_type, entity_id, summary, actor_user_id, actor_role, actor_name, meta")
       .eq("warehouse_id", profile.warehouse_id)
@@ -54,7 +55,14 @@ export async function GET(req: Request) {
     }
 
     if (actor) {
-      query = query.eq("actor_user_id", actor);
+      // Check if actor is UUID or name/role string
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actor);
+      if (isUUID) {
+        query = query.eq("actor_user_id", actor);
+      } else {
+        // Search by name or role (case-insensitive)
+        query = query.or(`actor_name.ilike.%${actor}%,actor_role.ilike.%${actor}%`);
+      }
     }
 
     if (q) {

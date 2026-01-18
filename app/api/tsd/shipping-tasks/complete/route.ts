@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 function normalizeCellCode(v: any): string {
   return String(v ?? "").trim().toUpperCase();
@@ -54,8 +55,8 @@ export async function POST(req: Request) {
     );
   }
 
-  // Get task with unit and target cell
-  const { data: task, error: taskError } = await supabase
+  // Get task with unit (use admin to bypass RLS)
+  const { data: task, error: taskError } = await supabaseAdmin
     .from("picking_tasks")
     .select(`
       id,
@@ -67,12 +68,6 @@ export async function POST(req: Request) {
         id,
         barcode,
         cell_id,
-        warehouse_id
-      ),
-      target_cell:warehouse_cells!picking_tasks_target_picking_cell_id_fkey (
-        id,
-        code,
-        cell_type,
         warehouse_id
       )
     `)
@@ -97,10 +92,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Задача отменена" }, { status: 400 });
   }
 
-  // Update task to in_progress if it was open (set picked_by/picked_at)
+  // Update task to in_progress if it was open (use admin to bypass RLS)
   const updateToInProgress = task.status === "open";
   if (updateToInProgress) {
-    const { error: inProgressError } = await supabase
+    const { error: inProgressError } = await supabaseAdmin
       .from("picking_tasks")
       .update({
         status: "in_progress",
@@ -129,9 +124,14 @@ export async function POST(req: Request) {
     );
   }
 
-  // Handle target_cell - can be array or object depending on Supabase type inference
-  const targetCell = Array.isArray(task.target_cell) ? task.target_cell[0] : task.target_cell;
-  if (!targetCell || !targetCell.code) {
+  // Get target picking cell separately (use admin to bypass RLS)
+  const { data: targetCell, error: targetCellError } = await supabaseAdmin
+    .from("warehouse_cells_map")
+    .select("id, code, cell_type, warehouse_id")
+    .eq("id", task.target_picking_cell_id)
+    .single();
+
+  if (targetCellError || !targetCell) {
     return NextResponse.json({ error: "Target picking cell not found" }, { status: 404 });
   }
 
@@ -143,8 +143,8 @@ export async function POST(req: Request) {
     );
   }
 
-  // Get from cell
-  const { data: fromCell, error: fromCellError } = await supabase
+  // Get from cell (use admin to bypass RLS)
+  const { data: fromCell, error: fromCellError } = await supabaseAdmin
     .from("warehouse_cells_map")
     .select("id, code, cell_type, warehouse_id")
     .eq("warehouse_id", profile.warehouse_id)
@@ -188,7 +188,7 @@ export async function POST(req: Request) {
     if (rpcError.message && rpcError.message.includes("INVENTORY_ACTIVE")) {
       // Task was updated to in_progress, but move failed - rollback status if needed
       if (updateToInProgress) {
-        await supabase
+        await supabaseAdmin
           .from("picking_tasks")
           .update({
             status: "open",
@@ -204,7 +204,7 @@ export async function POST(req: Request) {
     }
     // Rollback in_progress status if move failed
     if (updateToInProgress) {
-      await supabase
+      await supabaseAdmin
         .from("picking_tasks")
         .update({
           status: "open",
@@ -217,10 +217,11 @@ export async function POST(req: Request) {
   }
 
   const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+  
   if (!result?.ok) {
     // Rollback in_progress status if move failed
     if (updateToInProgress) {
-      await supabase
+      await supabaseAdmin
         .from("picking_tasks")
         .update({
           status: "open",
@@ -232,8 +233,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: result?.error || "Перемещение не удалось" }, { status: 400 });
   }
 
-  // Update task to done
-  const { error: updateError } = await supabase
+  // Update task to done (use admin to bypass RLS)
+  const { error: updateError } = await supabaseAdmin
     .from("picking_tasks")
     .update({
       status: "done",
@@ -251,6 +252,29 @@ export async function POST(req: Request) {
       unit: { id: unit.id, barcode: unit.barcode },
       targetCell: { id: targetCell.id, code: targetCell.code },
     });
+  }
+
+  // Audit logging: archive task completion
+  const { error: auditError } = await supabase.rpc("audit_log_event", {
+    p_action: "picking_task_complete",
+    p_entity_type: "picking_task",
+    p_entity_id: taskId,
+    p_summary: `Завершена задача отгрузки: ${unit.barcode} → ${targetCell.code}`,
+    p_meta: {
+      task_id: taskId,
+      unit_id: unit.id,
+      unit_barcode: unit.barcode,
+      from_cell_code: fromCellCode,
+      from_cell_type: fromCell.cell_type,
+      to_cell_code: targetCell.code,
+      to_cell_type: targetCell.cell_type,
+      to_status: "picking",
+    },
+  });
+
+  if (auditError) {
+    console.error("Audit log error:", auditError);
+    // Don't fail the request if audit logging fails
   }
 
   return NextResponse.json({

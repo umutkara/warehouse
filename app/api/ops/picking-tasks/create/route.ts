@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 function normalizeBarcode(v: any): string {
   return String(v ?? "").replace(/\D/g, "");
@@ -185,7 +186,8 @@ export async function POST(req: Request) {
     created_by: userData.user.id,
   }));
 
-  const { data: insertedTasks, error: insertError } = await supabase
+  // Use supabaseAdmin to bypass RLS (avoid recursive policies)
+  const { data: insertedTasks, error: insertError } = await supabaseAdmin
     .from("picking_tasks")
     .insert(tasksToInsert)
     .select();

@@ -44,6 +44,8 @@ export default function LeftNav({ role }: { role: string }) {
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
   const canOps = ["ops", "manager", "head", "admin"].includes(role);
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
+  const canLogistics = ["logistics", "admin", "head"].includes(role);
+  const isLogisticsOnly = role === "logistics";
 
   return (
     <aside
@@ -72,14 +74,15 @@ export default function LeftNav({ role }: { role: string }) {
       </div>
 
       <nav style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-xs)" }}>
-        {canWork && <NavButton href="/app/receiving">Приёмка</NavButton>}
-        {canWork && <NavButton href="/app/putaway">Размещение</NavButton>}
-        {canWork && <NavButton href="/app/picking">Сборка</NavButton>}
-        {canWork && <NavButton href="/app/shipping">Отгрузка</NavButton>}
-        {canViewTasks && <NavButton href="/app/tsd">ТСД</NavButton>}
+        {/* Worker section (hidden for logistics-only) */}
+        {canWork && !isLogisticsOnly && <NavButton href="/app/receiving">Приёмка</NavButton>}
+        {canWork && !isLogisticsOnly && <NavButton href="/app/putaway">Размещение</NavButton>}
+        {canWork && !isLogisticsOnly && <NavButton href="/app/picking">Сборка</NavButton>}
+        {canWork && !isLogisticsOnly && <NavButton href="/app/shipping">Отгрузка</NavButton>}
+        {canViewTasks && !isLogisticsOnly && <NavButton href="/app/tsd">ТСД</NavButton>}
 
-        {/* Ops section */}
-        {canOps && (
+        {/* Ops section (hidden for logistics) */}
+        {canOps && !isLogisticsOnly && (
           <>
             <div style={{ marginTop: "var(--spacing-md)", marginBottom: "var(--spacing-xs)", fontSize: "12px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
               OPS
@@ -88,12 +91,23 @@ export default function LeftNav({ role }: { role: string }) {
           </>
         )}
 
-        {/* guest/read-only future */}
+        {/* Logistics section (only for logistics, admin, head) */}
+        {canLogistics && (
+          <>
+            <div style={{ marginTop: "var(--spacing-md)", marginBottom: "var(--spacing-xs)", fontSize: "12px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
+              ЛОГИСТИКА
+            </div>
+            <NavButton href="/app/logistics">Отправка заказов</NavButton>
+            <NavButton href="/app/out">OUT (В доставке)</NavButton>
+          </>
+        )}
+
+        {/* Common section */}
         <div style={{ marginTop: "var(--spacing-md)", marginBottom: "var(--spacing-xs)", fontSize: "12px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
           ОБЩЕЕ
         </div>
         <NavButton href="/app/warehouse-map">Карта склада</NavButton>
-        {canWork && <NavButton href="/app/cells/labels">Этикетки ячеек</NavButton>}
+        {canWork && !isLogisticsOnly && <NavButton href="/app/cells/labels">Этикетки ячеек</NavButton>}
         <NavButton href="/app/inventory">Инвентаризация</NavButton>
         <NavButton href="/app/archive">Архив</NavButton>
       </nav>

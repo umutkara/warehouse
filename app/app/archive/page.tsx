@@ -198,13 +198,13 @@ export default function ArchivePage() {
 
           <div>
             <label style={{ display: "block", fontSize: 14, fontWeight: 600, marginBottom: "var(--spacing-xs)", color: "var(--color-text-secondary)" }}>
-              Пользователь (ID)
+              Пользователь
             </label>
             <input
               type="text"
               value={actorFilter}
               onChange={(e) => setActorFilter(e.target.value)}
-              placeholder="user uuid"
+              placeholder="имя или роль (admin, worker)"
               style={{
                 width: "100%",
                 padding: "var(--spacing-sm) var(--spacing-md)",
