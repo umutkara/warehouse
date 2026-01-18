@@ -115,8 +115,9 @@ export async function POST(req: Request) {
     }
   }
 
-  const unit = task.units;
-  if (!unit) {
+  // Handle units - can be array or object depending on Supabase type inference
+  const unit = Array.isArray(task.units) ? task.units[0] : task.units;
+  if (!unit || !unit.barcode) {
     return NextResponse.json({ error: "Unit not found in task" }, { status: 404 });
   }
 
@@ -128,8 +129,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const targetCell = task.target_cell;
-  if (!targetCell) {
+  // Handle target_cell - can be array or object depending on Supabase type inference
+  const targetCell = Array.isArray(task.target_cell) ? task.target_cell[0] : task.target_cell;
+  if (!targetCell || !targetCell.code) {
     return NextResponse.json({ error: "Target picking cell not found" }, { status: 404 });
   }
 
