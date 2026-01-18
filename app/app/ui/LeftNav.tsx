@@ -98,7 +98,7 @@ export default function LeftNav({ role }: { role: string }) {
               ЛОГИСТИКА
             </div>
             <NavButton href="/app/logistics">Отправка заказов</NavButton>
-            <NavButton href="/app/out">OUT (В доставке)</NavButton>
+            <NavButton href="/app/outbound">OUT (В доставке)</NavButton>
           </>
         )}
 
