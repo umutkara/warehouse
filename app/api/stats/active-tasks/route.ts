@@ -26,9 +26,9 @@ export async function GET() {
 
   try {
     // Count active picking tasks (pending + in_progress)
-    const { data: tasks, error: tasksError } = await supabaseAdmin
+    const { count, error: tasksError } = await supabaseAdmin
       .from("picking_tasks")
-      .select("id", { count: "exact", head: true })
+      .select("*", { count: "exact", head: true })
       .eq("warehouse_id", profile.warehouse_id)
       .in("status", ["pending", "in_progress"]);
 
@@ -39,7 +39,7 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      count: tasks || 0,
+      count: count || 0,
     });
   } catch (e: any) {
     console.error("Active tasks stats error:", e);

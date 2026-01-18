@@ -1,259 +1,671 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+"use client";
 
-type ProductInfo = {
-  title: string | null;
-  sku: string | null;
-  vendor: string | null;
-  image_url: string | null;
+import { useEffect, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
+import Image from "next/image";
+
+type Unit = {
+  id: string;
+  barcode: string;
+  status: string;
+  product_name?: string;
+  partner_name?: string;
+  price?: number;
+  photos?: Array<{
+    url: string;
+    filename: string;
+    uploaded_at: string;
+    uploaded_by_name?: string;
+  }>;
+  cell_id?: string;
+  created_at: string;
 };
 
-async function getUnit(unitId: string) {
-  const supabase = await supabaseServer();
+type HistoryEvent = {
+  event_type: string;
+  created_at: string;
+  details: any;
+};
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData?.user) {
-    return null;
-  }
+export default function UnitDetailPage() {
+  const router = useRouter();
+  const params = useParams();
+  const unitId = params.unitId as string;
 
-  const { data: profile, error: profError } = await supabase
-    .from("profiles")
-    .select("warehouse_id")
-    .eq("id", userData.user.id)
-    .single();
+  const [unit, setUnit] = useState<Unit | null>(null);
+  const [history, setHistory] = useState<HistoryEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (profError || !profile?.warehouse_id) {
-    return null;
-  }
+  // Edit state
+  const [editing, setEditing] = useState(false);
+  const [productName, setProductName] = useState("");
+  const [partnerName, setPartnerName] = useState("");
+  const [price, setPrice] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const { data, error } = await supabase
-    .from("units")
-    .select("id, barcode, status, cell_id, created_at")
-    .eq("id", unitId)
-    .eq("warehouse_id", profile.warehouse_id)
-    .maybeSingle();
+  // Photo upload state
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  if (error || !data) {
-    return null;
-  }
+  useEffect(() => {
+    loadUnit();
+    loadHistory();
+  }, [unitId]);
 
-  return data;
-}
+  async function loadUnit() {
+    setLoading(true);
+    setError(null);
 
-async function getCell(cellId: string) {
-  const supabase = await supabaseServer();
+    try {
+      const res = await fetch(`/api/units/${unitId}`);
+      const json = await res.json();
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData?.user) {
-    return null;
-  }
-
-  const { data: profile, error: profError } = await supabase
-    .from("profiles")
-    .select("warehouse_id")
-    .eq("id", userData.user.id)
-    .single();
-
-  if (profError || !profile?.warehouse_id) {
-    return null;
-  }
-
-  const { data, error } = await supabase
-    .from("warehouse_cells_map")
-    .select("id, code, cell_type")
-    .eq("id", cellId)
-    .eq("warehouse_id", profile.warehouse_id)
-    .maybeSingle();
-
-  if (error || !data) {
-    return null;
-  }
-
-  return data;
-}
-
-async function getUnitItem(unitId: string) {
-  const supabase = await supabaseServer();
-
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData?.user) {
-    return null;
-  }
-
-  const { data: profile, error: profError } = await supabase
-    .from("profiles")
-    .select("warehouse_id")
-    .eq("id", userData.user.id)
-    .single();
-
-  if (profError || !profile?.warehouse_id) {
-    return null;
-  }
-
-  // Verify unit belongs to user's warehouse via join
-  const { data: unitData } = await supabase
-    .from("units")
-    .select("id, warehouse_id")
-    .eq("id", unitId)
-    .eq("warehouse_id", profile.warehouse_id)
-    .maybeSingle();
-
-  if (!unitData) {
-    return null;
-  }
-
-  // Get unit_item
-  const { data, error } = await supabase
-    .from("unit_items")
-    .select("unit_id, title, sku, vendor, image_url, meta, created_at, updated_at")
-    .eq("unit_id", unitId)
-    .maybeSingle();
-
-  if (error || !data) {
-    return null;
-  }
-
-  return data;
-}
-
-export default async function UnitPage({
-  params,
-}: {
-  params: Promise<{ unitId: string }>;
-}) {
-  const { unitId } = await params;
-  const unit = await getUnit(unitId);
-
-  if (!unit) {
-    notFound();
-  }
-
-  const cell = unit.cell_id ? await getCell(unit.cell_id) : null;
-  const item = await getUnitItem(unitId);
-  const product: ProductInfo | null = item
-    ? {
-        title: item.title,
-        sku: item.sku,
-        vendor: item.vendor,
-        image_url: item.image_url,
+      if (!res.ok) {
+        if (res.status === 401) {
+          router.push("/login");
+          return;
+        }
+        setError(json.error || "Ошибка загрузки");
+        return;
       }
-    : null;
-  const moves: any[] = []; // Placeholder for future implementation
 
-  return (
-    <div style={{ padding: 20 }}>
-      <div style={{ marginBottom: 20 }}>
-        {unit.cell_id ? (
-          <Link href={`/app/cells/${unit.cell_id}`} style={{ color: "#0066cc", textDecoration: "none" }}>
-            ← Назад к ячейке
-          </Link>
-        ) : (
-          <Link href="/app/warehouse-map" style={{ color: "#0066cc", textDecoration: "none" }}>
-            ← Назад к карте
-          </Link>
-        )}
-      </div>
+      setUnit(json.unit);
+      setProductName(json.unit.product_name || "");
+      setPartnerName(json.unit.partner_name || "");
+      setPrice(json.unit.price ? String(json.unit.price) : "");
+    } catch (e: any) {
+      setError("Ошибка загрузки");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      <div style={{ marginBottom: 30 }}>
-        <div style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>{unit.barcode}</div>
-        <div style={{ fontSize: 14, color: "#666" }}>ID: {unit.id}</div>
-      </div>
+  async function loadHistory() {
+    try {
+      const res = await fetch(`/api/units/${unitId}/history`);
+      const json = await res.json();
 
-      <div style={{ display: "grid", gap: 20 }}>
-        <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 12, padding: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>Основная информация</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Статус</div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>{unit.status}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Создан</div>
-              <div style={{ fontSize: 14 }}>{new Date(unit.created_at).toLocaleString()}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Текущая ячейка</div>
-              {cell ? (
-                <>
-                  <div style={{ fontSize: 14, marginBottom: 4 }}>
-                    {cell.code} ({cell.cell_type})
-                  </div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-                    <Link
-                      href={`/app/cells/${unit.cell_id}`}
-                      style={{ color: "#0066cc", textDecoration: "none", fontSize: 14 }}
-                    >
-                      Открыть ячейку →
-                    </Link>
-                    <Link
-                      href={`/app/warehouse-map?cellId=${cell.id}`}
-                      style={{ color: "#0066cc", textDecoration: "none", fontSize: 14 }}
-                    >
-                      Показать на карте →
-                    </Link>
-                  </div>
-                </>
-              ) : (
-                <div style={{ fontSize: 14, color: "#999" }}>Ячейка: неизвестно</div>
-              )}
+      if (res.ok) {
+        setHistory(json.history || []);
+      }
+    } catch (e) {
+      console.error("Failed to load history:", e);
+    }
+  }
+
+  async function handleSave() {
+    if (!unit) return;
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/units/${unitId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_name: productName.trim() || null,
+          partner_name: partnerName.trim() || null,
+          price: price.trim() ? parseFloat(price) : null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        setError(json.error || "Ошибка сохранения");
+        return;
+      }
+
+      setUnit(json.unit);
+      setEditing(false);
+      await loadHistory(); // Reload history to show update event
+    } catch (e: any) {
+      setError("Ошибка сохранения");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("photo", file);
+
+      const res = await fetch(`/api/units/${unitId}/upload-photo`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        setUploadError(json.error || "Ошибка загрузки фото");
+        return;
+      }
+
+      // Update unit with new photos
+      setUnit((prev) => (prev ? { ...prev, photos: json.photos } : null));
+      await loadHistory(); // Show upload event
+    } catch (e: any) {
+      setUploadError("Ошибка загрузки фото");
+    } finally {
+      setUploading(false);
+      // Reset input
+      e.target.value = "";
+    }
+  }
+
+  async function handleDeletePhoto(filename: string) {
+    if (!confirm("Удалить фото?")) return;
+
+    try {
+      const res = await fetch(
+        `/api/units/${unitId}/upload-photo?filename=${encodeURIComponent(filename)}`,
+        { method: "DELETE" }
+      );
+
+      const json = await res.json();
+
+      if (res.ok) {
+        setUnit((prev) => (prev ? { ...prev, photos: json.photos } : null));
+        await loadHistory();
+      }
+    } catch (e) {
+      console.error("Failed to delete photo:", e);
+    }
+  }
+
+  function renderHistoryEvent(event: HistoryEvent) {
+    const date = new Date(event.created_at).toLocaleString("ru-RU");
+
+    switch (event.event_type) {
+      case "move":
+        const { from_cell, to_cell, from_status, to_status, actor_name, actor_role } = event.details;
+        return (
+          <div key={event.created_at} style={styles.historyItem}>
+            <div style={styles.historyIcon}>📦</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Перемещение</div>
+              <div style={styles.historyText}>
+                {from_cell || from_status} → {to_cell || to_status}
+              </div>
+              <div style={styles.historyMeta}>
+                {actor_name} ({actor_role}) • {date}
+              </div>
             </div>
           </div>
-        </div>
+        );
 
-        <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 12, padding: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>Товар</div>
-          {product ? (
-            <div style={{ display: "grid", gap: 12 }}>
-              {product.image_url && (
-                <div>
-                  <img
-                    src={product.image_url}
-                    alt={product.title || "Товар"}
-                    style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8 }}
-                  />
+      case "shipment":
+        const { status, courier_name, shipped_by, returned_by, return_reason, returned_at } = event.details;
+        if (status === "out") {
+          return (
+            <div key={event.created_at} style={styles.historyItem}>
+              <div style={styles.historyIcon}>🚚</div>
+              <div style={{ flex: 1 }}>
+                <div style={styles.historyTitle}>Отправка в OUT</div>
+                <div style={styles.historyText}>Курьер: {courier_name}</div>
+                <div style={styles.historyMeta}>
+                  {shipped_by} • {date}
                 </div>
-              )}
-              <div>
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Название</div>
-                <div style={{ fontSize: 14 }}>{product.title || "—"}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>SKU</div>
-                <div style={{ fontSize: 14 }}>{product.sku || "—"}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Производитель</div>
-                <div style={{ fontSize: 14 }}>{product.vendor || "—"}</div>
               </div>
             </div>
-          ) : (
-            <div style={{ padding: 20, textAlign: "center", color: "#999", fontSize: 14 }}>
-              Данные товара будут добавлены позже
+          );
+        } else if (status === "returned" && returned_at) {
+          return (
+            <div key={returned_at} style={styles.historyItem}>
+              <div style={styles.historyIcon}>↩️</div>
+              <div style={{ flex: 1 }}>
+                <div style={styles.historyTitle}>Возврат из OUT</div>
+                {return_reason && <div style={styles.historyText}>{return_reason}</div>}
+                <div style={styles.historyMeta}>
+                  {returned_by} • {new Date(returned_at).toLocaleString("ru-RU")}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+          );
+        }
+        break;
 
-        <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 12, padding: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>История перемещений (скоро)</div>
-          {moves.length > 0 ? (
-            <div style={{ display: "grid", gap: 8 }}>
-              {moves.map((move: any, index: number) => (
-                <div key={index} style={{ padding: 12, background: "#f9f9f9", borderRadius: 8 }}>
-                  <div style={{ fontSize: 14 }}>{move.note || "Перемещение"}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {new Date(move.created_at).toLocaleString()}
+      case "audit":
+        const { action, summary, actor_name: auditActor, actor_role: auditRole } = event.details;
+        let icon = "📝";
+        if (action === "unit.create") icon = "✨";
+        if (action === "unit.photo_uploaded") icon = "📷";
+        if (action === "unit.photo_deleted") icon = "🗑️";
+        if (action === "unit.update") icon = "✏️";
+
+        return (
+          <div key={event.created_at} style={styles.historyItem}>
+            <div style={styles.historyIcon}>{icon}</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>{summary || action}</div>
+              <div style={styles.historyMeta}>
+                {auditActor} ({auditRole}) • {date}
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={{ textAlign: "center", padding: 40 }}>Загрузка...</div>
+      </div>
+    );
+  }
+
+  if (error && !unit) {
+    return (
+      <div style={styles.container}>
+        <div style={{ color: "#dc2626", padding: 20 }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (!unit) {
+    return (
+      <div style={styles.container}>
+        <div style={{ padding: 20 }}>Заказ не найден</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.container}>
+      {/* Header */}
+      <div style={styles.header}>
+        <button onClick={() => router.back()} style={styles.backButton}>
+          ← Назад
+        </button>
+        <h1 style={styles.title}>Заказ {unit.barcode}</h1>
+      </div>
+
+      <div style={styles.grid}>
+        {/* Left Column - Info */}
+        <div style={styles.column}>
+          {/* Photos */}
+          <div style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Фотографии</h2>
+              <label style={styles.uploadButton}>
+                {uploading ? "Загрузка..." : "+ Добавить"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  disabled={uploading}
+                  style={{ display: "none" }}
+                />
+              </label>
+            </div>
+
+            {uploadError && (
+              <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 8 }}>{uploadError}</div>
+            )}
+
+            <div style={styles.photosGrid}>
+              {(!unit.photos || unit.photos.length === 0) && (
+                <div style={{ fontSize: 14, color: "#9ca3af" }}>Нет фото</div>
+              )}
+              {unit.photos?.map((photo, idx) => (
+                <div key={idx} style={styles.photoCard}>
+                  <div style={styles.photoContainer}>
+                    <img src={photo.url} alt={`Photo ${idx + 1}`} style={styles.photo} />
+                  </div>
+                  <button
+                    onClick={() => handleDeletePhoto(photo.filename)}
+                    style={styles.deletePhotoButton}
+                    title="Удалить фото"
+                  >
+                    🗑️
+                  </button>
+                  <div style={styles.photoMeta}>
+                    {photo.uploaded_by_name && (
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{photo.uploaded_by_name}</div>
+                    )}
+                    <div style={{ fontSize: 10, color: "#9ca3af" }}>
+                      {new Date(photo.uploaded_at).toLocaleDateString("ru-RU")}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <div style={{ padding: 20, textAlign: "center", color: "#999", fontSize: 14 }}>
-              История перемещений будет доступна позже
+          </div>
+
+          {/* Info */}
+          <div style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Информация</h2>
+              {!editing && (
+                <button onClick={() => setEditing(true)} style={styles.editButton}>
+                  ✏️ Редактировать
+                </button>
+              )}
             </div>
-          )}
+
+            {error && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 8 }}>{error}</div>}
+
+            {editing ? (
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <label style={styles.label}>Название товара</label>
+                  <input
+                    type="text"
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    style={styles.input}
+                    placeholder="Например: iPhone 15 Pro"
+                  />
+                </div>
+
+                <div>
+                  <label style={styles.label}>Партнер (мерч)</label>
+                  <input
+                    type="text"
+                    value={partnerName}
+                    onChange={(e) => setPartnerName(e.target.value)}
+                    style={styles.input}
+                    placeholder="Например: Apple Store"
+                  />
+                </div>
+
+                <div>
+                  <label style={styles.label}>Цена</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    style={styles.input}
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={handleSave} disabled={saving} style={styles.saveButton}>
+                    {saving ? "Сохранение..." : "Сохранить"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditing(false);
+                      setProductName(unit.product_name || "");
+                      setPartnerName(unit.partner_name || "");
+                      setPrice(unit.price ? String(unit.price) : "");
+                    }}
+                    style={styles.cancelButton}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <div style={styles.infoLabel}>Название товара</div>
+                  <div style={styles.infoValue}>{unit.product_name || "—"}</div>
+                </div>
+
+                <div>
+                  <div style={styles.infoLabel}>Партнер</div>
+                  <div style={styles.infoValue}>{unit.partner_name || "—"}</div>
+                </div>
+
+                <div>
+                  <div style={styles.infoLabel}>Цена</div>
+                  <div style={styles.infoValue}>
+                    {unit.price ? `${unit.price.toFixed(2)} ₽` : "—"}
+                  </div>
+                </div>
+
+                <div>
+                  <div style={styles.infoLabel}>Статус</div>
+                  <div style={styles.infoValue}>
+                    <span style={styles.statusBadge}>{unit.status}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={styles.infoLabel}>Создан</div>
+                  <div style={styles.infoValue}>
+                    {new Date(unit.created_at).toLocaleString("ru-RU")}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column - History */}
+        <div style={styles.column}>
+          <div style={styles.card}>
+            <h2 style={styles.cardTitle}>История перемещений</h2>
+
+            <div style={styles.historyContainer}>
+              {history.length === 0 && (
+                <div style={{ fontSize: 14, color: "#9ca3af", textAlign: "center", padding: 20 }}>
+                  История пуста
+                </div>
+              )}
+              {history.map((event) => renderHistoryEvent(event))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    maxWidth: 1400,
+    margin: "0 auto",
+    padding: "var(--spacing-xl)",
+  },
+  header: {
+    marginBottom: "var(--spacing-xl)",
+  },
+  backButton: {
+    padding: "8px 16px",
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 14,
+    marginBottom: 16,
+  } as React.CSSProperties,
+  title: {
+    fontSize: 28,
+    fontWeight: 700,
+    marginBottom: 0,
+  } as React.CSSProperties,
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "var(--spacing-lg)",
+  } as React.CSSProperties,
+  column: {
+    display: "grid",
+    gap: "var(--spacing-lg)",
+    alignContent: "start",
+  } as React.CSSProperties,
+  card: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: "var(--spacing-lg)",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+  } as React.CSSProperties,
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "var(--spacing-md)",
+  } as React.CSSProperties,
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 700,
+    margin: 0,
+  } as React.CSSProperties,
+  uploadButton: {
+    padding: "6px 12px",
+    background: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  editButton: {
+    padding: "6px 12px",
+    background: "#fff",
+    color: "#2563eb",
+    border: "1px solid #2563eb",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  photosGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+    gap: 12,
+  } as React.CSSProperties,
+  photoCard: {
+    position: "relative",
+  } as React.CSSProperties,
+  photoContainer: {
+    width: "100%",
+    paddingBottom: "100%",
+    position: "relative",
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "#f3f4f6",
+  } as React.CSSProperties,
+  photo: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  } as React.CSSProperties,
+  deletePhotoButton: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    background: "rgba(0,0,0,0.6)",
+    border: "none",
+    borderRadius: 4,
+    padding: 4,
+    cursor: "pointer",
+    fontSize: 12,
+  } as React.CSSProperties,
+  photoMeta: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#6b7280",
+  } as React.CSSProperties,
+  label: {
+    display: "block",
+    fontSize: 13,
+    fontWeight: 600,
+    marginBottom: 4,
+    color: "#374151",
+  } as React.CSSProperties,
+  input: {
+    width: "100%",
+    padding: "8px 12px",
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    fontSize: 14,
+  } as React.CSSProperties,
+  saveButton: {
+    flex: 1,
+    padding: "8px 16px",
+    background: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  cancelButton: {
+    flex: 1,
+    padding: "8px 16px",
+    background: "#fff",
+    color: "#374151",
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  infoLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#6b7280",
+    marginBottom: 4,
+  } as React.CSSProperties,
+  infoValue: {
+    fontSize: 14,
+    color: "#111827",
+  } as React.CSSProperties,
+  statusBadge: {
+    display: "inline-block",
+    padding: "4px 12px",
+    background: "#dbeafe",
+    color: "#1e40af",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  historyContainer: {
+    display: "grid",
+    gap: 12,
+    maxHeight: 600,
+    overflow: "auto",
+  } as React.CSSProperties,
+  historyItem: {
+    display: "flex",
+    gap: 12,
+    padding: 12,
+    background: "#f9fafb",
+    borderRadius: 8,
+    border: "1px solid #e5e7eb",
+  } as React.CSSProperties,
+  historyIcon: {
+    fontSize: 24,
+    flexShrink: 0,
+  } as React.CSSProperties,
+  historyTitle: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#111827",
+    marginBottom: 2,
+  } as React.CSSProperties,
+  historyText: {
+    fontSize: 13,
+    color: "#374151",
+    marginBottom: 4,
+  } as React.CSSProperties,
+  historyMeta: {
+    fontSize: 11,
+    color: "#9ca3af",
+  } as React.CSSProperties,
+};
