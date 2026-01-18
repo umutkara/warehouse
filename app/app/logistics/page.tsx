@@ -30,16 +30,8 @@ export default function LogisticsPage() {
     setLoading(true);
     setError(null);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:30',message:'loadUnits called',data:{timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-    // #endregion
-
     try {
       const res = await fetch("/api/logistics/picking-units", { cache: "no-store" });
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:38',message:'API response received',data:{status:res.status,ok:res.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-      // #endregion
       
       if (res.status === 401) {
         router.push("/login");
@@ -54,22 +46,12 @@ export default function LogisticsPage() {
 
       const json = await res.json();
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:54',message:'JSON parsed',data:{ok:json.ok,unitsCount:json.units?.length||0,hasError:!!json.error},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-      // #endregion
-      
       if (res.ok && json.ok) {
         setUnits(json.units || []);
       } else {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:63',message:'Error from API',data:{error:json.error},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-        // #endregion
         setError(json.error || "Ошибка загрузки заказов");
       }
     } catch (e: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:70',message:'Exception caught',data:{error:e.message},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-      // #endregion
       setError(e.message || "Ошибка загрузки");
     } finally {
       setLoading(false);

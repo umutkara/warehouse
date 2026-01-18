@@ -58,19 +58,10 @@ export async function GET(req: Request) {
 
   // Get unit info
   const unitIds = shipments?.map(s => s.unit_id) || [];
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'out-shipments/route.ts:62',message:'Before units query',data:{unitIdsCount:unitIds.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-  // #endregion
-  
-  const { data: units, error: unitsError } = await supabaseAdmin
+  const { data: units } = await supabaseAdmin
     .from("units")
     .select("id, barcode")
     .in("id", unitIds);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'out-shipments/route.ts:71',message:'After units query',data:{hasError:!!unitsError,errorMsg:unitsError?.message,unitsCount:units?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-  // #endregion
 
   const unitsMap = new Map(units?.map(u => [u.id, u]) || []);
 
