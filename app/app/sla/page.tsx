@@ -85,68 +85,73 @@ const MetricCard = memo(function MetricCard({
   color?: string;
   info?: string;
 }) {
-  const [showInfo, setShowInfo] = useState(false);
 
   return (
     <div
       style={{
-        background: "#fff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "var(--radius-lg)",
-        padding: "var(--spacing-lg)",
-        boxShadow: "var(--shadow-sm)",
+        background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
+        border: "2px solid #e5e7eb",
+        borderRadius: 16,
+        padding: 24,
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03)",
         position: "relative",
+        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+        overflow: "hidden",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "translateY(-4px)";
+        e.currentTarget.style.boxShadow = "0 12px 24px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.05)";
+        e.currentTarget.style.borderColor = color;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03)";
+        e.currentTarget.style.borderColor = "#e5e7eb";
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <div style={{ fontSize: 14, color: "#6b7280", fontWeight: 600 }}>
+      {/* Decorative gradient overlay */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width: "40%",
+        height: "100%",
+        background: `linear-gradient(135deg, transparent 0%, ${color}08 100%)`,
+        opacity: 0.5,
+        pointerEvents: "none",
+      }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, position: "relative", zIndex: 1 }}>
+        <div style={{ 
+          fontSize: 13, 
+          color: "#6b7280", 
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+        }}>
           {title}
         </div>
-        {info && (
-          <div
-            onMouseEnter={() => setShowInfo(true)}
-            onMouseLeave={() => setShowInfo(false)}
-            style={{
-              width: 16,
-              height: 16,
-              borderRadius: "50%",
-              background: "#e5e7eb",
-              color: "#6b7280",
-              fontSize: 11,
-              fontWeight: 700,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "help",
-            }}
-          >
-            ?
-          </div>
-        )}
       </div>
-      <div style={{ fontSize: 32, fontWeight: 700, color, marginBottom: 4 }}>
+      <div style={{ 
+        fontSize: 40, 
+        fontWeight: 800, 
+        color,
+        marginBottom: 8,
+        letterSpacing: "-0.02em",
+        position: "relative",
+        zIndex: 1,
+      }}>
         {value}
       </div>
       {subtitle && (
-        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: info ? 8 : 0 }}>{subtitle}</div>
-      )}
-      {info && (
-        <div
-          style={{
-            fontSize: 11,
-            color: "#6b7280",
-            lineHeight: 1.4,
-            padding: "6px 8px",
-            background: "#f9fafb",
-            borderRadius: 6,
-            border: "1px solid #e5e7eb",
-            marginTop: 8,
-            maxHeight: showInfo ? 200 : 0,
-            overflow: "hidden",
-            transition: "max-height 0.2s ease",
-          }}
-        >
-          {info}
+        <div style={{ 
+          fontSize: 13, 
+          color: "#9ca3af",
+          fontWeight: 600,
+          marginBottom: info ? 8 : 0,
+          position: "relative",
+          zIndex: 1,
+        }}>
+          {subtitle}
         </div>
       )}
     </div>
@@ -158,31 +163,46 @@ const BarChart = memo(function BarChart({ data, max }: { data: Array<{ label: st
   const maxValue = max || Math.max(...data.map((d) => d.value), 1);
 
   return (
-    <div style={{ display: "grid", gap: "var(--spacing-sm)" }}>
+    <div style={{ display: "grid", gap: 12 }}>
       {data.map((item, idx) => (
         <div key={idx}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ 
+              fontSize: 13, 
+              fontWeight: 700, 
+              color: "#374151",
+              letterSpacing: "0.01em",
+            }}>
               {item.label}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: item.color || "#2563eb" }}>
+            <span style={{ 
+              fontSize: 14, 
+              fontWeight: 800, 
+              color: item.color || "#2563eb",
+              background: `${item.color || "#2563eb"}10`,
+              padding: "2px 8px",
+              borderRadius: 6,
+            }}>
               {item.value}
             </span>
           </div>
           <div
             style={{
-              height: 8,
+              height: 10,
               background: "#f3f4f6",
-              borderRadius: 4,
+              borderRadius: 999,
               overflow: "hidden",
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.05)",
             }}
           >
             <div
               style={{
                 height: "100%",
-                background: item.color || "#2563eb",
+                background: `linear-gradient(90deg, ${item.color || "#2563eb"} 0%, ${item.color || "#2563eb"}dd 100%)`,
                 width: `${(item.value / maxValue) * 100}%`,
-                transition: "width 0.3s ease",
+                transition: "width 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+                borderRadius: 999,
+                boxShadow: `0 0 8px ${item.color || "#2563eb"}40`,
               }}
             />
           </div>
@@ -199,8 +219,8 @@ const DonutChart = memo(function DonutChart({ value, max, label, color = "#2563e
   const offset = circumference - (percentage / 100) * circumference;
 
   return (
-    <div style={{ textAlign: "center" }}>
-      <svg width="120" height="120" viewBox="0 0 100 100" style={{ transform: "rotate(-90deg)" }}>
+    <div style={{ textAlign: "center", position: "relative" }}>
+      <svg width="140" height="140" viewBox="0 0 100 100" style={{ transform: "rotate(-90deg)", filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.08))" }}>
         {/* Background circle */}
         <circle
           cx="50"
@@ -208,7 +228,7 @@ const DonutChart = memo(function DonutChart({ value, max, label, color = "#2563e
           r="45"
           fill="none"
           stroke="#f3f4f6"
-          strokeWidth="10"
+          strokeWidth="12"
         />
         {/* Progress circle */}
         <circle
@@ -216,17 +236,44 @@ const DonutChart = memo(function DonutChart({ value, max, label, color = "#2563e
           cy="50"
           r="45"
           fill="none"
-          stroke={color}
-          strokeWidth="10"
+          stroke={`url(#gradient-${color})`}
+          strokeWidth="12"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          style={{ transition: "stroke-dashoffset 0.5s ease" }}
+          style={{ transition: "stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)" }}
         />
+        {/* Gradient definition */}
+        <defs>
+          <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color} />
+            <stop offset="100%" stopColor={`${color}cc`} />
+          </linearGradient>
+        </defs>
       </svg>
-      <div style={{ marginTop: "-70px", fontSize: 24, fontWeight: 700, color }}>{Math.round(percentage)}%</div>
-      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 50 }}>{label}</div>
-      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>
+      <div style={{ 
+        marginTop: "-80px", 
+        fontSize: 32, 
+        fontWeight: 800, 
+        color,
+        letterSpacing: "-0.02em",
+      }}>
+        {Math.round(percentage)}%
+      </div>
+      <div style={{ 
+        fontSize: 12, 
+        color: "#6b7280", 
+        marginTop: 56,
+        fontWeight: 600,
+      }}>
+        {label}
+      </div>
+      <div style={{ 
+        fontSize: 11, 
+        color: "#9ca3af", 
+        marginTop: 4,
+        fontWeight: 500,
+      }}>
         {value} из {max}
       </div>
     </div>
@@ -322,26 +369,125 @@ export default function SLAPage() {
 
   if (loading && !metrics) {
     return (
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)", textAlign: "center" }}>
-        <div style={{ fontSize: 18, color: "#6b7280" }}>Загрузка метрик...</div>
+      <div style={{ 
+        maxWidth: 1400, 
+        margin: "0 auto", 
+        padding: "40px 24px",
+      }}>
+        {/* Header skeleton */}
+        <div style={{ marginBottom: 40 }}>
+          <div style={{
+            width: 280,
+            height: 40,
+            background: "linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%)",
+            backgroundSize: "200% 100%",
+            animation: "shimmer 1.5s infinite",
+            borderRadius: 8,
+            marginBottom: 12,
+          }} />
+          <div style={{
+            width: 400,
+            height: 20,
+            background: "linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%)",
+            backgroundSize: "200% 100%",
+            animation: "shimmer 1.5s infinite",
+            borderRadius: 6,
+          }} />
+        </div>
+
+        {/* Metrics cards skeleton */}
+        <div style={{ 
+          display: "grid", 
+          gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", 
+          gap: 20,
+          marginBottom: 40,
+        }}>
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} style={{
+              height: 140,
+              background: "linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%)",
+              backgroundSize: "200% 100%",
+              animation: "shimmer 1.5s infinite",
+              borderRadius: 12,
+              animationDelay: `${i * 0.1}s`,
+            }} />
+          ))}
+        </div>
+
+        {/* Charts skeleton */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 24 }}>
+          {[1, 2].map((i) => (
+            <div key={i} style={{
+              height: 300,
+              background: "linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%)",
+              backgroundSize: "200% 100%",
+              animation: "shimmer 1.5s infinite",
+              borderRadius: 12,
+              animationDelay: `${i * 0.15}s`,
+            }} />
+          ))}
+        </div>
+
+        <style>{`
+          @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+        `}</style>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)" }}>
-        <div
-          style={{
-            background: "#fee",
-            border: "1px solid #fcc",
-            borderRadius: "var(--radius-md)",
-            padding: "var(--spacing-md)",
-            color: "#c00",
-          }}
-        >
+      <div style={{ 
+        maxWidth: 600,
+        margin: "0 auto",
+        padding: "80px 24px",
+        textAlign: "center",
+      }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>⚠️</div>
+        <h2 style={{
+          fontSize: 24,
+          fontWeight: 700,
+          color: "#dc2626",
+          marginBottom: 12,
+        }}>
+          Ошибка загрузки метрик
+        </h2>
+        <div style={{
+          color: "#6b7280",
+          marginBottom: 24,
+          fontSize: 14,
+          lineHeight: 1.6,
+        }}>
           {error}
         </div>
+        <button
+          onClick={loadMetrics}
+          style={{
+            padding: "12px 24px",
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "white",
+            border: "none",
+            borderRadius: 10,
+            cursor: "pointer",
+            fontSize: 14,
+            fontWeight: 600,
+            boxShadow: "0 4px 12px rgba(102, 126, 234, 0.3)",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "translateY(-2px)";
+            e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.4)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.3)";
+          }}
+        >
+          🔄 Попробовать снова
+        </button>
       </div>
     );
   }
@@ -371,31 +517,84 @@ export default function SLAPage() {
   }));
 
   return (
-    <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-xl)" }}>
+    <div style={{ 
+      maxWidth: 1400, 
+      margin: "0 auto", 
+      padding: "32px 24px",
+      background: "linear-gradient(to bottom, #fafafa 0%, #ffffff 100%)",
+      minHeight: "100vh",
+    }}>
+      {/* Modern Header */}
+      <div style={{ 
+        display: "flex", 
+        justifyContent: "space-between", 
+        alignItems: "flex-start",
+        marginBottom: 40,
+        flexWrap: "wrap",
+        gap: 20,
+      }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
+          <h1 style={{ 
+            fontSize: 36,
+            fontWeight: 800,
+            marginBottom: 8,
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            letterSpacing: "-0.02em",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}>
             📊 SLA Dashboard
           </h1>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>
-            Мониторинг производительности и задержек на складе
+          <p style={{ 
+            color: "#6b7280", 
+            fontSize: 15,
+            fontWeight: 500,
+            margin: 0,
+          }}>
+            Мониторинг производительности и задержек на складе • Обновляется каждую минуту
           </p>
         </div>
         <button
           onClick={loadMetrics}
+          disabled={loading}
           style={{
-            padding: "var(--spacing-sm) var(--spacing-md)",
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-md)",
+            padding: "12px 20px",
+            background: loading 
+              ? "#e5e7eb"
+              : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: loading ? "#9ca3af" : "white",
+            border: "none",
+            borderRadius: 10,
             fontSize: 14,
             fontWeight: 600,
-            cursor: "pointer",
-            boxShadow: "var(--shadow-sm)",
+            cursor: loading ? "not-allowed" : "pointer",
+            boxShadow: loading 
+              ? "none"
+              : "0 4px 12px rgba(102, 126, 234, 0.3)",
+            transition: "all 0.2s",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+          onMouseEnter={(e) => {
+            if (!loading) {
+              e.currentTarget.style.transform = "translateY(-2px)";
+              e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.4)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loading) {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.3)";
+            }
           }}
         >
-          🔄 Обновить
+          <span>{loading ? "⏳" : "🔄"}</span>
+          <span>{loading ? "Обновление..." : "Обновить"}</span>
         </button>
       </div>
 
@@ -813,21 +1012,25 @@ export default function SLAPage() {
               title="Всего задач (сегодня)"
               value={processingMetrics.total_tasks}
               color="#374151"
+              info="📋 Общее количество задач на обработку (перемещение, приемка, размещение), созданных сегодня."
             />
             <MetricCard
               title="Среднее время"
               value={`${processingMetrics.avg_processing_time_hours}ч ${processingMetrics.avg_processing_time_minutes}м`}
               color="#0284c7"
+              info="⏱️ Среднее время выполнения задачи от момента создания до завершения. Показывает общую эффективность обработки."
             />
             <MetricCard
               title="Минимум"
               value={`${processingMetrics.min_time_hours}ч`}
               color="#10b981"
+              info="🚀 Самая быстрая задача за сегодня. Показывает минимально возможное время при идеальных условиях."
             />
             <MetricCard
               title="Максимум"
               value={`${processingMetrics.max_time_hours}ч`}
               color="#dc2626"
+              info="⚠️ Самая долгая задача за сегодня. Высокое значение может указывать на проблемы или сложные задачи."
             />
           </div>
         </div>
@@ -858,26 +1061,34 @@ export default function SLAPage() {
               title="Всего задач (сегодня)"
               value={shippingSLAMetrics.total_tasks}
               color="#374151"
+              info="📦 Общее количество задач отгрузки (перемещение из ячеек в зону shipping), созданных сегодня."
             />
             <MetricCard
               title="Открыто"
               value={shippingSLAMetrics.open_tasks}
               color="#f59e0b"
+              subtitle="Ожидают начала"
+              info="⏳ Задачи в статусе 'open' — созданы, но еще не взяты в работу складчиком. Ждут своей очереди."
             />
             <MetricCard
               title="В работе"
               value={shippingSLAMetrics.in_progress_tasks}
               color="#ea580c"
+              subtitle="Выполняются сейчас"
+              info="🔄 Задачи в статусе 'in_progress' — складчик активно работает над ними прямо сейчас."
             />
             <MetricCard
               title="Завершено"
               value={shippingSLAMetrics.completed_tasks}
               color="#10b981"
+              subtitle="Выполнено сегодня"
+              info="✅ Задачи в статусе 'completed' — успешно завершены за сегодня. Заказы перемещены в зону отгрузки."
             />
             <MetricCard
               title="Среднее (завершенные)"
               value={`${shippingSLAMetrics.avg_completion_time_hours}ч ${shippingSLAMetrics.avg_completion_time_minutes}м`}
               color="#0284c7"
+              info="⚡ Среднее время выполнения завершенных задач отгрузки. Показывает скорость обработки отгрузки."
             />
           </div>
           {shippingSLAMetrics.avg_current_wait_time_hours > 0 && (
@@ -926,25 +1137,34 @@ export default function SLAPage() {
               title="Всего проблемных"
               value={rejectionMetrics.total_units}
               color="#dc2626"
+              subtitle="Требуют внимания"
+              info="⚠️ Общее количество заказов с проблемами (брак, повреждения, несоответствия). Находятся в зоне BIN или на рассмотрении."
             />
             <MetricCard
               title="BIN → Тикет"
               value={`${rejectionMetrics.avg_bin_to_ticket_hours}ч ${rejectionMetrics.avg_bin_to_ticket_minutes}м`}
               color="#ea580c"
+              subtitle="Время реакции"
+              info="⏱️ Среднее время от помещения заказа в BIN до создания тикета для решения проблемы. Чем быстрее, тем лучше."
             />
             <MetricCard
               title="Тикет → Решение"
               value={`${rejectionMetrics.avg_ticket_resolution_hours}ч ${rejectionMetrics.avg_ticket_resolution_minutes}м`}
               color="#f59e0b"
+              subtitle="Время решения"
+              info="🔧 Среднее время от создания тикета до решения проблемы. Показывает эффективность работы с проблемными заказами."
             />
             <MetricCard
               title="Решено"
               value={rejectionMetrics.units_resolved}
               color="#10b981"
+              subtitle="Проблемы устранены"
+              info="✅ Количество проблемных заказов, по которым проблема была успешно решена и они могут продолжить обработку."
             />
           </div>
         </div>
       )}
+
     </div>
   );
 }

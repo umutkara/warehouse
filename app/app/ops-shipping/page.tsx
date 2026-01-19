@@ -29,16 +29,22 @@ type Task = {
   status: string;
   scenario?: string;
   created_at: string;
-  unit: {
+  created_by_name?: string;
+  picked_at?: string;
+  completed_at?: string;
+  unitCount: number;
+  units: Array<{
     id: string;
     barcode: string;
     cell_id?: string;
-  };
-  fromCell?: {
+    status?: string;
+  }>;
+  fromCells?: Array<{
     code: string;
     cell_type: string;
-  } | null;
+  }>;
   targetCell?: {
+    id: string;
     code: string;
     cell_type: string;
   } | null;
@@ -647,9 +653,17 @@ export default function OpsShippingPage() {
                         {task.status === "open" ? "Открыта" : task.status === "in_progress" ? "В работе" : task.status}
                       </span>
                     </td>
-                    <td style={{ padding: "12px", fontWeight: 600 }}>{task.unit.barcode}</td>
+                    <td style={{ padding: "12px", fontWeight: 600 }}>
+                      {task.unitCount > 1 
+                        ? `${task.unitCount} заказов` 
+                        : task.units[0]?.barcode || "—"}
+                    </td>
                     <td style={{ padding: "12px", fontSize: 13 }}>
-                      {task.fromCell ? `${task.fromCell.code} (${task.fromCell.cell_type})` : "—"}
+                      {task.fromCells && task.fromCells.length > 0
+                        ? task.fromCells.length > 1
+                          ? `${task.fromCells.length} ячеек`
+                          : `${task.fromCells[0].code} (${task.fromCells[0].cell_type})`
+                        : "—"}
                     </td>
                     <td style={{ padding: "12px", fontSize: 13 }}>
                       {task.targetCell ? `${task.targetCell.code} (${task.targetCell.cell_type})` : "—"}
