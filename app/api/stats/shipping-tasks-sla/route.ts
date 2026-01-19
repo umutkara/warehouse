@@ -114,7 +114,7 @@ export async function GET(req: Request) {
           completionTimes.push(timeInHours);
           const unitBarcode = Array.isArray(task.units) 
             ? task.units[0]?.barcode 
-            : task.units?.barcode;
+            : (task.units as any)?.barcode;
           
           completedTasks.push({
             id: task.id,
@@ -133,7 +133,7 @@ export async function GET(req: Request) {
 
         const unitBarcode = Array.isArray(task.units) 
           ? task.units[0]?.barcode 
-          : task.units?.barcode;
+          : (task.units as any)?.barcode;
         
         const taskData = {
           id: task.id,
