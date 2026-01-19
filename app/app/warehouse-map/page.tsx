@@ -32,22 +32,46 @@ function StatPill({ label, value, onClick }: { label: string; value?: number; on
     <div
       onClick={onClick}
       style={{
-        border: "1px solid #eee",
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 12,
-        background: "#fafafa",
+        border: "2px solid #e5e7eb",
+        borderRadius: 12,
+        padding: "8px 14px",
+        fontSize: 13,
+        fontWeight: 600,
+        background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
         display: "flex",
-        gap: 6,
+        gap: 8,
         alignItems: "center",
         cursor: onClick ? "pointer" : "default",
-        transition: "background 0.2s",
+        transition: "all 0.2s",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
       }}
-      onMouseEnter={(e) => onClick && (e.currentTarget.style.background = "#f0f0f0")}
-      onMouseLeave={(e) => onClick && (e.currentTarget.style.background = "#fafafa")}
+      onMouseEnter={(e) => {
+        if (onClick) {
+          e.currentTarget.style.background = "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%)";
+          e.currentTarget.style.borderColor = "#667eea";
+          e.currentTarget.style.transform = "translateY(-1px)";
+          e.currentTarget.style.boxShadow = "0 4px 8px rgba(102, 126, 234, 0.15)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (onClick) {
+          e.currentTarget.style.background = "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)";
+          e.currentTarget.style.borderColor = "#e5e7eb";
+          e.currentTarget.style.transform = "translateY(0)";
+          e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
+        }
+      }}
     >
-      <span style={{ color: "#666" }}>{label}</span>
-      <b style={{ color: "#111" }}>{typeof value === "number" ? value : "-"}</b>
+      <span style={{ color: "#6b7280" }}>{label}</span>
+      <b style={{ 
+        color: "#111",
+        fontSize: 14,
+        background: "#f3f4f6",
+        padding: "2px 8px",
+        borderRadius: 6,
+      }}>
+        {typeof value === "number" ? value : "-"}
+      </b>
     </div>
   );
 }
@@ -115,6 +139,7 @@ export default function WarehouseMapPage() {
   
   // Используем useRef для отслеживания последнего загруженного cellId, чтобы избежать повторных загрузок
   const lastLoadedCellIdRef = useRef<string | null>(null);
+  const moveLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   async function loadCells() {
     const r = await fetch("/api/cells/list", { cache: "no-store" });
@@ -144,14 +169,22 @@ export default function WarehouseMapPage() {
   }
 
   async function loadUnitMoves(unitId: string) {
-    setLoadingMoves(true);
-    try {
-      const r = await fetch(`/api/audit/unit?unitId=${encodeURIComponent(unitId)}`);
-      const j = await r.json().catch(() => ({}));
-      setUnitMoves(j.moves ?? []);
-    } finally {
-      setLoadingMoves(false);
+    // ⚡ ОПТИМИЗАЦИЯ: Debounce для предотвращения множественных запросов
+    if (moveLoadTimeoutRef.current) {
+      clearTimeout(moveLoadTimeoutRef.current);
     }
+    
+    setLoadingMoves(true);
+    
+    moveLoadTimeoutRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/audit/unit?unitId=${encodeURIComponent(unitId)}`);
+        const j = await r.json().catch(() => ({}));
+        setUnitMoves(j.moves ?? []);
+      } finally {
+        setLoadingMoves(false);
+      }
+    }, 150); // 150ms debounce
   }
 
   async function findByBarcode() {
@@ -232,22 +265,104 @@ export default function WarehouseMapPage() {
   const visibleCells = cells.filter((c) => zoneFilters[c.cell_type as Zone] !== false);
 
   return (
-    <div style={{ height: "calc(100vh - 120px)", display: "flex" }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+    <>
+      <style>{`
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+      `}</style>
+      
+      <div style={{ height: "calc(100vh - 120px)", display: "flex" }}>
+        <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
           <input
-            placeholder="Поиск по штрихкоду"
+            placeholder="🔍 Поиск по штрихкоду"
             value={searchBarcode}
             onChange={(e) => setSearchBarcode(e.target.value)}
-            style={{ padding: 10, width: 260 }}
+            onKeyDown={(e) => e.key === "Enter" && searchBarcode.trim() && findByBarcode()}
+            style={{ 
+              padding: "10px 14px",
+              width: 280,
+              borderRadius: 10,
+              border: "2px solid #e5e7eb",
+              fontSize: 14,
+              fontWeight: 500,
+              transition: "all 0.2s",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "#667eea";
+              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(102, 126, 234, 0.1)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "#e5e7eb";
+              e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
+            }}
           />
-          <button onClick={findByBarcode} disabled={!searchBarcode.trim()}>
+          <button 
+            onClick={findByBarcode} 
+            disabled={!searchBarcode.trim()}
+            style={{
+              padding: "10px 20px",
+              borderRadius: 10,
+              border: "none",
+              background: searchBarcode.trim() 
+                ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                : "#e5e7eb",
+              color: searchBarcode.trim() ? "#fff" : "#9ca3af",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: searchBarcode.trim() ? "pointer" : "not-allowed",
+              transition: "all 0.2s",
+              boxShadow: searchBarcode.trim() 
+                ? "0 2px 8px rgba(102, 126, 234, 0.3)"
+                : "none",
+            }}
+            onMouseEnter={(e) => {
+              if (searchBarcode.trim()) {
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.4)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (searchBarcode.trim()) {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 2px 8px rgba(102, 126, 234, 0.3)";
+              }
+            }}
+          >
             Найти
           </button>
-          {searchMsg && <div style={{ fontSize: 12, color: searchMsg.includes("Ошибка") ? "crimson" : "#111" }}>{searchMsg}</div>}
+          {searchMsg && (
+            <div style={{ 
+              fontSize: 13, 
+              fontWeight: 500,
+              color: searchMsg.includes("Ошибка") ? "#dc2626" : "#059669",
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: searchMsg.includes("Ошибка") 
+                ? "#fef2f2"
+                : "#f0fdf4",
+              border: `1px solid ${searchMsg.includes("Ошибка") ? "#fecaca" : "#bbf7d0"}`,
+            }}>
+              {searchMsg}
+            </div>
+          )}
         </div>
 
-        <h2>Карта склада</h2>
+        <h2 style={{
+          fontSize: 28,
+          fontWeight: 800,
+          marginBottom: 16,
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          letterSpacing: "-0.02em",
+        }}>
+          🗺️ Карта склада
+        </h2>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ fontSize: 12, color: "#666" }}>Сводка:</div>
@@ -262,15 +377,59 @@ export default function WarehouseMapPage() {
           <StatPill label="Всего" value={zoneStats?.total} />
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           {ZONES.map((z) => (
-            <label key={z} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <label 
+              key={z} 
+              style={{ 
+                display: "flex", 
+                gap: 8, 
+                alignItems: "center", 
+                fontSize: 13,
+                fontWeight: 600,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: zoneFilters[z] ? "#667eea" : "#e5e7eb",
+                background: zoneFilters[z] 
+                  ? "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%)"
+                  : "#fff",
+                cursor: "pointer",
+                transition: "all 0.2s",
+                userSelect: "none",
+                boxShadow: zoneFilters[z] 
+                  ? "0 2px 8px rgba(102, 126, 234, 0.15)"
+                  : "0 1px 3px rgba(0, 0, 0, 0.05)",
+              }}
+              onMouseEnter={(e) => {
+                if (!zoneFilters[z]) {
+                  e.currentTarget.style.borderColor = "#667eea";
+                  e.currentTarget.style.background = "#f9fafb";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!zoneFilters[z]) {
+                  e.currentTarget.style.borderColor = "#e5e7eb";
+                  e.currentTarget.style.background = "#fff";
+                }
+              }}
+            >
               <input
                 type="checkbox"
                 checked={zoneFilters[z]}
                 onChange={() => toggleZone(z)}
+                style={{
+                  width: 16,
+                  height: 16,
+                  cursor: "pointer",
+                  accentColor: "#667eea",
+                }}
               />
-              {ZONE_LABEL[z]}
+              <span style={{ 
+                color: zoneFilters[z] ? "#667eea" : "#6b7280",
+              }}>
+                {ZONE_LABEL[z]}
+              </span>
             </label>
           ))}
         </div>
@@ -342,10 +501,11 @@ export default function WarehouseMapPage() {
         }}
         style={{
           position: "relative",
-          background: "#fff",
-          border: "1px solid #ddd",
+          background: "linear-gradient(to bottom right, #fafafa 0%, #ffffff 100%)",
+          border: "1px solid #e5e7eb",
           height: "100%",
-          borderRadius: 12,
+          borderRadius: 16,
+          boxShadow: "inset 0 1px 3px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.05)",
         }}
       >
         {visibleCells.map((c) => (
@@ -378,9 +538,13 @@ export default function WarehouseMapPage() {
               setMoveTargetCell(null);
               setSelectedUnit(null);
               setUnitMoves([]);
-              setHighlightCellId(c.id); // Подсветка при клике
-              loadCellUnits(c.id);
-              loadUnassigned();
+              setHighlightCellId(c.id);
+              
+              // ⚡ ОПТИМИЗАЦИЯ: Параллельная загрузка данных
+              Promise.all([
+                loadCellUnits(c.id),
+                loadUnassigned()
+              ]);
             }}
             style={{
               position: "absolute",
@@ -388,28 +552,94 @@ export default function WarehouseMapPage() {
               top: c.y,
               width: CELL_SIZE,
               height: CELL_SIZE,
-              background: cellBg(c),
-              border: `2px solid ${borderColor(c.calc_status)}`,
-              outline: highlightCellId === c.id ? "3px solid #ff9800" : "none",
-              boxShadow: highlightCellId === c.id ? "0 0 0 3px rgba(255,152,0,0.25)" : "none",
+              background: highlightCellId === c.id 
+                ? `linear-gradient(135deg, ${cellBg(c)} 0%, ${cellBg(c)} 100%)`
+                : cellBg(c),
+              border: highlightCellId === c.id 
+                ? "3px solid #667eea" 
+                : `2px solid ${borderColor(c.calc_status)}`,
+              boxShadow: highlightCellId === c.id 
+                ? "0 8px 24px rgba(102, 126, 234, 0.4), 0 0 0 4px rgba(102, 126, 234, 0.1)"
+                : c.calc_status === "blocked" 
+                  ? "0 2px 8px rgba(220, 38, 38, 0.2)"
+                  : c.units_count > 0 
+                    ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                    : "0 1px 3px rgba(0, 0, 0, 0.05)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontWeight: 700,
               cursor: canEdit ? "move" : "pointer",
               userSelect: "none",
-              borderRadius: 8,
+              borderRadius: 10,
+              transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+              transform: highlightCellId === c.id ? "scale(1.05)" : "scale(1)",
             }}
             title={`${c.code} (${c.cell_type}) - ${c.units_count} units (${c.calc_status})`}
+            onMouseEnter={(e) => {
+              if (highlightCellId !== c.id && !dragId) {
+                e.currentTarget.style.transform = "scale(1.02)";
+                e.currentTarget.style.boxShadow = c.calc_status === "blocked"
+                  ? "0 4px 12px rgba(220, 38, 38, 0.3)"
+                  : "0 4px 12px rgba(0, 0, 0, 0.12)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (highlightCellId !== c.id && !dragId) {
+                e.currentTarget.style.transform = "scale(1)";
+                e.currentTarget.style.boxShadow = c.calc_status === "blocked"
+                  ? "0 2px 8px rgba(220, 38, 38, 0.2)"
+                  : c.units_count > 0
+                    ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                    : "0 1px 3px rgba(0, 0, 0, 0.05)";
+              }
+            }}
           >
-            <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 4 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.code}</div>
-              <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{c.cell_type}</div>
+            <div style={{ 
+              position: "relative", 
+              width: "100%", 
+              height: "100%", 
+              display: "flex", 
+              flexDirection: "column", 
+              alignItems: "center", 
+              justifyContent: "center", 
+              padding: 4,
+            }}>
+              <div style={{ 
+                fontWeight: 800, 
+                fontSize: highlightCellId === c.id ? 15 : 14,
+                color: highlightCellId === c.id ? "#667eea" : "#111",
+                letterSpacing: "-0.01em",
+                transition: "all 0.2s",
+              }}>
+                {c.code}
+              </div>
+              <div style={{ 
+                fontSize: 9, 
+                color: "#6b7280",
+                marginTop: 2,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.03em",
+              }}>
+                {c.cell_type}
+              </div>
               {c.units_count > 0 && (
                 <div style={{
                   marginTop: 4,
-                  background: "#111", color: "#fff",
-                  fontSize: 11, padding: "2px 6px", borderRadius: 999
+                  background: highlightCellId === c.id 
+                    ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                    : c.calc_status === "blocked"
+                      ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                      : "linear-gradient(135deg, #374151 0%, #1f2937 100%)",
+                  color: "#fff",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "3px 7px",
+                  borderRadius: 999,
+                  boxShadow: "0 2px 4px rgba(0, 0, 0, 0.15)",
+                  minWidth: 20,
+                  textAlign: "center",
                 }}>
                   {c.units_count}
                 </div>
@@ -421,167 +651,439 @@ export default function WarehouseMapPage() {
       </div>
 
       {selectedCell && (
-        <div style={{ width: 360, borderLeft: "1px solid #ddd", padding: 12, background: "#fff" }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>
-            Ячейка: {selectedCell.code}
-          </div>
-
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
-            Зона: {selectedCell.cell_type} • Заказов: {selectedCell.units_count}
-          </div>
-
-          <div style={{ marginBottom: 12 }}>
-            <button
-              onClick={() => router.push(`/app/cells/${selectedCell.id}`)}
-              style={{
-                padding: "8px 16px",
-                background: "#0066cc",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                width: "100%",
-              }}
-            >
-              Открыть ячейку
-            </button>
-          </div>
-
-          {/* Block/Unblock button for managers */}
-          {["manager", "head", "admin"].includes(role) && (
-            <div style={{ marginBottom: 12 }}>
-              {(() => {
-                const isBlocked = selectedCell?.meta?.blocked === true;
-                return (
-                  <button
-                    onClick={async () => {
-                      const r = await fetch("/api/cells/block", {
-                        method: "POST",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({ cellId: selectedCell.id, blocked: !isBlocked }),
-                      });
-                      if (!r.ok) {
-                        const j = await r.json().catch(() => ({}));
-                        alert(j.error ?? "Не удалось");
-                        return;
-                      }
-                      await loadCells(); // Обновляем цвета/счётчики
-                      const fresh = (await fetch("/api/cells/list").then(r=>r.json())).cells?.find((x:any)=>x.id===selectedCell.id);
-                      if (fresh) setSelectedCell(fresh);
-                    }}
-                    style={{
-                      padding: "8px 16px",
-                      background: isBlocked ? "#dc2626" : "#16a34a",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      width: "100%",
-                    }}
-                  >
-                    {isBlocked ? "Разблокировать" : "Заблокировать"}
-                  </button>
-                );
-              })()}
-            </div>
-          )}
-
-          {["head", "admin"].includes(role) && (
-            <div style={{ marginBottom: 12 }}>
+        <div 
+          style={{ 
+            width: 420, 
+            borderLeft: "1px solid #e5e7eb", 
+            background: "linear-gradient(to bottom, #f9fafb 0%, #ffffff 100%)",
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: "100%",
+            overflow: "hidden",
+            boxShadow: "-4px 0 12px rgba(0,0,0,0.05)",
+          }}
+        >
+          {/* Header */}
+          <div style={{ 
+            padding: "20px 20px 16px", 
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "#fff",
+            borderBottom: "1px solid rgba(255,255,255,0.1)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>
+                {selectedCell.code}
+              </div>
               <button
-                onClick={async () => {
-                  if (!confirm(`Удалить ячейку ${selectedCell.code}? Это действие нельзя отменить.`)) {
-                    return;
-                  }
-                  
-                  const r = await fetch("/api/cells/delete", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ cellId: selectedCell.id }),
-                  });
-                  
-                  const j = await r.json().catch(() => ({}));
-                  
-                  if (!r.ok) {
-                    alert(j.error ?? "Ошибка удаления ячейки");
-                    return;
-                  }
-                  
-                  alert("Ячейка успешно удалена");
+                onClick={() => {
                   setSelectedCell(null);
-                  await loadCells();
+                  setHighlightCellId(null);
+                  setSelectedUnit(null);
+                  setUnitMoves([]);
+                  setMoveTargetCell(null);
                 }}
                 style={{
-                  padding: "8px 16px",
-                  background: "#dc2626",
-                  color: "#fff",
+                  background: "rgba(255,255,255,0.2)",
                   border: "none",
+                  color: "#fff",
+                  padding: "6px 12px",
                   borderRadius: 6,
                   cursor: "pointer",
-                  width: "100%",
+                  fontSize: 18,
+                  fontWeight: 600,
                 }}
               >
-                🗑️ Удалить ячейку
+                ×
               </button>
             </div>
-          )}
+            
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ 
+                fontSize: 12, 
+                fontWeight: 600,
+                background: "rgba(255,255,255,0.25)",
+                padding: "4px 10px",
+                borderRadius: 12,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}>
+                {selectedCell.cell_type}
+              </div>
+              <div style={{ 
+                fontSize: 12, 
+                fontWeight: 600,
+                background: "rgba(255,255,255,0.25)",
+                padding: "4px 10px",
+                borderRadius: 12,
+              }}>
+                📦 {selectedCell.units_count}
+              </div>
+            </div>
+          </div>
 
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Содержимое</div>
+          {/* Content - Scrollable */}
+          <div style={{ 
+            flex: 1, 
+            overflowY: "auto", 
+            padding: "16px 20px",
+          }}>
 
-          {loadingUnits ? (
-            <div style={{ fontSize: 12, color: "#666" }}>Загрузка…</div>
-          ) : (
-            <div style={{ display: "grid", gap: 8, maxHeight: 420, overflow: "auto" }}>
-              {cellUnits.length === 0 && (
-                <div style={{ fontSize: 12, color: "#666" }}>Пусто</div>
-              )}
+            {/* Action Buttons */}
+            <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
+              <button
+                onClick={() => router.push(`/app/cells/${selectedCell.id}`)}
+                style={{
+                  padding: "12px 16px",
+                  background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  boxShadow: "0 2px 8px rgba(102, 126, 234, 0.3)",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.4)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 2px 8px rgba(102, 126, 234, 0.3)";
+                }}
+              >
+                🔍 Открыть полную информацию
+              </button>
+            </div>
 
-              {cellUnits.map((u) => (
-                <div
-                  key={u.id}
-                  onClick={() => {
-                    setSelectedUnit(u);
-                    loadUnitMoves(u.id);
+            {/* Block/Unblock button for managers */}
+            {["manager", "head", "admin"].includes(role) && (
+              <div style={{ marginBottom: 12 }}>
+                {(() => {
+                  const isBlocked = selectedCell?.meta?.blocked === true;
+                  return (
+                    <button
+                      onClick={async () => {
+                        const r = await fetch("/api/cells/block", {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ cellId: selectedCell.id, blocked: !isBlocked }),
+                        });
+                        if (!r.ok) {
+                          const j = await r.json().catch(() => ({}));
+                          alert(j.error ?? "Не удалось");
+                          return;
+                        }
+                        await loadCells();
+                        const fresh = (await fetch("/api/cells/list").then(r=>r.json())).cells?.find((x:any)=>x.id===selectedCell.id);
+                        if (fresh) setSelectedCell(fresh);
+                      }}
+                      style={{
+                        padding: "10px 16px",
+                        background: isBlocked 
+                          ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)" 
+                          : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        width: "100%",
+                        boxShadow: isBlocked 
+                          ? "0 2px 8px rgba(239, 68, 68, 0.3)" 
+                          : "0 2px 8px rgba(16, 185, 129, 0.3)",
+                        transition: "all 0.2s",
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-1px)"}
+                      onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+                    >
+                      {isBlocked ? "🔓 Разблокировать ячейку" : "🔒 Заблокировать ячейку"}
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
+
+            {["head", "admin"].includes(role) && (
+              <div style={{ marginBottom: 12 }}>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Удалить ячейку ${selectedCell.code}? Это действие нельзя отменить.`)) {
+                      return;
+                    }
+                    
+                    const r = await fetch("/api/cells/delete", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ cellId: selectedCell.id }),
+                    });
+                    
+                    const j = await r.json().catch(() => ({}));
+                    
+                    if (!r.ok) {
+                      alert(j.error ?? "Ошибка удаления ячейки");
+                      return;
+                    }
+                    
+                    alert("Ячейка успешно удалена");
+                    setSelectedCell(null);
+                    await loadCells();
                   }}
                   style={{
-                    border: "1px solid #eee",
-                    borderRadius: 10,
-                    padding: 10,
+                    padding: "10px 16px",
+                    background: "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
                     cursor: "pointer",
-                    background: selectedUnit?.id === u.id ? "#fff8e1" : "#fff",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    width: "100%",
+                    boxShadow: "0 2px 8px rgba(220, 38, 38, 0.3)",
+                    transition: "all 0.2s",
                   }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-1px)"}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
                 >
-                  <div style={{ fontWeight: 700 }}>{u.barcode}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {new Date(u.created_at).toLocaleString()}
+                  🗑️ Удалить ячейку
+                </button>
+              </div>
+            )}
+
+            {/* Units Section */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ 
+                fontWeight: 700, 
+                fontSize: 14,
+                marginBottom: 12,
+                color: "#374151",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <span>📦</span>
+                <span>Содержимое</span>
+                <span style={{ 
+                  fontSize: 11, 
+                  fontWeight: 600, 
+                  background: "#e5e7eb", 
+                  padding: "2px 8px", 
+                  borderRadius: 12,
+                  color: "#6b7280",
+                }}>
+                  {cellUnits.length}
+                </span>
+              </div>
+
+              {loadingUnits ? (
+                // Skeleton loader
+                <div style={{ display: "grid", gap: 8 }}>
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: "linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%)",
+                        backgroundSize: "200% 100%",
+                        animation: "shimmer 1.5s infinite",
+                        borderRadius: 12,
+                        height: 72,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : cellUnits.length === 0 ? (
+                <div style={{ 
+                  textAlign: "center", 
+                  padding: "32px 20px",
+                  background: "#f9fafb",
+                  borderRadius: 12,
+                  border: "2px dashed #d1d5db",
+                }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+                  <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 500 }}>Ячейка пуста</div>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {cellUnits.map((u) => (
+                    <div
+                      key={u.id}
+                      onClick={() => {
+                        setSelectedUnit(u);
+                        loadUnitMoves(u.id);
+                      }}
+                      style={{
+                        border: selectedUnit?.id === u.id 
+                          ? "2px solid #667eea" 
+                          : "1px solid #e5e7eb",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        cursor: "pointer",
+                        background: selectedUnit?.id === u.id 
+                          ? "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%)"
+                          : "#fff",
+                        transition: "all 0.2s",
+                        boxShadow: selectedUnit?.id === u.id 
+                          ? "0 4px 12px rgba(102, 126, 234, 0.15)"
+                          : "0 1px 3px rgba(0,0,0,0.05)",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedUnit?.id !== u.id) {
+                          e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)";
+                          e.currentTarget.style.transform = "translateY(-1px)";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedUnit?.id !== u.id) {
+                          e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
+                          e.currentTarget.style.transform = "translateY(0)";
+                        }
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: 700, 
+                        fontSize: 15,
+                        color: selectedUnit?.id === u.id ? "#667eea" : "#111",
+                        marginBottom: 4,
+                      }}>
+                        {u.barcode}
+                      </div>
+                      <div style={{ 
+                        fontSize: 11, 
+                        color: "#6b7280",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}>
+                        <span>🕒</span>
+                        {new Date(u.created_at).toLocaleString("ru-RU", {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* History Section */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ 
+                fontWeight: 700, 
+                fontSize: 14,
+                marginBottom: 12,
+                color: "#374151",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <span>📜</span>
+                <span>История перемещений</span>
+              </div>
+
+              {!selectedUnit ? (
+                <div style={{ 
+                  textAlign: "center", 
+                  padding: "24px 16px",
+                  background: "#f9fafb",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                }}>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>👆</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Выберите заказ для просмотра истории
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ marginTop: 14, fontWeight: 800 }}>История перемещений</div>
-
-          {!selectedUnit ? (
-            <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
-              Выберите заказ выше, чтобы увидеть историю.
-            </div>
-          ) : loadingMoves ? (
-            <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>Загрузка…</div>
-          ) : unitMoves.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>Истории пока нет.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 8, marginTop: 8, maxHeight: 260, overflow: "auto" }}>
-              {unitMoves.map((m) => (
-                <div key={m.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: 10 }}>
-                  <div style={{ fontSize: 12, color: "#111" }}>{m.note ?? "Событие"}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    {new Date(m.created_at).toLocaleString()} → {m.source}
+              ) : loadingMoves ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: "linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%)",
+                        backgroundSize: "200% 100%",
+                        animation: "shimmer 1.5s infinite",
+                        borderRadius: 10,
+                        height: 52,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : unitMoves.length === 0 ? (
+                <div style={{ 
+                  textAlign: "center", 
+                  padding: "24px 16px",
+                  background: "#f9fafb",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                }}>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>📭</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    История пока пуста
                   </div>
                 </div>
-              ))}
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {unitMoves.map((m, idx) => (
+                    <div 
+                      key={m.id} 
+                      style={{ 
+                        border: "1px solid #e5e7eb", 
+                        borderRadius: 10, 
+                        padding: "10px 12px",
+                        background: "#fff",
+                        position: "relative",
+                        paddingLeft: 32,
+                      }}
+                    >
+                      <div style={{
+                        position: "absolute",
+                        left: 10,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: idx === 0 ? "#667eea" : "#d1d5db",
+                      }} />
+                      <div style={{ 
+                        fontSize: 12, 
+                        fontWeight: 600, 
+                        color: "#374151",
+                        marginBottom: 2,
+                      }}>
+                        {m.note ?? "Событие"}
+                      </div>
+                      <div style={{ 
+                        fontSize: 11, 
+                        color: "#6b7280",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}>
+                        <span>🕒</span>
+                        {new Date(m.created_at).toLocaleString("ru-RU", {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {m.source && (
+                          <>
+                            <span>•</span>
+                            <span>{m.source}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
 
           {selectedUnit && moveTargetCell && (
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #eee" }}>
@@ -650,36 +1152,111 @@ export default function WarehouseMapPage() {
             </div>
           )}
 
-          {/* Assign unassigned units */}
-          <div style={{ display: "grid", gap: 6, maxHeight: 200, overflow: "auto" }}>
-            {unassigned.map((u) => (
-              <button
-                key={u.id}
-                onClick={async () => {
-                  // Ручной перенос (карта): move_unit(unitId, null, toCellId)
-                  const r = await fetch("/api/units/assign", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ unitId: u.id, toStatus: null, cellId: selectedCell.id }),
-                  });
-                  if (!r.ok) {
-                    const j = await r.json().catch(() => ({}));
-                    alert(j.error ?? "Assign failed");
-                    return;
-                  }
-                  // После назначения: обновляем карту, список ячейки и неразмещенные
-                  await loadCells();
-                  await loadCellUnits(selectedCell.id);
-                  await loadUnassigned();
-                }}
-                style={{ padding: 8, textAlign: "left", border: "1px solid #eee", borderRadius: 6, fontSize: 12 }}
-              >
-                {u.barcode}
-              </button>
-            ))}
           </div>
+
+          {/* Move Target Section */}
+          {selectedUnit && moveTargetCell && (
+            <div style={{ 
+              padding: "16px 20px", 
+              borderTop: "1px solid #e5e7eb",
+              background: "#f9fafb",
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 12, color: "#374151" }}>
+                🔄 Перемещение
+              </div>
+              <div style={{ 
+                fontSize: 12, 
+                color: "#6b7280", 
+                marginBottom: 12,
+                padding: 12,
+                background: "#fff",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+              }}>
+                <div><strong>Заказ:</strong> {selectedUnit.barcode}</div>
+                <div style={{ marginTop: 4 }}>
+                  <strong>Цель:</strong> {moveTargetCell.code} ({moveTargetCell.cell_type})
+                </div>
+              </div>
+
+              <button
+                style={{ 
+                  width: "100%",
+                  padding: "10px",
+                  background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  cursor: moving || moveTargetCell.id === selectedUnit.cell_id ? "not-allowed" : "pointer",
+                  opacity: moving || moveTargetCell.id === selectedUnit.cell_id ? 0.5 : 1,
+                }}
+                disabled={moving || moveTargetCell.id === selectedUnit.cell_id}
+                onClick={async () => {
+                  setMoving(true);
+                  setMoveMsg(null);
+                  try {
+                    const r = await fetch("/api/units/move", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ unitId: selectedUnit.id, toCellId: moveTargetCell.id }),
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                      setMoveMsg(j.error ?? "Ошибка перемещения");
+                      return;
+                    }
+
+                    setMoveMsg(`✅ Перемещено в ${moveTargetCell.code}`);
+                    await loadCells();
+                    if (selectedCell?.id) await loadCellUnits(selectedCell.id);
+                    if (moveTargetCell?.id) await loadCellUnits(moveTargetCell.id);
+                    setMoveTargetCell(null);
+                    setSelectedUnit(null);
+                  } finally {
+                    setMoving(false);
+                  }
+                }}
+              >
+                {moving ? "Перемещение..." : "Переместить"}
+              </button>
+
+              {moveMsg && (
+                <div style={{ 
+                  marginTop: 8, 
+                  fontSize: 12, 
+                  color: moveMsg.startsWith("✅") ? "#059669" : "#dc2626",
+                  textAlign: "center",
+                }}>
+                  {moveMsg}
+                </div>
+              )}
+
+              <button
+                style={{ 
+                  marginTop: 8, 
+                  width: "100%",
+                  padding: "8px",
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  color: "#6b7280",
+                }}
+                onClick={() => {
+                  setMoveTargetCell(null);
+                  setSelectedUnit(null);
+                  setUnitMoves([]);
+                  setMoveMsg(null);
+                }}
+              >
+                Отмена
+              </button>
+            </div>
+          )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

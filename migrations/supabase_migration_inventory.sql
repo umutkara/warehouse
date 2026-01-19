@@ -207,7 +207,17 @@ BEGIN
   FROM public.warehouses
   WHERE id = v_warehouse_id;
 
-  IF NOT v_active OR v_session_id IS NULL THEN
+  -- If no session_id on warehouse, try to find the most recent session
+  IF v_session_id IS NULL THEN
+    SELECT id INTO v_session_id
+    FROM public.inventory_sessions
+    WHERE warehouse_id = v_warehouse_id
+    ORDER BY started_at DESC
+    LIMIT 1;
+  END IF;
+
+  -- If still no session found, return inactive with no session
+  IF v_session_id IS NULL THEN
     RETURN json_build_object(
       'ok', true,
       'active', false,
@@ -217,10 +227,10 @@ BEGIN
     );
   END IF;
 
-  -- Get session details
+  -- Get session details (active or closed)
   SELECT started_by, started_at INTO v_session
   FROM public.inventory_sessions
-  WHERE id = v_session_id AND status = 'active';
+  WHERE id = v_session_id;
 
   IF NOT FOUND THEN
     RETURN json_build_object(
@@ -232,9 +242,10 @@ BEGIN
     );
   END IF;
 
+  -- Return status with sessionId (даже если неактивна)
   RETURN json_build_object(
     'ok', true,
-    'active', true,
+    'active', COALESCE(v_active, false),
     'sessionId', v_session_id,
     'startedBy', v_session.started_by,
     'startedAt', v_session.started_at

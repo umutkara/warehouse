@@ -21,11 +21,19 @@ export default function ConditionalLayout({
 
   // Стандартный layout с меню
   return (
-    <div style={{ height: "100vh", display: "grid", gridTemplateRows: "160px 1fr" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <TopBarExcel />
-      <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <LeftNav role={role} />
-        <main style={{ background: "#f5f6f7", padding: 16, overflow: "auto" }}>{children}</main>
+        <main style={{ 
+          flex: 1, 
+          background: "#f5f6f7", 
+          padding: 16, 
+          overflow: "auto",
+          marginLeft: "72px", // Отступ для collapsed sidebar
+        }}>
+          {children}
+        </main>
       </div>
     </div>
   );

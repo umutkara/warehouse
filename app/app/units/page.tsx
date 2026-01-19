@@ -14,6 +14,26 @@ type Unit = {
   cell_type?: string;
   created_at: string;
   age_hours: number;
+  meta?: {
+    merchant_rejections?: Array<{
+      rejected_at: string;
+      reason: string;
+      scenario: string;
+      shipment_id: string;
+      courier_name: string;
+      return_number: number;
+    }>;
+    merchant_rejection_count?: number;
+    service_center_returns?: Array<{
+      returned_at: string;
+      reason: string;
+      scenario: string;
+      shipment_id: string;
+      courier_name: string;
+      return_number: number;
+    }>;
+    service_center_return_count?: number;
+  };
 };
 
 export default function UnitsListPage() {
@@ -76,6 +96,39 @@ export default function UnitsListPage() {
     setSearchQuery("");
   }
 
+  async function handleExportToExcel() {
+    try {
+      const params = new URLSearchParams({ 
+        age: ageFilter,
+        status: statusFilter,
+      });
+      if (searchQuery.trim()) {
+        params.append("search", searchQuery.trim());
+      }
+
+      const res = await fetch(`/api/units/export-excel?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        setError("Ошибка экспорта");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `units_on_warehouse_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      setError("Ошибка экспорта");
+    }
+  }
+
   function formatAge(hours: number): string {
     if (hours < 1) return "< 1ч";
     if (hours < 24) return `${hours}ч`;
@@ -94,11 +147,10 @@ export default function UnitsListPage() {
 
   const statusColors: Record<string, string> = {
     receiving: "#3b82f6",
-    storage: "#10b981",
+    stored: "#10b981",
     picking: "#f59e0b",
-    shipping: "#ef4444",
+    shipped: "#ef4444",
     out: "#8b5cf6",
-    bin: "#a855f7",
   };
 
   if (loading) {
@@ -123,24 +175,32 @@ export default function UnitsListPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <form onSubmit={handleSearch} style={styles.searchContainer}>
-        <input
-          type="text"
-          placeholder="🔍 Поиск по номеру заказа..."
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          style={styles.searchInput}
-        />
-        <button type="submit" style={styles.searchButton}>
-          Найти
-        </button>
-        {searchQuery && (
-          <button type="button" onClick={clearSearch} style={styles.clearButton}>
-            ✕
+      {/* Search and Export */}
+      <div style={styles.searchAndExportContainer}>
+        <form onSubmit={handleSearch} style={styles.searchContainer}>
+          <input
+            type="text"
+            placeholder="🔍 Поиск по номеру заказа..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            style={styles.searchInput}
+          />
+          <button type="submit" style={styles.searchButton}>
+            Найти
+          </button>
+          {searchQuery && (
+            <button type="button" onClick={clearSearch} style={styles.clearButton}>
+              ✕
+            </button>
+          )}
+        </form>
+
+        {statusFilter === "on_warehouse" && (
+          <button onClick={handleExportToExcel} style={styles.exportButton}>
+            📊 Экспорт в Excel
           </button>
         )}
-      </form>
+      </div>
 
       {/* Status Filter */}
       <div style={styles.filters}>
@@ -156,6 +216,15 @@ export default function UnitsListPage() {
             Все
           </button>
           <button
+            onClick={() => setStatusFilter("on_warehouse")}
+            style={{
+              ...styles.filterButton,
+              ...(statusFilter === "on_warehouse" ? styles.filterButtonActive : {}),
+            }}
+          >
+            На складе
+          </button>
+          <button
             onClick={() => setStatusFilter("receiving")}
             style={{
               ...styles.filterButton,
@@ -165,10 +234,10 @@ export default function UnitsListPage() {
             Приёмка
           </button>
           <button
-            onClick={() => setStatusFilter("storage")}
+            onClick={() => setStatusFilter("stored")}
             style={{
               ...styles.filterButton,
-              ...(statusFilter === "storage" ? styles.filterButtonActive : {}),
+              ...(statusFilter === "stored" ? styles.filterButtonActive : {}),
             }}
           >
             Хранение
@@ -183,10 +252,10 @@ export default function UnitsListPage() {
             Пикинг
           </button>
           <button
-            onClick={() => setStatusFilter("shipping")}
+            onClick={() => setStatusFilter("shipped")}
             style={{
               ...styles.filterButton,
-              ...(statusFilter === "shipping" ? styles.filterButtonActive : {}),
+              ...(statusFilter === "shipped" ? styles.filterButtonActive : {}),
             }}
           >
             Отгрузка
@@ -199,15 +268,6 @@ export default function UnitsListPage() {
             }}
           >
             OUT
-          </button>
-          <button
-            onClick={() => setStatusFilter("bin")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "bin" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Bin
           </button>
         </div>
       </div>
@@ -300,7 +360,25 @@ export default function UnitsListPage() {
                 }}
               >
                 <td style={styles.td}>
-                  <div style={styles.barcode}>{unit.barcode}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={styles.barcode}>{unit.barcode}</div>
+                    {unit.meta?.merchant_rejection_count && unit.meta.merchant_rejection_count > 0 && (
+                      <span
+                        style={styles.merchantRejectionBadge}
+                        title={`Мерчант не принял ${unit.meta.merchant_rejection_count} раз(а)`}
+                      >
+                        🚫 Мерчант не принял ({unit.meta.merchant_rejection_count})
+                      </span>
+                    )}
+                    {unit.meta?.service_center_return_count && unit.meta.service_center_return_count > 0 && (
+                      <span
+                        style={styles.serviceCenterBadge}
+                        title={`Вернулся с сервисного центра ${unit.meta.service_center_return_count} раз(а)`}
+                      >
+                        🔧 С сервиса ({unit.meta.service_center_return_count})
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td style={styles.td}>
                   <div style={styles.productName}>{unit.product_name || "—"}</div>
@@ -407,10 +485,16 @@ const styles = {
     fontWeight: 600,
     boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
   } as React.CSSProperties,
+  searchAndExportContainer: {
+    display: "flex",
+    gap: 16,
+    marginBottom: "var(--spacing-lg)",
+    alignItems: "center",
+  } as React.CSSProperties,
   searchContainer: {
     display: "flex",
     gap: 8,
-    marginBottom: "var(--spacing-lg)",
+    flex: 1,
     padding: 16,
     background: "#fff",
     borderRadius: 12,
@@ -452,6 +536,20 @@ const styles = {
     fontSize: 14,
     fontWeight: 600,
     transition: "all 0.2s",
+  } as React.CSSProperties,
+  exportButton: {
+    padding: "10px 20px",
+    background: "#10b981",
+    color: "#fff",
+    borderWidth: 0,
+    borderStyle: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 600,
+    boxShadow: "0 2px 4px rgba(16, 185, 129, 0.3)",
+    transition: "all 0.2s",
+    whiteSpace: "nowrap",
   } as React.CSSProperties,
   filters: {
     display: "flex",
@@ -598,5 +696,25 @@ const styles = {
     fontSize: 16,
     fontWeight: 700,
     color: "#374151",
+  } as React.CSSProperties,
+  merchantRejectionBadge: {
+    padding: "2px 8px",
+    background: "#dc2626",
+    color: "#fff",
+    borderRadius: 4,
+    fontSize: 10,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    display: "inline-block",
+  } as React.CSSProperties,
+  serviceCenterBadge: {
+    padding: "2px 8px",
+    background: "#f59e0b",
+    color: "#fff",
+    borderRadius: 4,
+    fontSize: 10,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    display: "inline-block",
   } as React.CSSProperties,
 };

@@ -19,6 +19,26 @@ type Unit = {
   }>;
   cell_id?: string;
   created_at: string;
+  meta?: {
+    merchant_rejections?: Array<{
+      rejected_at: string;
+      reason: string;
+      scenario: string;
+      shipment_id: string;
+      courier_name: string;
+      return_number: number;
+    }>;
+    merchant_rejection_count?: number;
+    service_center_returns?: Array<{
+      returned_at: string;
+      reason: string;
+      scenario: string;
+      shipment_id: string;
+      courier_name: string;
+      return_number: number;
+    }>;
+    service_center_return_count?: number;
+  };
 };
 
 type HistoryEvent = {
@@ -88,6 +108,8 @@ export default function UnitDetailPage() {
 
       if (res.ok) {
         setHistory(json.history || []);
+      } else {
+        console.error("Failed to load history:", json.error);
       }
     } catch (e) {
       console.error("Failed to load history:", e);
@@ -183,20 +205,31 @@ export default function UnitDetailPage() {
     }
   }
 
-  function renderHistoryEvent(event: HistoryEvent) {
+  function renderHistoryEvent(event: HistoryEvent, idx: number) {
     const date = new Date(event.created_at).toLocaleString("ru-RU");
+    const uniqueKey = `${event.event_type}-${event.created_at}-${idx}`;
 
     switch (event.event_type) {
       case "move":
-        const { from_cell, to_cell, from_status, to_status, actor_name, actor_role } = event.details;
+        const { from_cell, to_cell, actor_name, actor_role, note, source } = event.details;
         return (
-          <div key={event.created_at} style={styles.historyItem}>
+          <div key={uniqueKey} style={styles.historyItem}>
             <div style={styles.historyIcon}>📦</div>
             <div style={{ flex: 1 }}>
               <div style={styles.historyTitle}>Перемещение</div>
               <div style={styles.historyText}>
-                {from_cell || from_status} → {to_cell || to_status}
+                {from_cell || "—"} → {to_cell || "—"}
               </div>
+              {note && (
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Примечание: {note}
+                </div>
+              )}
+              {source && (
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                  Источник: {source}
+                </div>
+              )}
               <div style={styles.historyMeta}>
                 {actor_name} ({actor_role}) • {date}
               </div>
@@ -208,7 +241,7 @@ export default function UnitDetailPage() {
         const { status, courier_name, shipped_by, returned_by, return_reason, returned_at } = event.details;
         if (status === "out") {
           return (
-            <div key={event.created_at} style={styles.historyItem}>
+            <div key={`${uniqueKey}-out`} style={styles.historyItem}>
               <div style={styles.historyIcon}>🚚</div>
               <div style={{ flex: 1 }}>
                 <div style={styles.historyTitle}>Отправка в OUT</div>
@@ -221,7 +254,7 @@ export default function UnitDetailPage() {
           );
         } else if (status === "returned" && returned_at) {
           return (
-            <div key={returned_at} style={styles.historyItem}>
+            <div key={`${uniqueKey}-returned`} style={styles.historyItem}>
               <div style={styles.historyIcon}>↩️</div>
               <div style={{ flex: 1 }}>
                 <div style={styles.historyTitle}>Возврат из OUT</div>
@@ -236,18 +269,64 @@ export default function UnitDetailPage() {
         break;
 
       case "audit":
-        const { action, summary, actor_name: auditActor, actor_role: auditRole } = event.details;
+        const { action, summary, actor_name: auditActor, actor_role: auditRole, meta } = event.details;
         let icon = "📝";
-        if (action === "unit.create") icon = "✨";
-        if (action === "unit.photo_uploaded") icon = "📷";
-        if (action === "unit.photo_deleted") icon = "🗑️";
-        if (action === "unit.update") icon = "✏️";
+        let bgColor = "#f9fafb";
+        let borderColor = "#e5e7eb";
+
+        // Special handling for merchant rejection and service center return
+        if (action === "logistics.merchant_rejection") {
+          icon = "🚫";
+          bgColor = "#fef2f2";
+          borderColor = "#fecaca";
+        } else if (action === "logistics.service_center_return") {
+          icon = "🔧";
+          bgColor = "#fef3c7";
+          borderColor = "#fde047";
+        } else if (action === "unit.create") {
+          icon = "✨";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
+        } else if (action === "unit.photo_uploaded") {
+          icon = "📷";
+        } else if (action === "unit.photo_deleted") {
+          icon = "🗑️";
+        } else if (action === "unit.update") {
+          icon = "✏️";
+        } else if (action?.includes("picking_task")) {
+          icon = "📋";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
+        } else if (action?.includes("logistics")) {
+          icon = "🚚";
+          bgColor = "#f5f3ff";
+          borderColor = "#ddd6fe";
+        }
 
         return (
-          <div key={event.created_at} style={styles.historyItem}>
+          <div
+            key={uniqueKey}
+            style={{
+              ...styles.historyItem,
+              background: bgColor,
+              borderColor: borderColor,
+            }}
+          >
             <div style={styles.historyIcon}>{icon}</div>
             <div style={{ flex: 1 }}>
               <div style={styles.historyTitle}>{summary || action}</div>
+              {/* Show scenario if present */}
+              {meta?.scenario && (
+                <div style={styles.historyScenario}>
+                  Сценарий: {meta.scenario}
+                </div>
+              )}
+              {/* Show courier if present */}
+              {meta?.courier_name && (
+                <div style={styles.historyCourier}>
+                  Курьер: {meta.courier_name}
+                </div>
+              )}
               <div style={styles.historyMeta}>
                 {auditActor} ({auditRole}) • {date}
               </div>
@@ -293,6 +372,118 @@ export default function UnitDetailPage() {
         </button>
         <h1 style={styles.title}>Заказ {unit.barcode}</h1>
       </div>
+
+      {/* Merchant Rejection Alert */}
+      {unit.meta?.merchant_rejections && unit.meta.merchant_rejections.length > 0 && (
+        <div style={styles.merchantRejectionAlert}>
+          <div style={styles.merchantRejectionHeader}>
+            <span style={{ fontSize: 24 }}>🚫</span>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+              Возврат от мерчанта ({unit.meta.merchant_rejection_count || unit.meta.merchant_rejections.length})
+            </h3>
+          </div>
+          <div style={styles.merchantRejectionBody}>
+            {unit.meta.merchant_rejections.map((rejection, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: 12,
+                  background: idx === 0 ? "#fff" : "#fef2f2",
+                  borderRadius: 8,
+                  marginBottom: idx < unit.meta!.merchant_rejections!.length - 1 ? 12 : 0,
+                  borderWidth: 1,
+                  borderStyle: "solid",
+                  borderColor: "#fecaca",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 8, color: "#dc2626" }}>
+                  Возврат #{rejection.return_number}
+                </div>
+                <div style={styles.merchantRejectionRow}>
+                  <span style={styles.merchantRejectionLabel}>Дата отказа:</span>
+                  <span style={styles.merchantRejectionValue}>
+                    {new Date(rejection.rejected_at).toLocaleString("ru-RU")}
+                  </span>
+                </div>
+                <div style={styles.merchantRejectionRow}>
+                  <span style={styles.merchantRejectionLabel}>Сценарий:</span>
+                  <span style={styles.merchantRejectionValue}>
+                    {rejection.scenario}
+                  </span>
+                </div>
+                <div style={styles.merchantRejectionRow}>
+                  <span style={styles.merchantRejectionLabel}>Курьер:</span>
+                  <span style={styles.merchantRejectionValue}>
+                    {rejection.courier_name}
+                  </span>
+                </div>
+                <div style={styles.merchantRejectionRow}>
+                  <span style={styles.merchantRejectionLabel}>Причина:</span>
+                  <span style={styles.merchantRejectionValue}>
+                    {rejection.reason}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Service Center Return Alert */}
+      {unit.meta?.service_center_returns && unit.meta.service_center_returns.length > 0 && (
+        <div style={styles.serviceCenterAlert}>
+          <div style={styles.serviceCenterHeader}>
+            <span style={{ fontSize: 24 }}>🔧</span>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+              Возврат с сервисного центра ({unit.meta.service_center_return_count || unit.meta.service_center_returns.length})
+            </h3>
+          </div>
+          <div style={styles.serviceCenterBody}>
+            {unit.meta.service_center_returns.map((returnInfo, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: 12,
+                  background: idx === 0 ? "#fff" : "#fffbeb",
+                  borderRadius: 8,
+                  marginBottom: idx < unit.meta!.service_center_returns!.length - 1 ? 12 : 0,
+                  borderWidth: 1,
+                  borderStyle: "solid",
+                  borderColor: "#fed7aa",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 8, color: "#f59e0b" }}>
+                  Возврат #{returnInfo.return_number}
+                </div>
+                <div style={styles.serviceCenterRow}>
+                  <span style={styles.serviceCenterLabel}>Дата возврата:</span>
+                  <span style={styles.serviceCenterValue}>
+                    {new Date(returnInfo.returned_at).toLocaleString("ru-RU")}
+                  </span>
+                </div>
+                <div style={styles.serviceCenterRow}>
+                  <span style={styles.serviceCenterLabel}>Сценарий:</span>
+                  <span style={styles.serviceCenterValue}>
+                    {returnInfo.scenario}
+                  </span>
+                </div>
+                <div style={styles.serviceCenterRow}>
+                  <span style={styles.serviceCenterLabel}>Курьер:</span>
+                  <span style={styles.serviceCenterValue}>
+                    {returnInfo.courier_name}
+                  </span>
+                </div>
+                <div style={styles.serviceCenterRow}>
+                  <span style={styles.serviceCenterLabel}>Причина:</span>
+                  <span style={styles.serviceCenterValue}>
+                    {returnInfo.reason}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={styles.grid}>
         {/* Left Column - Info */}
@@ -460,7 +651,7 @@ export default function UnitDetailPage() {
                   История пуста
                 </div>
               )}
-              {history.map((event) => renderHistoryEvent(event))}
+              {history.map((event, idx) => renderHistoryEvent(event, idx))}
             </div>
           </div>
         </div>
@@ -667,5 +858,106 @@ const styles = {
   historyMeta: {
     fontSize: 11,
     color: "#9ca3af",
+  } as React.CSSProperties,
+  historyScenario: {
+    fontSize: 12,
+    color: "#059669",
+    fontWeight: 600,
+    marginTop: 4,
+    padding: "2px 8px",
+    background: "#d1fae5",
+    borderRadius: 4,
+    display: "inline-block",
+  } as React.CSSProperties,
+  historyCourier: {
+    fontSize: 12,
+    color: "#7c3aed",
+    fontWeight: 600,
+    marginTop: 4,
+    padding: "2px 8px",
+    background: "#ede9fe",
+    borderRadius: 4,
+    display: "inline-block",
+    marginLeft: 8,
+  } as React.CSSProperties,
+  merchantRejectionAlert: {
+    background: "#fef2f2",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderColor: "#dc2626",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 24,
+    boxShadow: "0 4px 6px rgba(220, 38, 38, 0.1)",
+  } as React.CSSProperties,
+  merchantRejectionHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "#fecaca",
+  } as React.CSSProperties,
+  merchantRejectionBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  } as React.CSSProperties,
+  merchantRejectionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+  merchantRejectionLabel: {
+    fontWeight: 600,
+    fontSize: 14,
+    color: "#7f1d1d",
+    minWidth: 120,
+  } as React.CSSProperties,
+  merchantRejectionValue: {
+    fontSize: 14,
+    color: "#1f2937",
+  } as React.CSSProperties,
+  serviceCenterAlert: {
+    background: "#fffbeb",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderColor: "#f59e0b",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 24,
+    boxShadow: "0 4px 6px rgba(245, 158, 11, 0.1)",
+  } as React.CSSProperties,
+  serviceCenterHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "#fed7aa",
+  } as React.CSSProperties,
+  serviceCenterBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  } as React.CSSProperties,
+  serviceCenterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+  serviceCenterLabel: {
+    fontWeight: 600,
+    fontSize: 14,
+    color: "#92400e",
+    minWidth: 120,
+  } as React.CSSProperties,
+  serviceCenterValue: {
+    fontSize: 14,
+    color: "#1f2937",
   } as React.CSSProperties,
 };

@@ -335,13 +335,16 @@ export default function OpsShippingPage() {
 
       {/* Available units list */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <label style={{ fontWeight: 600, fontSize: 16 }}>
-            Доступные заказы (storage/shipping)
+            📦 Доступные заказы для создания задач
           </label>
           <Button variant="secondary" size="sm" onClick={loadAvailableUnits} disabled={loadingUnits}>
             {loadingUnits ? "Загрузка..." : "Обновить"}
           </Button>
+        </div>
+        <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
+          Заказы из ячеек storage/shipping, которые еще не добавлены в задачи
         </div>
 
         {loadingUnits ? (
@@ -350,7 +353,7 @@ export default function OpsShippingPage() {
           </div>
         ) : availableUnits.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
-            Нет заказов в storage/shipping ячейках
+            Нет доступных заказов. Все заказы из storage/shipping уже добавлены в задачи или ячейки пусты.
           </div>
         ) : (
           <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>

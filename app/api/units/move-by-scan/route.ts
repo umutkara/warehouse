@@ -12,13 +12,16 @@ function normalizeUnitBarcode(v: any) {
 
 function statusByCellType(cellType: string) {
   // ВАЖНО: статусы должны совпадать с enum unit_status
+  // Статус заказа = тип ячейки (согласно новой логике)
   switch (cellType) {
     case "bin":
-      return "receiving";
+      return "bin";
     case "storage":
-      return "inventory_hold";
+      return "stored";
     case "shipping":
-      return "shipped";
+      return "shipping";
+    case "picking":
+      return "picking";
     default:
       return null;
   }
@@ -119,10 +122,15 @@ export async function POST(req: Request) {
     }
 
     // Разрешённые перемещения
+    // bin → storage/shipping (решение куда отправить)
+    // storage/shipping → picking (OPS создал задание)
+    // storage ⇄ shipping (изменение решения)
+    // picking → out (через ТСД отгрузка - но это отдельный API)
     const allowedMoves: Record<string, string[]> = {
       bin: ["storage", "shipping"],
-      storage: ["storage", "shipping"],
-      shipping: ["shipping", "storage"],
+      storage: ["storage", "shipping", "picking"],
+      shipping: ["shipping", "storage", "picking"],
+      picking: ["picking"], // Picking может перемещаться внутри picking зоны
     };
 
     const fromType = String(fromCell.cell_type);
@@ -137,6 +145,7 @@ export async function POST(req: Request) {
 
     // STATUS строго по типу целевой ячейки (НЕ null)
     const toStatus = statusByCellType(toCell.cell_type);
+
     if (!toStatus) {
       return NextResponse.json(
         { error: `Неизвестный тип целевой ячейки: ${toCell.cell_type}` },
@@ -164,6 +173,7 @@ export async function POST(req: Request) {
     }
 
     const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
+
     if (!result?.ok) {
       return NextResponse.json({ error: result?.error || "Ошибка перемещения" }, { status: 400 });
     }

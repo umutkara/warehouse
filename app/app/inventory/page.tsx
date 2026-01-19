@@ -20,6 +20,7 @@ export default function InventoryPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -108,6 +109,39 @@ export default function InventoryPage() {
     }
   }
 
+  async function handleGenerateReport() {
+    setGeneratingReport(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/inventory/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: status?.sessionId }),
+      });
+      
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error || "Ошибка генерации отчёта");
+        return;
+      }
+
+      const json = await res.json();
+      
+      if (json.ok && json.publicUrl) {
+        // Download the file
+        window.open(json.publicUrl, "_blank");
+        setSuccess(`Отчёт сгенерирован: ${json.fileName}`);
+      } else {
+        setError("Ошибка генерации отчёта");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Ошибка генерации отчёта");
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   const canManage = profile?.role && ["admin", "head", "manager"].includes(profile.role);
 
   return (
@@ -189,43 +223,114 @@ export default function InventoryPage() {
           )}
 
           {canManage && (
-            <div style={{ display: "flex", gap: 12 }}>
-              {!status?.active ? (
-                <button
-                  onClick={handleStart}
-                  disabled={busy}
-                  style={{
-                    background: "#0066cc",
-                    color: "#fff",
-                    border: "none",
-                    padding: "10px 20px",
-                    borderRadius: 6,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: busy ? "not-allowed" : "pointer",
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  {busy ? "Запуск..." : "Начать инвентаризацию"}
-                </button>
-              ) : (
-                <button
-                  onClick={handleStop}
-                  disabled={busy}
-                  style={{
-                    background: "#c00",
-                    color: "#fff",
-                    border: "none",
-                    padding: "10px 20px",
-                    borderRadius: 6,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: busy ? "not-allowed" : "pointer",
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  {busy ? "Завершение..." : "Завершить инвентаризацию"}
-                </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                {!status?.active ? (
+                  <button
+                    onClick={handleStart}
+                    disabled={busy}
+                    style={{
+                      background: "#0066cc",
+                      color: "#fff",
+                      border: "none",
+                      padding: "10px 20px",
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      opacity: busy ? 0.6 : 1,
+                    }}
+                  >
+                    {busy ? "Запуск..." : "Начать инвентаризацию"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStop}
+                    disabled={busy}
+                    style={{
+                      background: "#c00",
+                      color: "#fff",
+                      border: "none",
+                      padding: "10px 20px",
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      opacity: busy ? 0.6 : 1,
+                    }}
+                  >
+                    {busy ? "Завершение..." : "Завершить инвентаризацию"}
+                  </button>
+                )}
+              </div>
+
+              {status?.sessionId && (
+                <>
+                  <a
+                    href="/app/inventory-progress"
+                    style={{
+                      display: "block",
+                      textAlign: "center",
+                      background: status?.active 
+                        ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+                        : "linear-gradient(135deg, #6b7280 0%, #4b5563 100%)",
+                      color: "#fff",
+                      border: "none",
+                      padding: "10px 20px",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                      e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
+                    }}
+                  >
+                    📊 {status?.active ? "Посмотреть прогресс" : "Просмотреть результаты"}
+                  </a>
+
+                  <button
+                    onClick={handleGenerateReport}
+                    disabled={generatingReport}
+                    style={{
+                      background: generatingReport 
+                        ? "#d1d5db"
+                        : "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)",
+                      color: "#fff",
+                      border: "none",
+                      padding: "10px 20px",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: generatingReport ? "not-allowed" : "pointer",
+                      opacity: generatingReport ? 0.6 : 1,
+                      boxShadow: generatingReport ? "none" : "0 2px 8px rgba(139, 92, 246, 0.3)",
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!generatingReport) {
+                        e.currentTarget.style.transform = "translateY(-1px)";
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(139, 92, 246, 0.4)";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!generatingReport) {
+                        e.currentTarget.style.transform = "translateY(0)";
+                        e.currentTarget.style.boxShadow = "0 2px 8px rgba(139, 92, 246, 0.3)";
+                      }
+                    }}
+                  >
+                    {generatingReport ? "Генерация..." : "📥 Скачать отчёт"}
+                  </button>
+                </>
               )}
             </div>
           )}

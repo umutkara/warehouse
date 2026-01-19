@@ -29,16 +29,28 @@ export async function GET(req: Request) {
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    // 1. Units older than 24 hours (залежалые заказы)
-    const { data: oldUnits } = await supabaseAdmin
-      .from("units")
-      .select("id, barcode, status, created_at, cell_id")
-      .eq("warehouse_id", profile.warehouse_id)
-      .lt("created_at", twentyFourHoursAgo.toISOString())
-      .neq("status", "shipped")
-      .neq("status", "out")
-      .order("created_at", { ascending: true })
-      .limit(100);
+    // 1 & 2. Execute independent queries in parallel
+    const [
+      { data: oldUnits },
+      { data: allUnits }
+    ] = await Promise.all([
+      // 1. Units older than 24 hours (залежалые заказы)
+      supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, created_at, cell_id")
+        .eq("warehouse_id", profile.warehouse_id)
+        .lt("created_at", twentyFourHoursAgo.toISOString())
+        .neq("status", "shipped")
+        .neq("status", "out")
+        .order("created_at", { ascending: true })
+        .limit(100),
+      
+      // 2. Total units by status (current snapshot)
+      supabaseAdmin
+        .from("units")
+        .select("status")
+        .eq("warehouse_id", profile.warehouse_id)
+    ]);
 
     // Group by status
     const oldUnitsByStatus: Record<string, number> = {};
@@ -46,18 +58,13 @@ export async function GET(req: Request) {
       oldUnitsByStatus[u.status] = (oldUnitsByStatus[u.status] || 0) + 1;
     });
 
-    // 2. Total units by status (current snapshot)
-    const { data: allUnits } = await supabaseAdmin
-      .from("units")
-      .select("status")
-      .eq("warehouse_id", profile.warehouse_id);
-
     const unitsByStatus: Record<string, number> = {};
     (allUnits || []).forEach(u => {
       unitsByStatus[u.status] = (unitsByStatus[u.status] || 0) + 1;
     });
 
     // 3. Average time in each status (from audit_events)
+    // Reduced limit from 500 to 200 for better performance
     const { data: recentEvents } = await supabaseAdmin
       .from("audit_events")
       .select("action, created_at, entity_id, meta")
@@ -65,7 +72,7 @@ export async function GET(req: Request) {
       .gte("created_at", sevenDaysAgo.toISOString())
       .in("action", ["unit.create", "unit.move", "picking_task_complete", "logistics.ship_out"])
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(200);
 
     // Calculate average processing time (created → shipped)
     const unitTimestamps: Record<string, { created?: number; shipped?: number }> = {};
@@ -92,23 +99,29 @@ export async function GET(req: Request) {
       ? processingTimes.reduce((a, b) => a + b, 0) / processingTimes.length
       : 0;
 
-    // 4. OUT shipments stats (returns)
-    const { data: outShipments } = await supabaseAdmin
-      .from("outbound_shipments")
-      .select("status, out_at, returned_at")
-      .eq("warehouse_id", profile.warehouse_id)
-      .gte("out_at", sevenDaysAgo.toISOString());
+    // 4 & 5. Execute independent queries in parallel for better performance
+    const [
+      { data: outShipments },
+      { data: pickingTasks }
+    ] = await Promise.all([
+      // 4. OUT shipments stats (returns)
+      supabaseAdmin
+        .from("outbound_shipments")
+        .select("status, out_at, returned_at")
+        .eq("warehouse_id", profile.warehouse_id)
+        .gte("out_at", sevenDaysAgo.toISOString()),
+      
+      // 5. Picking tasks performance
+      supabaseAdmin
+        .from("picking_tasks")
+        .select("status, created_at, picked_at, completed_at")
+        .eq("warehouse_id", profile.warehouse_id)
+        .gte("created_at", sevenDaysAgo.toISOString())
+    ]);
 
     const totalShipments = (outShipments || []).length;
     const returnedShipments = (outShipments || []).filter(s => s.status === "returned").length;
     const returnRate = totalShipments > 0 ? (returnedShipments / totalShipments) * 100 : 0;
-
-    // 5. Picking tasks performance
-    const { data: pickingTasks } = await supabaseAdmin
-      .from("picking_tasks")
-      .select("status, created_at, picked_at, completed_at")
-      .eq("warehouse_id", profile.warehouse_id)
-      .gte("created_at", sevenDaysAgo.toISOString());
 
     const taskTimes: number[] = [];
     (pickingTasks || []).forEach(t => {
@@ -153,6 +166,107 @@ export async function GET(req: Request) {
       else ageDistribution.over_48h++;
     });
 
+    // 8. Get bin cells with their units and accurate placement time from unit_moves
+    // First, get all bin cells
+    const { data: binCells } = await supabaseAdmin
+      .from("warehouse_cells")
+      .select("id, code")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("cell_type", "bin")
+      .eq("is_active", true)
+      .order("code");
+
+    let binStats = [];
+
+    if (binCells && binCells.length > 0) {
+      // Get all units in bin cells
+      const binCellIds = binCells.map(c => c.id);
+      const { data: binUnits } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, cell_id")
+        .in("cell_id", binCellIds);
+
+      if (binUnits && binUnits.length > 0) {
+        const unitIds = binUnits.map(u => u.id);
+        
+        // Get the latest move TO each bin cell for each unit (accurate placement time)
+        const { data: unitMoves } = await supabaseAdmin
+          .from("unit_moves")
+          .select("unit_id, to_cell_id, created_at")
+          .in("unit_id", unitIds)
+          .in("to_cell_id", binCellIds)
+          .order("created_at", { ascending: false });
+
+        // Get the latest move for each unit (when it was placed in current cell)
+        const latestMoveByUnit: Record<string, any> = {};
+        (unitMoves || []).forEach(move => {
+          // Find the unit's current cell
+          const unit = binUnits.find(u => u.id === move.unit_id);
+          if (unit && unit.cell_id === move.to_cell_id) {
+            // This move is to the current cell
+            if (!latestMoveByUnit[move.unit_id]) {
+              latestMoveByUnit[move.unit_id] = move;
+            }
+          }
+        });
+
+        // Group units by cell_id
+        const unitsByCell: Record<string, any[]> = {};
+        binUnits.forEach(unit => {
+          if (!unitsByCell[unit.cell_id]) {
+            unitsByCell[unit.cell_id] = [];
+          }
+          
+          const moveInfo = latestMoveByUnit[unit.id];
+          if (moveInfo) {
+            unitsByCell[unit.cell_id].push({
+              ...unit,
+              placed_at: moveInfo.created_at,
+            });
+          }
+        });
+
+        // Process each bin cell
+        for (const cell of binCells) {
+          const cellUnits = unitsByCell[cell.id] || [];
+          
+          if (cellUnits.length > 0) {
+            // Sort by placement time to get the latest
+            cellUnits.sort((a, b) => 
+              new Date(b.placed_at).getTime() - new Date(a.placed_at).getTime()
+            );
+            const latestUnit = cellUnits[0];
+
+            const placedAtTime = new Date(latestUnit.placed_at).getTime();
+            const timeInCellHours = Math.floor(
+              (now.getTime() - placedAtTime) / (1000 * 60 * 60)
+            );
+            const timeInCellMinutes = Math.floor(
+              ((now.getTime() - placedAtTime) / (1000 * 60)) % 60
+            );
+
+            binStats.push({
+              cell_code: cell.code,
+              cell_id: cell.id,
+              unit_barcode: latestUnit.barcode,
+              unit_id: latestUnit.id,
+              unit_status: latestUnit.status,
+              time_in_cell_hours: timeInCellHours,
+              time_in_cell_minutes: timeInCellMinutes,
+              placed_at: latestUnit.placed_at,
+            });
+          }
+        }
+
+        // Sort by time in cell (longest first)
+        binStats.sort((a, b) => {
+          const timeA = a.time_in_cell_hours * 60 + a.time_in_cell_minutes;
+          const timeB = b.time_in_cell_hours * 60 + b.time_in_cell_minutes;
+          return timeB - timeA;
+        });
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       metrics: {
@@ -180,6 +294,9 @@ export async function GET(req: Request) {
         
         // Age distribution
         age_distribution: ageDistribution,
+
+        // Bin cells metrics
+        bin_cells: binStats,
       },
     });
   } catch (e: any) {

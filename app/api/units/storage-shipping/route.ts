@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 /**
  * GET /api/units/storage-shipping
  * Returns all units that are currently in storage or shipping cells
+ * EXCLUDING units that are already in picking_tasks with status 'open' or 'in_progress'
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -69,7 +70,24 @@ export async function GET(req: Request) {
     cellsMap.set(cell.id, cell);
   });
 
-  // Filter units that are in storage or shipping cells
+  // Get all picking tasks that are open or in_progress
+  const { data: pickingTasks, error: tasksError } = await supabase
+    .from("picking_tasks")
+    .select("unit_id")
+    .eq("warehouse_id", profile.warehouse_id)
+    .in("status", ["open", "in_progress"]);
+
+  if (tasksError) {
+    console.error("Error loading picking tasks:", tasksError);
+    return NextResponse.json({ error: tasksError.message }, { status: 400 });
+  }
+
+  // Create a set of unit IDs that are already in tasks
+  const unitIdsInTasks = new Set(
+    (pickingTasks || []).map((task) => task.unit_id).filter(Boolean)
+  );
+
+  // Filter units that are in storage or shipping cells AND not in picking tasks
   const unitsInStorageOrShipping = units
     .map((unit) => {
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
@@ -88,7 +106,13 @@ export async function GET(req: Request) {
           : null,
       };
     })
-    .filter((unit) => unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping"));
+    .filter((unit) => {
+      // Must be in storage or shipping cell
+      const isInStorageOrShipping = unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping");
+      // Must NOT be in picking tasks
+      const isNotInTasks = !unitIdsInTasks.has(unit.id);
+      return isInStorageOrShipping && isNotInTasks;
+    });
 
   return NextResponse.json({
     ok: true,

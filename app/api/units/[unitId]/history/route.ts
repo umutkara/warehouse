@@ -40,13 +40,14 @@ export async function GET(
     if (historyError) {
       console.error("History RPC error:", historyError);
       return NextResponse.json(
-        { error: "Failed to load history" },
+        { error: "Failed to load history", details: historyError.message },
         { status: 500 }
       );
     }
 
     // Check if RPC returned an error
     if (historyData && !historyData.ok) {
+      console.error("History RPC returned error:", historyData);
       return NextResponse.json(
         { error: historyData.error || "Failed to load history" },
         { status: 400 }
@@ -55,8 +56,8 @@ export async function GET(
 
     return NextResponse.json({
       ok: true,
-      unit: historyData.unit,
-      history: historyData.history || [],
+      unit: historyData?.unit || null,
+      history: historyData?.history || [],
     });
   } catch (e: any) {
     console.error("Get history error:", e);

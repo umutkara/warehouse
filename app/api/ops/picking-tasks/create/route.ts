@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
   const { data: profile, error: profError } = await supabase
     .from("profiles")
-    .select("warehouse_id, role")
+    .select("warehouse_id, role, full_name")
     .eq("id", userData.user.id)
     .single();
 
@@ -175,25 +175,51 @@ export async function POST(req: Request) {
     );
   }
 
-  // Create tasks (one per unit)
-  const tasksToInsert = allUnits.map((unit) => ({
+  // Get creator name for display
+  const creatorName = profile.full_name || userData.user.email || "Unknown";
+
+  // Create ONE task for all units (grouped by picking cell)
+  const taskToInsert = {
     warehouse_id: profile.warehouse_id,
-    unit_id: unit.id,
-    from_cell_id: unit.cell_id, // Snapshot current cell
+    unit_id: null, // New multi-unit tasks don't use this field
+    from_cell_id: null, // Units may come from different cells
     target_picking_cell_id: targetPickingCellId,
     scenario,
     status: "open",
     created_by: userData.user.id,
-  }));
+    created_by_name: creatorName,
+  };
 
   // Use supabaseAdmin to bypass RLS (avoid recursive policies)
   const { data: insertedTasks, error: insertError } = await supabaseAdmin
     .from("picking_tasks")
-    .insert(tasksToInsert)
+    .insert([taskToInsert])
     .select();
 
   if (insertError) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
+  }
+
+  const taskId = insertedTasks?.[0]?.id;
+  if (!taskId) {
+    return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
+  }
+
+  // Insert units into picking_task_units junction table
+  const taskUnitsToInsert = allUnits.map((unit) => ({
+    picking_task_id: taskId,
+    unit_id: unit.id,
+    from_cell_id: unit.cell_id, // Snapshot current cell
+  }));
+
+  const { error: unitsInsertError } = await supabaseAdmin
+    .from("picking_task_units")
+    .insert(taskUnitsToInsert);
+
+  if (unitsInsertError) {
+    // Rollback: delete the task
+    await supabaseAdmin.from("picking_tasks").delete().eq("id", taskId);
+    return NextResponse.json({ error: unitsInsertError.message }, { status: 500 });
   }
 
   // Audit logging: log task creation with details
@@ -201,14 +227,15 @@ export async function POST(req: Request) {
   const { error: auditError } = await supabase.rpc("audit_log_event", {
     p_action: "picking_task_create",
     p_entity_type: "picking_task",
-    p_entity_id: null, // Multiple tasks created
-    p_summary: `Создано ${insertedTasks?.length || 0} заданий для ${taskBarcodes.length} units`,
+    p_entity_id: taskId,
+    p_summary: `Создано задание для ячейки ${targetCell.code} (${creatorName}) с ${allUnits.length} заказами`,
     p_meta: {
-      task_count: insertedTasks?.length || 0,
+      task_id: taskId,
       unit_count: allUnits.length,
       unit_barcodes: taskBarcodes,
       target_picking_cell_id: targetPickingCellId,
       target_picking_cell_code: targetCell.code,
+      created_by_name: creatorName,
       scenario,
     },
   });
@@ -220,7 +247,9 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    tasks: insertedTasks || [],
-    count: insertedTasks?.length || 0,
+    task: insertedTasks?.[0] || null,
+    taskId,
+    unitCount: allUnits.length,
+    unitBarcodes: taskBarcodes,
   });
 }

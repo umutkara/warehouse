@@ -22,6 +22,50 @@ type Metrics = {
     created_at: string;
   }>;
   age_distribution: Record<string, number>;
+  bin_cells: Array<{
+    cell_code: string;
+    cell_id: string;
+    unit_barcode: string;
+    unit_id: string;
+    unit_status: string;
+    time_in_cell_hours: number;
+    time_in_cell_minutes: number;
+    placed_at: string;
+  }>;
+};
+
+type ProcessingMetrics = {
+  period: string;
+  total_tasks: number;
+  avg_processing_time_hours: number;
+  avg_processing_time_minutes: number;
+  min_time_hours: number;
+  max_time_hours: number;
+  tasks_count: number;
+};
+
+type ShippingSLAMetrics = {
+  period: string;
+  total_tasks: number;
+  open_tasks: number;
+  in_progress_tasks: number;
+  completed_tasks: number;
+  avg_completion_time_hours: number;
+  avg_completion_time_minutes: number;
+  avg_current_wait_time_hours: number;
+  avg_current_wait_time_minutes: number;
+  min_time_hours: number;
+  max_time_hours: number;
+};
+
+type MerchantRejectionMetrics = {
+  total_units: number;
+  avg_bin_to_ticket_hours: number;
+  avg_bin_to_ticket_minutes: number;
+  avg_ticket_resolution_hours: number;
+  avg_ticket_resolution_minutes: number;
+  units_with_tickets: number;
+  units_resolved: number;
 };
 
 function MetricCard({
@@ -175,7 +219,10 @@ function DonutChart({ value, max, label, color = "#2563eb" }: { value: number; m
         />
       </svg>
       <div style={{ marginTop: "-70px", fontSize: 24, fontWeight: 700, color }}>{Math.round(percentage)}%</div>
-      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 50 }}>{label}</div>
+      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>
+        {value} из {max}
+      </div>
     </div>
   );
 }
@@ -186,9 +233,22 @@ export default function SLAPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // New metrics states
+  const [processingMetrics, setProcessingMetrics] = useState<ProcessingMetrics | null>(null);
+  const [shippingSLAMetrics, setShippingSLAMetrics] = useState<ShippingSLAMetrics | null>(null);
+  const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
+
   useEffect(() => {
     loadMetrics();
-    const interval = setInterval(loadMetrics, 60000); // Refresh every minute
+    loadProcessingMetrics();
+    loadShippingSLAMetrics();
+    loadRejectionMetrics();
+    const interval = setInterval(() => {
+      loadMetrics();
+      loadProcessingMetrics();
+      loadShippingSLAMetrics();
+      loadRejectionMetrics();
+    }, 60000); // Refresh every minute
     return () => clearInterval(interval);
   }, []);
 
@@ -215,6 +275,42 @@ export default function SLAPage() {
       setError(e.message || "Ошибка загрузки");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadProcessingMetrics() {
+    try {
+      const res = await fetch("/api/stats/processing-metrics?period=today", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) setProcessingMetrics(json.metrics);
+      }
+    } catch (e) {
+      console.error("Failed to load processing metrics:", e);
+    }
+  }
+
+  async function loadShippingSLAMetrics() {
+    try {
+      const res = await fetch("/api/stats/shipping-tasks-sla?period=today", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) setShippingSLAMetrics(json.metrics);
+      }
+    } catch (e) {
+      console.error("Failed to load shipping SLA metrics:", e);
+    }
+  }
+
+  async function loadRejectionMetrics() {
+    try {
+      const res = await fetch("/api/stats/merchant-rejection-metrics?rejection_count=all", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) setRejectionMetrics(json.metrics);
+      }
+    } catch (e) {
+      console.error("Failed to load rejection metrics:", e);
     }
   }
 
@@ -392,7 +488,10 @@ export default function SLAPage() {
             Производительность
           </h2>
           <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
-            📈 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code> и <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>outbound_shipments</code> за последние 7 дней
+            📈 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code> (задачи на отгрузку) и 
+            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>outbound_shipments</code> (отправленные заказы) за последние 7 дней. 
+            <strong style={{ color: "#6b7280" }}>Задачи выполнены:</strong> процент завершенных задач от общего числа созданных (done/total). 
+            <strong style={{ color: "#6b7280" }}>Успешно доставлено:</strong> процент отправок без возврата (отправлено - возвращено) / всего отправок.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--spacing-md)" }}>
             <DonutChart
@@ -481,7 +580,7 @@ export default function SLAPage() {
       </div>
 
       {/* Additional Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--spacing-lg)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--spacing-lg)", marginBottom: "var(--spacing-lg)" }}>
         <div
           style={{
             background: "#fff",
@@ -554,6 +653,292 @@ export default function SLAPage() {
           </div>
         </div>
       </div>
+
+      {/* Bin Cells Section - Always visible */}
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: "var(--radius-lg)",
+          padding: "var(--spacing-lg)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+          🗄️ Мониторинг ячеек BIN
+        </h2>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
+          📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units</code> с привязкой к ячейкам типа bin. Показывается последний размещенный заказ в каждой ячейке и время его нахождения там.
+        </div>
+        
+        {metrics.bin_cells && metrics.bin_cells.length > 0 ? (
+          <div style={{ maxHeight: 400, overflow: "auto" }}>
+            <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left", position: "sticky", top: 0, background: "#fff" }}>
+                  <th style={{ padding: "8px 12px", fontWeight: 600, color: "#6b7280" }}>Ячейка</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 600, color: "#6b7280" }}>Заказ</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 600, color: "#6b7280" }}>Статус</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 600, color: "#6b7280", textAlign: "right" }}>
+                    Время в ячейке
+                  </th>
+                  <th style={{ padding: "8px 12px", fontWeight: 600, color: "#6b7280", textAlign: "right" }}>
+                    Размещен
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.bin_cells.map((bin, idx) => {
+                  const totalMinutes = bin.time_in_cell_hours * 60 + bin.time_in_cell_minutes;
+                  const isWarning = totalMinutes > 24 * 60; // >24 hours
+                  const isCritical = totalMinutes > 48 * 60; // >48 hours
+
+                  return (
+                    <tr 
+                      key={idx} 
+                      style={{ 
+                        borderBottom: "1px solid #f3f4f6",
+                        background: isCritical ? "#fef2f2" : isWarning ? "#fffbeb" : "transparent"
+                      }}
+                    >
+                      <td style={{ padding: "10px 12px", fontWeight: 700, color: "#2563eb" }}>
+                        {bin.cell_code}
+                      </td>
+                      <td style={{ padding: "10px 12px", fontWeight: 600 }}>
+                        <a 
+                          href={`/app/units/${bin.unit_id}`}
+                          style={{ color: "#2563eb", textDecoration: "none" }}
+                          onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
+                          onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
+                        >
+                          {bin.unit_barcode}
+                        </a>
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            background: statusColors[bin.unit_status] || "#e5e7eb",
+                            color: "#fff",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {bin.unit_status}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          fontWeight: 700,
+                          color: isCritical ? "#dc2626" : isWarning ? "#f59e0b" : "#10b981",
+                        }}
+                      >
+                        {bin.time_in_cell_hours > 0 && `${bin.time_in_cell_hours}ч `}
+                        {bin.time_in_cell_minutes}мин
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          fontSize: 12,
+                          color: "#6b7280",
+                        }}
+                      >
+                        {new Date(bin.placed_at).toLocaleString("ru-RU", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div 
+            style={{ 
+              textAlign: "center", 
+              padding: "var(--spacing-xl)", 
+              background: "#f9fafb",
+              borderRadius: "var(--radius-md)",
+              border: "1px dashed #d1d5db"
+            }}
+          >
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>
+              Нет данных по BIN ячейкам
+            </div>
+            <div style={{ fontSize: 12, color: "#9ca3af" }}>
+              Убедитесь что в БД есть ячейки с типом "bin" и в них размещены заказы
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Processing Time: Storage/Shipping → OPS */}
+      {processingMetrics && (
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--spacing-lg)",
+            boxShadow: "var(--shadow-sm)",
+            marginTop: "var(--spacing-lg)",
+          }}
+        >
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+            ⏱️ Storage/Shipping → Создание задачи OPS
+          </h2>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
+            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>unit_moves</code> → 
+            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>picking_tasks</code>. 
+            Считается время от первого попадания заказа в ячейку storage/shipping до создания задачи OPS. Показывает как быстро OPS реагирует на доступные заказы.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+            <MetricCard
+              title="Всего задач (сегодня)"
+              value={processingMetrics.total_tasks}
+              color="#374151"
+            />
+            <MetricCard
+              title="Среднее время"
+              value={`${processingMetrics.avg_processing_time_hours}ч ${processingMetrics.avg_processing_time_minutes}м`}
+              color="#0284c7"
+            />
+            <MetricCard
+              title="Минимум"
+              value={`${processingMetrics.min_time_hours}ч`}
+              color="#10b981"
+            />
+            <MetricCard
+              title="Максимум"
+              value={`${processingMetrics.max_time_hours}ч`}
+              color="#dc2626"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Shipping Tasks SLA */}
+      {shippingSLAMetrics && (
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--spacing-lg)",
+            boxShadow: "var(--shadow-sm)",
+            marginTop: "var(--spacing-lg)",
+          }}
+        >
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+            📦 SLA Заданий на отгрузку (OPS → ТСД)
+          </h2>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
+            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code>. 
+            Время от создания задания OPS (<code>created_at</code>) до завершения в ТСД (<code>completed_at</code> или <code>picked_at</code>). 
+            Открытые задания показывают текущее время ожидания. Помогает отслеживать загруженность ТСД и скорость обработки.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 16 }}>
+            <MetricCard
+              title="Всего задач (сегодня)"
+              value={shippingSLAMetrics.total_tasks}
+              color="#374151"
+            />
+            <MetricCard
+              title="Открыто"
+              value={shippingSLAMetrics.open_tasks}
+              color="#f59e0b"
+            />
+            <MetricCard
+              title="В работе"
+              value={shippingSLAMetrics.in_progress_tasks}
+              color="#ea580c"
+            />
+            <MetricCard
+              title="Завершено"
+              value={shippingSLAMetrics.completed_tasks}
+              color="#10b981"
+            />
+            <MetricCard
+              title="Среднее (завершенные)"
+              value={`${shippingSLAMetrics.avg_completion_time_hours}ч ${shippingSLAMetrics.avg_completion_time_minutes}м`}
+              color="#0284c7"
+            />
+          </div>
+          {shippingSLAMetrics.avg_current_wait_time_hours > 0 && (
+            <div
+              style={{
+                padding: 16,
+                background: "#fef2f2",
+                borderRadius: 8,
+                border: "1px solid #fecaca",
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
+                ⚠️ Среднее время ожидания (активные задачи)
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
+                {shippingSLAMetrics.avg_current_wait_time_hours}ч {shippingSLAMetrics.avg_current_wait_time_minutes}м
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Merchant Rejection Metrics */}
+      {rejectionMetrics && rejectionMetrics.total_units > 0 && (
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--spacing-lg)",
+            boxShadow: "var(--shadow-sm)",
+            marginTop: "var(--spacing-lg)",
+          }}
+        >
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+            🚫 Мерчант не принял
+          </h2>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
+            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units.meta</code> (merchant_rejections) + 
+            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>unit_moves</code> (bin) + 
+            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>merchant_rejection_ticket</code>. 
+            "BIN → Тикет" — время от попадания в BIN до создания тикета. "Тикет → Решение" — время работы над проблемой. Критичные метрики для контроля качества возвратов.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+            <MetricCard
+              title="Всего проблемных"
+              value={rejectionMetrics.total_units}
+              color="#dc2626"
+            />
+            <MetricCard
+              title="BIN → Тикет"
+              value={`${rejectionMetrics.avg_bin_to_ticket_hours}ч ${rejectionMetrics.avg_bin_to_ticket_minutes}м`}
+              color="#ea580c"
+            />
+            <MetricCard
+              title="Тикет → Решение"
+              value={`${rejectionMetrics.avg_ticket_resolution_hours}ч ${rejectionMetrics.avg_ticket_resolution_minutes}м`}
+              color="#f59e0b"
+            />
+            <MetricCard
+              title="Решено"
+              value={rejectionMetrics.units_resolved}
+              color="#10b981"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

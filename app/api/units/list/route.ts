@@ -8,7 +8,8 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * Query params:
  * - age: all | 24h | 48h | 7d (filter by time on warehouse)
  * - search: search by barcode (partial match)
- * - status: filter by status (receiving, storage, picking, shipping, out, bin, inventory_hold, all)
+ * - status: filter by status (receiving, stored, picking, shipped, out, inventory_hold, all)
+ *          OR by cell_type (bin, shipping) - filters units in cells of specific type
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -65,6 +66,7 @@ export async function GET(req: Request) {
         price,
         cell_id,
         created_at,
+        meta,
         warehouse_cells!units_cell_id_fkey(code, cell_type)
       `)
       .eq("warehouse_id", profile.warehouse_id)
@@ -72,7 +74,20 @@ export async function GET(req: Request) {
 
     // Apply status filter
     if (statusFilter && statusFilter !== "all") {
-      query = query.eq("status", statusFilter);
+      if (statusFilter === "on_warehouse") {
+        // "На складе" includes: receiving, stored, picking, shipped
+        query = query.in("status", ["receiving", "stored", "picking", "shipped"]);
+      } else if (statusFilter === "bin") {
+        // "BIN" - заказы в BIN ячейках (обычно со статусом receiving)
+        // Фильтруем по cell_type через join
+        query = query.eq("warehouse_cells.cell_type", "bin");
+      } else if (statusFilter === "shipping") {
+        // "Shipping" - заказы в shipping ячейках
+        // Фильтруем по cell_type через join
+        query = query.eq("warehouse_cells.cell_type", "shipping");
+      } else {
+        query = query.eq("status", statusFilter);
+      }
     }
 
     // Apply search filter
@@ -111,6 +126,7 @@ export async function GET(req: Request) {
         cell_type: unit.warehouse_cells?.cell_type,
         created_at: unit.created_at,
         age_hours: ageHours,
+        meta: unit.meta,
       };
     });
 

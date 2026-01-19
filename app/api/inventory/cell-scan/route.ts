@@ -140,6 +140,22 @@ export async function POST(req: Request) {
 
     // RPC function already handled upsert and units insertion
     
+    // ✨ НОВОЕ: Обновить статус задания с 'pending' на 'scanned'
+    const { error: updateStatusError } = await supabase
+      .from("inventory_cell_counts")
+      .update({ 
+        status: 'scanned',
+        scanned_at: new Date().toISOString(),
+        scanned_by: authData.user.id
+      })
+      .eq("session_id", inventorySessionId)
+      .eq("cell_id", cell.id);
+
+    if (updateStatusError) {
+      console.error("Failed to update task status:", updateStatusError);
+      // Don't fail the request - continue with the scan
+    }
+    
     // CRITICAL: Apply changes to actual units.cell_id by calling inventory_close_cell
     // This function updates units table based on scanned barcodes
     const { data: closeResult, error: closeError } = await supabase.rpc("inventory_close_cell", {
@@ -218,9 +234,24 @@ export async function POST(req: Request) {
       // Don't fail the request if audit logging fails
     }
 
+    // ✨ НОВОЕ: Проверить завершение всех заданий и автоматически закрыть если нужно
+    const { data: autoCloseResult, error: autoCloseError } = await supabase.rpc(
+      "inventory_check_and_auto_close",
+      { p_session_id: inventorySessionId }
+    );
+
+    let inventoryAutoClosed = false;
+    if (!autoCloseError && autoCloseResult) {
+      const closeData = typeof autoCloseResult === "string" 
+        ? JSON.parse(autoCloseResult) 
+        : autoCloseResult;
+      inventoryAutoClosed = closeData.autoClosed || false;
+    }
+
     return NextResponse.json({
       ok: true,
       sessionId: inventorySessionId,
+      inventoryAutoClosed,
       cell: {
         id: cell.id,
         code: cell.code,

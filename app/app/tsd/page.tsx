@@ -29,10 +29,12 @@ export default function TsdPage() {
   
   // Для режима Перемещение
   const [fromCell, setFromCell] = useState<CellInfo | null>(null);
-  const [unit, setUnit] = useState<UnitInfo | null>(null);
+  const [units, setUnits] = useState<UnitInfo[]>([]); // Массив отсканированных заказов
   const [toCell, setToCell] = useState<CellInfo | null>(null);
   
   // Для режима Инвентаризация
+  const [inventoryTasks, setInventoryTasks] = useState<any[]>([]);
+  const [currentInventoryTask, setCurrentInventoryTask] = useState<any | null>(null);
   const [inventoryCell, setInventoryCell] = useState<CellInfo | null>(null);
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [inventoryActive, setInventoryActive] = useState<boolean | null>(null);
@@ -41,12 +43,13 @@ export default function TsdPage() {
     expected: { count: number };
     scanned: { count: number };
   } | null>(null);
+  const [loadingInventoryTasks, setLoadingInventoryTasks] = useState(false);
   
   // Для режима Отгрузка (Shipping Tasks)
   const [shippingTasks, setShippingTasks] = useState<any[]>([]);
   const [currentTask, setCurrentTask] = useState<any | null>(null);
   const [shippingFromCell, setShippingFromCell] = useState<CellInfo | null>(null);
-  const [shippingUnit, setShippingUnit] = useState<UnitInfo | null>(null);
+  const [shippingUnits, setShippingUnits] = useState<UnitInfo[]>([]); // Массив отсканированных заказов
   const [shippingToCell, setShippingToCell] = useState<CellInfo | null>(null);
   const [loadingTasks, setLoadingTasks] = useState(false);
   
@@ -56,7 +59,7 @@ export default function TsdPage() {
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Проверка статуса инвентаризации при загрузке и смене режима
+  // Проверка статуса инвентаризации и загрузка заданий
   useEffect(() => {
     async function checkInventoryStatus() {
       if (mode === "inventory") {
@@ -70,6 +73,7 @@ export default function TsdPage() {
               setInventoryError("Инвентаризация не активна. Обратитесь к менеджеру.");
             } else {
               setInventoryError(null);
+              loadInventoryTasks(); // Загрузить задания
             }
           }
         } catch (e: any) {
@@ -78,6 +82,8 @@ export default function TsdPage() {
       } else {
         setInventoryActive(null);
         setInventoryError(null);
+        setInventoryTasks([]);
+        setCurrentInventoryTask(null);
       }
     }
     checkInventoryStatus();
@@ -88,7 +94,7 @@ export default function TsdPage() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, unit, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnit, shippingToCell]);
+  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell]);
   
   // Load shipping tasks when mode is shipping
   useEffect(() => {
@@ -105,7 +111,7 @@ export default function TsdPage() {
         // Current task no longer in list (completed/canceled)
         setCurrentTask(null);
         setShippingFromCell(null);
-        setShippingUnit(null);
+        setShippingUnits([]);
         setShippingToCell(null);
       }
     }
@@ -115,7 +121,7 @@ export default function TsdPage() {
   function handleSelectTask(task: any) {
     setCurrentTask(task);
     setShippingFromCell(null);
-    setShippingUnit(null);
+    setShippingUnits([]);
     setShippingToCell(null);
     setError(null);
     setSuccess(null);
@@ -128,14 +134,65 @@ export default function TsdPage() {
       const json = await res.json();
       if (res.ok) {
         setShippingTasks(json.tasks || []);
-        if (json.tasks && json.tasks.length > 0 && !currentTask) {
-          setCurrentTask(json.tasks[0]);
-        }
+        // Пользователь сам выбирает задачу из списка (не автовыбор)
       }
     } catch (e) {
       console.error("Failed to load shipping tasks:", e);
     } finally {
       setLoadingTasks(false);
+    }
+  }
+
+  async function loadInventoryTasks() {
+    setLoadingInventoryTasks(true);
+    try {
+      const res = await fetch("/api/tsd/inventory-tasks/list", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok) {
+        setInventoryTasks(json.tasks || []);
+      }
+    } catch (e) {
+      console.error("Failed to load inventory tasks:", e);
+    } finally {
+      setLoadingInventoryTasks(false);
+    }
+  }
+
+  async function handleSelectInventoryTask(task: any) {
+    setError(null);
+    setBusy(true);
+    
+    try {
+      // Блокируем задание для текущего пользователя
+      const res = await fetch("/api/tsd/inventory-tasks/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: task.id }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json();
+        setError(json.error || "Ошибка выбора задания");
+        return;
+      }
+
+      const json = await res.json();
+      
+      // Устанавливаем текущее задание и ячейку
+      setCurrentInventoryTask(task);
+      setInventoryCell({
+        id: json.cellId,
+        code: json.cellCode,
+        cell_type: json.cellType,
+      });
+      setSuccess(`Задание взято: ${json.cellCode}`);
+      
+      // Очищаем сообщение через 3 секунды
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e: any) {
+      setError(e.message || "Ошибка выбора задания");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -330,23 +387,32 @@ export default function TsdPage() {
           // Первый скан - FROM
           setFromCell(cellInfo);
           setSuccess(`FROM: ${cellInfo.code} (${cellInfo.cell_type})`);
-        } else if (!unit) {
-          // Ещё нет unit - ошибка
-          setError("Сначала отсканируйте unit");
-          setScanValue("");
-          return;
         } else {
-          // Третий скан - TO
+          // Второй скан ячейки - TO
+          // Должен быть хотя бы один отсканированный заказ
+          if (units.length === 0) {
+            setError("Сначала отсканируйте хотя бы один заказ");
+            setScanValue("");
+            return;
+          }
+
           setToCell(cellInfo);
           setSuccess(`TO: ${cellInfo.code} (${cellInfo.cell_type})`);
 
-          // Автоматически выполняем перемещение
-          setTimeout(() => executeMove(), 100);
+          // Автоматически выполняем массовое перемещение (передаем toCell напрямую)
+          executeMove(cellInfo);
         }
       } else {
         // Это unit barcode
         if (!fromCell) {
           setError("Сначала отсканируйте FROM ячейку");
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем, не отсканирован ли уже этот заказ
+        if (units.some(u => u.barcode === parsed.code)) {
+          setError(`Заказ ${parsed.code} уже отсканирован`);
           setScanValue("");
           return;
         }
@@ -358,8 +424,9 @@ export default function TsdPage() {
           return;
         }
 
-        setUnit(unitInfo);
-        setSuccess(`UNIT: ${unitInfo.barcode}`);
+        // Добавляем в массив
+        setUnits([...units, unitInfo]);
+        setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
       }
     } catch (e: any) {
       setError(e.message || "Ошибка обработки скана");
@@ -369,9 +436,12 @@ export default function TsdPage() {
     }
   }
 
-  // Выполнение перемещения
-  async function executeMove() {
-    if (!fromCell || !unit || !toCell) {
+  // Выполнение перемещения (массовое)
+  // toCellOverride: используется при автоматическом вызове после setToCell для избежания race condition
+  async function executeMove(toCellOverride?: CellInfo) {
+    const effectiveToCell = toCellOverride || toCell;
+    
+    if (!fromCell || units.length === 0 || !effectiveToCell) {
       setError("Не все данные заполнены");
       return;
     }
@@ -381,40 +451,59 @@ export default function TsdPage() {
     setBusy(true);
 
     try {
-      const res = await fetch("/api/units/move-by-scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fromCellCode: fromCell.code,
-          toCellCode: toCell.code,
-          unitBarcode: unit.barcode,
-        }),
-      });
+      let successCount = 0;
+      let failedUnits: string[] = [];
 
-      const rawText = await res.text().catch(() => '');
-      let json: any = null;
-      try {
-        json = rawText ? JSON.parse(rawText) : null;
-      } catch {}
-      
-      if (!res.ok) {
-        // Проверка на ошибку инвентаризации (423 Locked)
-        if (res.status === 423 && json?.error) {
-          setInventoryError(json.error);
-          throw new Error(json.error);
+      // Перемещаем каждый unit последовательно
+      for (const unit of units) {
+        try {
+          const res = await fetch("/api/units/move-by-scan", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              fromCellCode: fromCell.code,
+              toCellCode: effectiveToCell.code,
+              unitBarcode: unit.barcode,
+            }),
+          });
+
+          const rawText = await res.text().catch(() => '');
+          let json: any = null;
+          try {
+            json = rawText ? JSON.parse(rawText) : null;
+          } catch {}
+          
+          if (!res.ok) {
+            // Проверка на ошибку инвентаризации (423 Locked)
+            if (res.status === 423 && json?.error) {
+              setInventoryError(json.error);
+              throw new Error(json.error);
+            }
+            failedUnits.push(`${unit.barcode}: ${json?.error || rawText || "ошибка"}`);
+          } else {
+            successCount++;
+          }
+        } catch (e: any) {
+          failedUnits.push(`${unit.barcode}: ${e.message}`);
         }
-        throw new Error(json?.error || rawText || "Ошибка перемещения");
       }
 
-      setSuccess(`✓ Перемещено: ${unit.barcode} из ${fromCell.code} в ${toCell.code}`);
+      // Формируем сообщение о результате
+      if (failedUnits.length === 0) {
+        setSuccess(`✓ Успешно перемещено ${successCount} заказов из ${fromCell.code} в ${effectiveToCell.code}`);
+      } else {
+        setError(`Перемещено: ${successCount}, Ошибок: ${failedUnits.length}. ${failedUnits.slice(0, 3).join(", ")}${failedUnits.length > 3 ? "..." : ""}`);
+      }
 
       // Сброс состояния после успеха
       setTimeout(() => {
         setFromCell(null);
-        setUnit(null);
+        setUnits([]);
         setToCell(null);
-        setSuccess(null);
-      }, 2000);
+        if (failedUnits.length === 0) {
+          setSuccess(null);
+        }
+      }, 3000);
     } catch (e: any) {
       setError(e.message || "Ошибка перемещения");
       // Если ошибка инвентаризации - очищаем через 5 секунд
@@ -434,6 +523,12 @@ export default function TsdPage() {
       return;
     }
 
+    if (!inventoryCell || !currentInventoryTask) {
+      setError("Сначала выберите ячейку из списка заданий");
+      setScanValue("");
+      return;
+    }
+
     const parsed = parseScan(scanValue);
     if (!parsed) {
       setError("Некорректный скан");
@@ -444,39 +539,17 @@ export default function TsdPage() {
     setError(null);
     setSuccess(null);
 
-    if (parsed.type === "cell") {
-      // Сканирование ячейки
-      const cellInfo = await loadCellInfo(parsed.code);
-      if (!cellInfo) {
-        setError(`Ячейка "${parsed.code}" не найдена`);
-        setScanValue("");
-        return;
-      }
-
-      setInventoryCell(cellInfo);
-      setScannedBarcodes([]);
-      setScanResult(null);
-      setSuccess(`Ячейка: ${cellInfo.code} (${cellInfo.cell_type})`);
+    // Только сканирование unit barcode (ячейка уже выбрана из списка)
+    const barcode = parsed.code;
+    if (scannedBarcodes.includes(barcode)) {
+      setError(`Штрихкод "${barcode}" уже добавлен`);
       setScanValue("");
-    } else {
-      // Сканирование unit barcode
-      if (!inventoryCell) {
-        setError("Сначала отсканируйте ячейку");
-        setScanValue("");
-        return;
-      }
-
-      const barcode = parsed.code;
-      if (scannedBarcodes.includes(barcode)) {
-        setError(`Штрихкод "${barcode}" уже добавлен`);
-        setScanValue("");
-        return;
-      }
-
-      setScannedBarcodes([...scannedBarcodes, barcode].slice(-10)); // Последние 10
-      setSuccess(`Добавлен: ${barcode} (всего: ${scannedBarcodes.length + 1})`);
-      setScanValue("");
+      return;
     }
+
+    setScannedBarcodes([...scannedBarcodes, barcode]);
+    setSuccess(`Добавлен: ${barcode} (всего: ${scannedBarcodes.length + 1})`);
+    setScanValue("");
   }
 
   // Сохранение результатов сканирования ячейки
@@ -546,16 +619,25 @@ export default function TsdPage() {
 
   // Сменить ячейку (сброс)
   function handleChangeCell() {
+    setCurrentInventoryTask(null);
     setInventoryCell(null);
     setScannedBarcodes([]);
     setScanResult(null);
     setSuccess(null);
     setError(null);
+    loadInventoryTasks(); // Перезагрузить список заданий
   }
 
-  // Обработка сканирования для режима Shipping
+  // Обработка сканирования для режима Shipping (как режим Перемещение)
   async function handleShippingScan() {
     if (!scanValue.trim()) return;
+
+    // Проверка наличия активной задачи
+    if (!currentTask) {
+      setError("Сначала выберите задание из списка");
+      setScanValue("");
+      return;
+    }
 
     const parsed = parseScan(scanValue.trim());
     if (!parsed) {
@@ -564,133 +646,134 @@ export default function TsdPage() {
       return;
     }
 
-    // Шаг 1: Сканирование FROM cell
-    if (!shippingFromCell) {
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+
+    try {
       if (parsed.type === "cell") {
-        // Проверить, что есть активная задача
-        if (!currentTask) {
-          setError("Нет активной задачи");
+        // Сканируем ячейку
+        const cellInfo = await loadCellInfo(parsed.code);
+        if (!cellInfo) {
+          setError(`Ячейка "${parsed.code}" не найдена`);
           setScanValue("");
           return;
         }
 
-        if (!currentTask.fromCell) {
-          setError("Ячейка FROM не найдена в задаче");
-          setScanValue("");
-          return;
-        }
+        // Определяем FROM или TO
+        if (!shippingFromCell) {
+          // Первая ячейка - FROM
+          // Должна быть storage или shipping
+          if (cellInfo.cell_type !== "storage" && cellInfo.cell_type !== "shipping") {
+            setError(`FROM ячейка должна быть storage или shipping, а не ${cellInfo.cell_type}`);
+            setScanValue("");
+            return;
+          }
+          
+          // Взять задачу в работу (in_progress) - блокирует для других пользователей
+          try {
+            const startRes = await fetch("/api/tsd/shipping-tasks/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ taskId: currentTask.id }),
+            });
 
-        // Normalize cell code: remove "CELL:" prefix, uppercase, trim
-        const normalizedCode = parsed.code.replace(/^CELL:/i, "").trim().toUpperCase();
-        
-        // СТРОГАЯ ПРОВЕРКА: FROM ячейка должна совпадать с задачей
-        if (currentTask.fromCell.code.toUpperCase() !== normalizedCode) {
-          setError(`Ячейка не совпадает с задачей. Ожидается FROM: ${currentTask.fromCell.code}`);
-          setScanValue("");
-          return;
-        }
+            if (!startRes.ok) {
+              const startJson = await startRes.json().catch(() => ({}));
+              throw new Error(startJson.error || "Не удалось взять задачу в работу");
+            }
+          } catch (e: any) {
+            setError(`Ошибка: ${e.message}`);
+            setScanValue("");
+            return;
+          }
+          
+          setShippingFromCell(cellInfo);
+          setSuccess(`✓ Задача в работе! FROM: ${cellInfo.code} (${cellInfo.cell_type})`);
+        } else {
+          // Вторая ячейка - TO
+          // Должен быть хотя бы один unit
+          if (shippingUnits.length === 0) {
+            setError("Сначала отсканируйте хотя бы один заказ");
+            setScanValue("");
+            return;
+          }
 
-        // Verify cell is storage or shipping (not bin, not picking)
-        if (currentTask.fromCell.cell_type !== "storage" && currentTask.fromCell.cell_type !== "shipping") {
-          setError(`Ячейка "${currentTask.fromCell.code}" имеет тип "${currentTask.fromCell.cell_type}". FROM должна быть storage или shipping.`);
-          setScanValue("");
-          return;
+          // TO ячейка должна совпадать с targetCell задачи
+          if (!currentTask.targetCell) {
+            setError("Целевая ячейка не найдена в задаче");
+            setScanValue("");
+            return;
+          }
+
+          if (cellInfo.id !== currentTask.targetCell.id) {
+            setError(`TO ячейка должна быть ${currentTask.targetCell.code} (из задания)`);
+            setScanValue("");
+            return;
+          }
+
+          // Verify target cell is picking type
+          if (cellInfo.cell_type !== "picking") {
+            setError(`TO ячейка должна быть picking, а не ${cellInfo.cell_type}`);
+            setScanValue("");
+            return;
+          }
+
+          setShippingToCell(cellInfo);
+          setSuccess(`TO: ${cellInfo.code} (${cellInfo.cell_type})`);
+          
+          // Автоматически выполняем перемещение (передаем toCell напрямую)
+          handleCompleteShippingTask(cellInfo);
         }
-        
-        setShippingFromCell(currentTask.fromCell);
-        setSuccess(`FROM: ${currentTask.fromCell.code} (${currentTask.fromCell.cell_type})`);
-        setScanValue("");
       } else {
-        setError("Сначала отсканируйте FROM ячейку (storage/shipping)");
-        setScanValue("");
+        // Сканируем unit barcode
+        if (!shippingFromCell) {
+          setError("Сначала отсканируйте FROM ячейку");
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем что unit не отсканирован уже
+        if (shippingUnits.some(u => u.barcode === parsed.code)) {
+          setError(`Заказ ${parsed.code} уже отсканирован`);
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем что unit принадлежит текущей задаче
+        const unitInTask = currentTask.units?.find((u: any) => u.barcode === parsed.code);
+        if (!unitInTask) {
+          setError(`Заказ ${parsed.code} не принадлежит текущему заданию`);
+          setScanValue("");
+          return;
+        }
+
+        const unitInfo = await loadUnitInfo(parsed.code);
+        if (!unitInfo) {
+          setError(`Unit "${parsed.code}" не найден`);
+          setScanValue("");
+          return;
+        }
+
+        // Добавляем в массив
+        setShippingUnits([...shippingUnits, unitInfo]);
+        setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${shippingUnits.length + 1}/${currentTask.unitCount})`);
       }
-      return;
-    }
-
-    // Шаг 2: Сканирование UNIT
-    if (!shippingUnit) {
-      if (parsed.type === "unit") {
-        // Проверить, что unit совпадает с текущей задачей
-        if (!currentTask) {
-          setError("Нет активной задачи");
-          setScanValue("");
-          return;
-        }
-
-        if (currentTask.unit.barcode !== parsed.code) {
-          setError(`Штрихкод не совпадает с задачей. Ожидается: ${currentTask.unit.barcode}`);
-          setScanValue("");
-          return;
-        }
-
-        setShippingUnit({ id: currentTask.unit.id, barcode: parsed.code });
-        setSuccess(`UNIT: ${parsed.code}`);
-        setScanValue("");
-      } else {
-        setError("Отсканируйте штрихкод заказа");
-        setScanValue("");
-      }
-      return;
-    }
-
-    // Шаг 3: Сканирование TO cell
-    if (!shippingToCell) {
-      if (parsed.type === "cell") {
-        // Normalize cell code: remove "CELL:" prefix, uppercase, trim
-        const normalizedCode = parsed.code.replace(/^CELL:/i, "").trim().toUpperCase();
-        
-        // Проверить, что toCell совпадает с target cell задачи
-        if (!currentTask) {
-          setError("Нет активной задачи");
-          setScanValue("");
-          return;
-        }
-
-        if (!currentTask.targetCell) {
-          setError("Целевая ячейка не найдена в задаче");
-          setScanValue("");
-          return;
-        }
-
-        if (currentTask.targetCell.code.toUpperCase() !== normalizedCode) {
-          setError(`Ячейка не совпадает с задачей. Ожидается: ${currentTask.targetCell.code}`);
-          setScanValue("");
-          return;
-        }
-
-        // Verify target cell is picking type
-        if (currentTask.targetCell.cell_type !== "picking") {
-          setError(`Ячейка "${currentTask.targetCell.code}" имеет тип "${currentTask.targetCell.cell_type}". TO должна быть picking.`);
-          setScanValue("");
-          return;
-        }
-
-        const toCellObj = {
-          id: currentTask.targetCell.id,
-          code: currentTask.targetCell.code, // Use original code from task
-          cell_type: currentTask.targetCell.cell_type,
-        };
-        
-        setShippingToCell(toCellObj);
-        setSuccess(`TO: ${currentTask.targetCell.code} (${currentTask.targetCell.cell_type})`);
-        setScanValue("");
-
-        // Автоматически выполняем задачу (передаем toCell напрямую, не полагаясь на async state)
-        handleCompleteShippingTask(toCellObj);
-      } else {
-        setError("Отсканируйте целевую ячейку picking");
-        setScanValue("");
-      }
-      return;
+    } catch (e: any) {
+      setError(e.message || "Ошибка обработки скана");
+    } finally {
+      setBusy(false);
+      setScanValue("");
     }
   }
 
-  // Выполнение задачи shipping
+  // Выполнение задачи shipping (массовое перемещение)
   // toCell: optional override (used when called immediately after setState to avoid async race condition)
   async function handleCompleteShippingTask(toCell?: { id: string; code: string; cell_type: string }) {
     const effectiveToCell = toCell || shippingToCell;
     
-    if (!currentTask || !shippingFromCell || !shippingUnit || !effectiveToCell) {
+    if (!currentTask || !shippingFromCell || shippingUnits.length === 0 || !effectiveToCell) {
+      setError("Не все данные заполнены");
       return;
     }
 
@@ -699,54 +782,95 @@ export default function TsdPage() {
     setSuccess(null);
 
     try {
-      const res = await fetch("/api/tsd/shipping-tasks/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskId: currentTask.id,
-          fromCellCode: shippingFromCell.code,
-          toCellCode: effectiveToCell.code,
-          unitBarcode: shippingUnit.barcode,
-        }),
-      });
+      let successCount = 0;
+      let failedUnits: string[] = [];
+      const movedUnitIds: string[] = [];
 
-      if (res.status === 401) {
-        window.location.href = "/login";
-        return;
+      // Перемещаем каждый unit последовательно
+      for (const unit of shippingUnits) {
+        try {
+          const res = await fetch("/api/units/move-by-scan", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              fromCellCode: shippingFromCell.code,
+              toCellCode: effectiveToCell.code,
+              unitBarcode: unit.barcode,
+            }),
+          });
+
+          const rawText = await res.text().catch(() => '');
+          let json: any = null;
+          try {
+            json = rawText ? JSON.parse(rawText) : null;
+          } catch {}
+          
+          if (res.status === 423) {
+            // Inventory active
+            setInventoryError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+            throw new Error("Инвентаризация активна");
+          }
+
+          if (!res.ok) {
+            failedUnits.push(`${unit.barcode}: ${json?.error || rawText || "ошибка"}`);
+          } else {
+            successCount++;
+            movedUnitIds.push(unit.id);
+          }
+        } catch (e: any) {
+          if (e.message === "Инвентаризация активна") {
+            throw e; // Re-throw inventory errors
+          }
+          failedUnits.push(`${unit.barcode}: ${e.message}`);
+        }
       }
 
-      const rawText = await res.text();
-      let json: any = null;
-      try {
-        json = rawText ? JSON.parse(rawText) : null;
-      } catch (parseError: any) {
-        // Ignore parse errors
+      // Complete/update task
+      if (successCount > 0) {
+        try {
+          const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskId: currentTask.id,
+              movedUnitIds,
+            }),
+          });
+
+          const completeJson = await completeRes.json().catch(() => ({}));
+          
+          if (completeRes.ok && completeJson.taskCompleted) {
+            setSuccess(`✓ Задание завершено! Перемещено ${successCount} заказов из ${shippingFromCell.code} в ${effectiveToCell.code}`);
+          } else {
+            setSuccess(`✓ Перемещено ${successCount}/${currentTask.unitCount} заказов. ${failedUnits.length > 0 ? `Ошибок: ${failedUnits.length}` : ""}`);
+          }
+        } catch (e: any) {
+          // Task completion failed, but units were moved
+          setSuccess(`✓ Перемещено ${successCount} заказов (ошибка обновления задания)`);
+        }
       }
 
-      if (res.status === 423) {
-        // Inventory active - show prominent error notification
-        setError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
-        // Don't clear scan state - user might want to retry after inventory ends
-        // Task status will remain open (rolled back in API if was updated to in_progress)
-        setBusy(false);
-        return;
+      if (failedUnits.length > 0 && successCount === 0) {
+        setError(`Ошибка: ${failedUnits.slice(0, 3).join(", ")}${failedUnits.length > 3 ? "..." : ""}`);
       }
 
-      if (!res.ok) {
-        throw new Error(json?.error || rawText || "Ошибка выполнения задачи");
-      }
-
-      setSuccess(`✓ Задача выполнена: ${shippingUnit.barcode} → ${effectiveToCell.code}`);
-
-      // Сброс состояния сканирования
-      setShippingFromCell(null);
-      setShippingUnit(null);
-      setShippingToCell(null);
-
-      // Перезагрузить задачи (useEffect автоматически выберет следующую)
-      await loadShippingTasks();
+      // Сброс состояния после успеха
+      setTimeout(() => {
+        setShippingFromCell(null);
+        setShippingUnits([]);
+        setShippingToCell(null);
+        if (failedUnits.length === 0) {
+          setSuccess(null);
+        }
+        // Reload tasks
+        loadShippingTasks();
+      }, 3000);
     } catch (e: any) {
-      setError(e.message || "Ошибка выполнения задачи");
+      setError(e.message || "Ошибка перемещения");
+      // Если ошибка инвентаризации - очищаем через 5 секунд
+      if (inventoryError) {
+        setTimeout(() => setInventoryError(null), 5000);
+      }
     } finally {
       setBusy(false);
     }
@@ -759,15 +883,17 @@ export default function TsdPage() {
       setLastReceivedUnit(null);
     } else if (mode === "moving") {
       setFromCell(null);
-      setUnit(null);
+      setUnits([]);
       setToCell(null);
     } else if (mode === "inventory") {
+      setCurrentInventoryTask(null);
       setInventoryCell(null);
       setScannedBarcodes([]);
       setScanResult(null);
+      loadInventoryTasks(); // Перезагрузить список заданий
     } else if (mode === "shipping") {
       setShippingFromCell(null);
-      setShippingUnit(null);
+      setShippingUnits([]);
       setShippingToCell(null);
       // Не сбрасываем currentTask - он загружается автоматически
     }
@@ -789,8 +915,6 @@ export default function TsdPage() {
       handleReset();
     }
   }
-
-  const canMove = fromCell && unit && toCell && !busy;
 
   return (
     <>
@@ -1037,18 +1161,80 @@ export default function TsdPage() {
         {/* Режим ИНВЕНТАРИЗАЦИЯ */}
         {mode === "inventory" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-            {/* Ячейка */}
-            <div
-              style={{
-                padding: 16,
-                background: inventoryCell ? getCellColor(inventoryCell.cell_type, inventoryCell.meta) : "#f5f5f5",
-                borderRadius: 8,
-                border: "2px solid",
-                borderColor: inventoryCell ? "#2563eb" : "#ddd",
-              }}
-            >
-              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Ячейка</div>
-              {inventoryCell ? (
+            {/* Список заданий (ячеек) - если ячейка НЕ выбрана */}
+            {!currentInventoryTask && (
+              <div>
+                {loadingInventoryTasks ? (
+                  <div style={{ padding: 16, textAlign: "center", color: "#666" }}>Загрузка заданий...</div>
+                ) : inventoryTasks.length === 0 ? (
+                  <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8, textAlign: "center" }}>
+                    <div style={{ fontSize: "18px", color: "#666" }}>Все ячейки отсканированы</div>
+                    <div style={{ fontSize: "14px", color: "#999", marginTop: 4 }}>Инвентаризация завершена</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: 12, color: "#374151" }}>
+                      Выберите ячейку ({inventoryTasks.length}):
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "60vh", overflowY: "auto" }}>
+                      {inventoryTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          onClick={() => !busy && handleSelectInventoryTask(task)}
+                          style={{
+                            padding: 16,
+                            background: getCellColor(task.cellType, {}),
+                            borderRadius: 8,
+                            border: "2px solid #d1d5db",
+                            cursor: busy ? "not-allowed" : "pointer",
+                            opacity: busy ? 0.6 : 1,
+                            transition: "all 0.2s",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!busy) e.currentTarget.style.transform = "scale(1.02)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = "scale(1)";
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div
+                              style={{
+                                width: 48,
+                                height: 48,
+                                background: getCellColor(task.cellType, {}),
+                                border: "2px solid #9ca3af",
+                                borderRadius: 8,
+                                flexShrink: 0,
+                              }}
+                            />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: "18px", fontWeight: 700, color: "#111" }}>
+                                {task.cellCode}
+                              </div>
+                              <div style={{ fontSize: "14px", color: "#666" }}>{task.cellType}</div>
+                            </div>
+                            <div style={{ fontSize: "24px" }}>→</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Текущее задание (ячейка) - если выбрано */}
+            {currentInventoryTask && inventoryCell && (
+              <div
+                style={{
+                  padding: 16,
+                  background: getCellColor(inventoryCell.cell_type, inventoryCell.meta),
+                  borderRadius: 8,
+                  border: "2px solid #2563eb",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Текущая ячейка:</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
                     style={{
@@ -1065,10 +1251,8 @@ export default function TsdPage() {
                     <div style={{ fontSize: "14px", color: "#666" }}>{inventoryCell.cell_type}</div>
                   </div>
                 </div>
-              ) : (
-                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Список штрихкодов */}
             {scannedBarcodes.length > 0 && (
@@ -1167,8 +1351,13 @@ export default function TsdPage() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
                         <div>
                           <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
-                            {task.unit.barcode}
+                            📦 {task.unitCount || 0} заказов
                           </div>
+                          {task.created_by_name && (
+                            <div style={{ fontSize: "12px", color: "#666", marginBottom: 4 }}>
+                              👤 Создал: {task.created_by_name}
+                            </div>
+                          )}
                           {task.status === "in_progress" && (
                             <div style={{ 
                               display: "inline-block",
@@ -1178,7 +1367,7 @@ export default function TsdPage() {
                               borderRadius: 4,
                               fontSize: "12px",
                               fontWeight: 600,
-                              marginBottom: 4
+                              marginTop: 4
                             }}>
                               В РАБОТЕ
                             </div>
@@ -1197,13 +1386,11 @@ export default function TsdPage() {
                       </div>
                       {task.scenario && (
                         <div style={{ fontSize: "13px", color: "#666", marginBottom: 4 }}>
-                          📦 {task.scenario}
+                          🎯 {task.scenario}
                         </div>
                       )}
                       <div style={{ fontSize: "13px", color: "#666" }}>
-                        {task.fromCell && `FROM: ${task.fromCell.code}`}
-                        {task.fromCell && task.targetCell && " → "}
-                        {task.targetCell && `TO: ${task.targetCell.code}`}
+                        {task.targetCell && `→ TO: ${task.targetCell.code} (picking)`}
                       </div>
                     </div>
                   ))}
@@ -1244,7 +1431,7 @@ export default function TsdPage() {
                       onClick={() => {
                         setCurrentTask(null);
                         setShippingFromCell(null);
-                        setShippingUnit(null);
+                        setShippingUnits([]);
                         setShippingToCell(null);
                         setError(null);
                         setSuccess(null);
@@ -1264,19 +1451,17 @@ export default function TsdPage() {
                     </button>
                   </div>
                   <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
-                    Заказ: {currentTask.unit.barcode}
+                    📦 Задание: {currentTask.unitCount || 0} заказов
                   </div>
-                  {currentTask.scenario && (
-                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>Сценарий: {currentTask.scenario}</div>
+                  {currentTask.created_by_name && (
+                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>👤 Создал: {currentTask.created_by_name}</div>
                   )}
-                  {currentTask.fromCell && (
-                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>
-                      FROM: {currentTask.fromCell.code} ({currentTask.fromCell.cell_type})
-                    </div>
+                  {currentTask.scenario && (
+                    <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>🎯 Сценарий: {currentTask.scenario}</div>
                   )}
                   {currentTask.targetCell && (
                     <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>
-                      TO: {currentTask.targetCell.code} ({currentTask.targetCell.cell_type})
+                      → TO: {currentTask.targetCell.code} (picking)
                     </div>
                   )}
                 </div>
@@ -1314,19 +1499,55 @@ export default function TsdPage() {
                   )}
                 </div>
 
-                {/* UNIT */}
+                {/* UNITS (список отсканированных заказов) */}
                 <div
                   style={{
                     padding: 16,
-                    background: shippingUnit ? "#fff8e1" : "#f5f5f5",
+                    background: shippingUnits.length > 0 ? "#fff8e1" : "#f5f5f5",
                     borderRadius: 8,
                     border: "2px solid",
-                    borderColor: shippingUnit ? "#ffc107" : "#ddd",
+                    borderColor: shippingUnits.length > 0 ? "#ffc107" : "#ddd",
                   }}
                 >
-                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>UNIT (заказ)</div>
-                  {shippingUnit ? (
-                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingUnit.barcode}</div>
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                    ЗАКАЗЫ (отсканировано: {shippingUnits.length}/{currentTask.unitCount})
+                  </div>
+                  {shippingUnits.length > 0 ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                      {shippingUnits.map((u, idx) => (
+                        <div 
+                          key={u.id} 
+                          style={{ 
+                            fontSize: "16px", 
+                            fontWeight: 600, 
+                            padding: "8px 12px",
+                            background: "#fff",
+                            borderRadius: 6,
+                            border: "1px solid #ffc107",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8
+                          }}
+                        >
+                          <span style={{ 
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 24,
+                            height: 24,
+                            borderRadius: "50%",
+                            background: "#ffc107",
+                            color: "#fff",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            flexShrink: 0
+                          }}>
+                            {idx + 1}
+                          </span>
+                          <span style={{ flex: 1 }}>{u.barcode}</span>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     <div style={{ fontSize: "18px", color: "#999" }}>—</div>
                   )}
@@ -1383,7 +1604,7 @@ export default function TsdPage() {
                         fontSize: 12
                       }}>1</span>
                       <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>FROM</strong> ячейку (storage/shipping)
+                        Отсканируйте <strong>FROM</strong> ячейку (откуда)
                       </span>
                       {shippingFromCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
                     </div>
@@ -1395,15 +1616,15 @@ export default function TsdPage() {
                         width: 24, 
                         height: 24, 
                         borderRadius: "50%", 
-                        background: shippingUnit ? "#4caf50" : "#e0e0e0",
-                        color: shippingUnit ? "#fff" : "#666",
+                        background: shippingUnits.length > 0 ? "#4caf50" : "#e0e0e0",
+                        color: shippingUnits.length > 0 ? "#fff" : "#666",
                         fontWeight: 700,
                         fontSize: 12
                       }}>2</span>
                       <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>штрихкод заказа</strong>
+                        Отсканируйте <strong>заказы из задания</strong> (от 1 до {currentTask.unitCount})
                       </span>
-                      {shippingUnit && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
+                      {shippingUnits.length > 0 && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ 
@@ -1419,13 +1640,16 @@ export default function TsdPage() {
                         fontSize: 12
                       }}>3</span>
                       <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>TO</strong> (picking) ячейку
+                        Отсканируйте <strong>TO</strong> ячейку ({currentTask.targetCell?.code || "picking"})
                       </span>
                       {shippingToCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
                     </div>
                   </div>
                   <div style={{ marginTop: 12, padding: 8, background: "#e8f5e9", borderRadius: 6, color: "#2e7d32", fontWeight: 600, fontSize: 13 }}>
-                    ✓ Задача выполнится автоматически после 3-го скана
+                    ✓ Задача берется в работу при скане FROM (блокируется для других)
+                  </div>
+                  <div style={{ marginTop: 8, padding: 8, background: "#e3f2fd", borderRadius: 6, color: "#1565c0", fontWeight: 600, fontSize: 13 }}>
+                    ✓ Все заказы переместятся автоматически после сканирования TO
                   </div>
                 </div>
               </>
@@ -1469,19 +1693,55 @@ export default function TsdPage() {
               )}
             </div>
 
-            {/* UNIT */}
+            {/* UNITS (список отсканированных заказов) */}
             <div
               style={{
                 padding: 16,
-                background: unit ? "#fff8e1" : "#f5f5f5",
+                background: units.length > 0 ? "#fff8e1" : "#f5f5f5",
                 borderRadius: 8,
                 border: "2px solid",
-                borderColor: unit ? "#ffc107" : "#ddd",
+                borderColor: units.length > 0 ? "#ffc107" : "#ddd",
               }}
             >
-              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>UNIT (что перемещаем)</div>
-              {unit ? (
-                <div style={{ fontSize: "20px", fontWeight: 700 }}>{unit.barcode}</div>
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                ЗАКАЗЫ (отсканировано: {units.length})
+              </div>
+              {units.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                  {units.map((u, idx) => (
+                    <div 
+                      key={u.id} 
+                      style={{ 
+                        fontSize: "16px", 
+                        fontWeight: 600, 
+                        padding: "8px 12px",
+                        background: "#fff",
+                        borderRadius: 6,
+                        border: "1px solid #ffc107",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                      }}
+                    >
+                      <span style={{ 
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        background: "#ffc107",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        flexShrink: 0
+                      }}>
+                        {idx + 1}
+                      </span>
+                      <span style={{ flex: 1 }}>{u.barcode}</span>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div style={{ fontSize: "18px", color: "#999" }}>—</div>
               )}
@@ -1580,35 +1840,22 @@ export default function TsdPage() {
                   Сменить ячейку
                 </Button>
               )}
+              {!currentInventoryTask && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={loadInventoryTasks}
+                  disabled={loadingInventoryTasks || busy}
+                  fullWidth
+                >
+                  Обновить список заданий
+                </Button>
+              )}
             </>
           )}
           <Button variant="secondary" size="lg" onClick={handleReset} disabled={busy} fullWidth>
             Сброс
           </Button>
-          {mode === "moving" && (
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={executeMove}
-              disabled={!canMove}
-              fullWidth
-              style={{
-                background: canMove ? "var(--color-success)" : undefined,
-              }}
-              onMouseEnter={(e) => {
-                if (canMove) {
-                  e.currentTarget.style.background = "#15803d";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (canMove) {
-                  e.currentTarget.style.background = "var(--color-success)";
-                }
-              }}
-            >
-              Переместить
-            </Button>
-          )}
         </div>
 
         {/* Инструкция */}
@@ -1623,17 +1870,24 @@ export default function TsdPage() {
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте FROM ячейку (или введите код)</li>
-              <li>Отсканируйте UNIT (штрихкод заказа)</li>
-              <li>Отсканируйте TO ячейку (или введите код)</li>
-              <li>Перемещение выполнится автоматически</li>
+              <li>Отсканируйте FROM ячейку (откуда)</li>
+              <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
+              <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
+            </ol>
+          ) : mode === "inventory" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li><strong>Выберите ячейку</strong> из списка заданий (нажмите на неё)</li>
+              <li>Отсканируйте штрихкоды всех заказов в этой ячейке</li>
+              <li>Нажмите <strong>"Сохранить ячейку"</strong> - результаты отправятся на сервер</li>
+              <li>Проверьте результат: ОК или расхождение (недостача/излишки)</li>
+              <li>Нажмите <strong>"Сбросить"</strong> и выберите следующую ячейку</li>
             </ol>
           ) : (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте ячейку (или введите код)</li>
-              <li>Отсканируйте штрихкоды unit'ов подряд (каждый Enter добавляет в список)</li>
-              <li>Нажмите "Сохранить ячейку" для отправки результатов</li>
-              <li>Проверьте результат: ОК или расхождение</li>
+              <li>Выберите задание из списка (нажмите на него)</li>
+              <li>Отсканируйте FROM ячейку (откуда)</li>
+              <li>Отсканируйте заказы один за другим</li>
+              <li>Отсканируйте TO ячейку (picking) - заказы переместятся автоматически</li>
             </ol>
           )}
         </div>
