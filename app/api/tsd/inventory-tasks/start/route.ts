@@ -48,7 +48,11 @@ export async function POST(req: Request) {
       .eq("id", authData.user.id)
       .single();
 
-    if (!profile || profile.warehouse_id !== task.warehouse_cells.warehouse_id) {
+    const warehouseCell = Array.isArray(task.warehouse_cells) 
+      ? task.warehouse_cells[0] 
+      : task.warehouse_cells;
+    
+    if (!profile || profile.warehouse_id !== warehouseCell?.warehouse_id) {
       return NextResponse.json({ error: "Доступ запрещён" }, { status: 403 });
     }
 
@@ -100,8 +104,8 @@ export async function POST(req: Request) {
       ok: true,
       taskId: task.id,
       cellId: task.cell_id,
-      cellCode: task.warehouse_cells.code,
-      cellType: task.warehouse_cells.cell_type,
+      cellCode: warehouseCell?.code,
+      cellType: warehouseCell?.cell_type,
     });
   } catch (e: any) {
     console.error("tsd/inventory-tasks/start error:", e);
