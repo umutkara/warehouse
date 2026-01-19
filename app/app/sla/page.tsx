@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback, memo } from "react";
 import { useRouter } from "next/navigation";
+
+// ⚡ Force dynamic for real-time SLA metrics
+export const dynamic = 'force-dynamic';
 
 type Metrics = {
   total_units: number;
@@ -68,7 +71,8 @@ type MerchantRejectionMetrics = {
   units_resolved: number;
 };
 
-function MetricCard({
+// ⚡ OPTIMIZATION: Memoized MetricCard component
+const MetricCard = memo(function MetricCard({
   title,
   value,
   subtitle,
@@ -147,9 +151,10 @@ function MetricCard({
       )}
     </div>
   );
-}
+});
 
-function BarChart({ data, max }: { data: Array<{ label: string; value: number; color?: string }>; max?: number }) {
+// ⚡ OPTIMIZATION: Memoized BarChart component
+const BarChart = memo(function BarChart({ data, max }: { data: Array<{ label: string; value: number; color?: string }>; max?: number }) {
   const maxValue = max || Math.max(...data.map((d) => d.value), 1);
 
   return (
@@ -185,9 +190,10 @@ function BarChart({ data, max }: { data: Array<{ label: string; value: number; c
       ))}
     </div>
   );
-}
+});
 
-function DonutChart({ value, max, label, color = "#2563eb" }: { value: number; max: number; label: string; color?: string }) {
+// ⚡ OPTIMIZATION: Memoized DonutChart component
+const DonutChart = memo(function DonutChart({ value, max, label, color = "#2563eb" }: { value: number; max: number; label: string; color?: string }) {
   const percentage = max > 0 ? (value / max) * 100 : 0;
   const circumference = 2 * Math.PI * 45;
   const offset = circumference - (percentage / 100) * circumference;
@@ -225,7 +231,7 @@ function DonutChart({ value, max, label, color = "#2563eb" }: { value: number; m
       </div>
     </div>
   );
-}
+});
 
 export default function SLAPage() {
   const router = useRouter();

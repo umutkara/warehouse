@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
 import { Alert, Button } from "@/lib/ui/components";
+
+// ⚡ Force dynamic for real-time TSD operations
+export const dynamic = 'force-dynamic';
 
 type CellInfo = {
   id: string;

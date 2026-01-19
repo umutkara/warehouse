@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+
+// ⚡ Force dynamic for real-time data
+export const dynamic = 'force-dynamic';
 
 type Unit = {
   id: string;
@@ -22,16 +25,15 @@ export default function ShippingStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    loadUnits();
-  }, []);
-
-  async function loadUnits() {
+  // ⚡ OPTIMIZATION: Memoized load function
+  const loadUnits = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/units/list?status=shipping", { cache: "no-store" });
+      const res = await fetch("/api/units/list?status=shipping", { 
+        next: { revalidate: 30 } // ⚡ Cache for 30 seconds
+      });
 
       if (res.status === 401) {
         router.push("/login");
@@ -50,10 +52,16 @@ export default function ShippingStatusPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [router]);
 
-  const filteredUnits = units.filter((unit) =>
-    unit.barcode.toLowerCase().includes(searchQuery.toLowerCase())
+  useEffect(() => {
+    loadUnits();
+  }, [loadUnits]);
+
+  // ⚡ OPTIMIZATION: Memoized filtered units
+  const filteredUnits = useMemo(
+    () => units.filter((unit) => unit.barcode.toLowerCase().includes(searchQuery.toLowerCase())),
+    [units, searchQuery]
   );
 
   return (

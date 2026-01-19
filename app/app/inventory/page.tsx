@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+
+// ⚡ Force dynamic for real-time inventory status
+export const dynamic = 'force-dynamic';
 
 type InventoryStatus = {
   active: boolean;

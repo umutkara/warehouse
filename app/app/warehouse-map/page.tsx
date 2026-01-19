@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUIStore, type Zone } from "@/lib/ui/store";
 import { getCellColor } from "@/lib/ui/cellColors";
+
+// ⚡ Force dynamic for real-time warehouse data
+export const dynamic = 'force-dynamic';
 
 type Cell = {
   id: string;
@@ -141,32 +144,39 @@ export default function WarehouseMapPage() {
   const lastLoadedCellIdRef = useRef<string | null>(null);
   const moveLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  async function loadCells() {
-    const r = await fetch("/api/cells/list", { cache: "no-store" });
+  // ⚡ OPTIMIZATION: Memoized load functions
+  const loadCells = useCallback(async () => {
+    const r = await fetch("/api/cells/list", { 
+      next: { revalidate: 30 } // ⚡ Cache for 30 seconds
+    });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       setErr(j.error ?? "Ошибка загрузки");
       return;
     }
     setCells(j.cells ?? []);
-  }
+  }, []);
 
-  async function loadUnassigned() {
-    const r = await fetch("/api/units/unassigned");
+  const loadUnassigned = useCallback(async () => {
+    const r = await fetch("/api/units/unassigned", {
+      next: { revalidate: 10 } // ⚡ Cache for 10 seconds
+    });
     const j = await r.json();
     setUnassigned(j.units ?? []);
-  }
+  }, []);
 
-  async function loadCellUnits(cellId: string) {
+  const loadCellUnits = useCallback(async (cellId: string) => {
     setLoadingUnits(true);
     try {
-      const r = await fetch(`/api/cells/units?cellId=${cellId}`);
+      const r = await fetch(`/api/cells/units?cellId=${cellId}`, {
+        next: { revalidate: 5 } // ⚡ Cache for 5 seconds
+      });
       const j = await r.json();
       setCellUnits(j.units ?? []);
     } finally {
       setLoadingUnits(false);
     }
-  }
+  }, []);
 
   async function loadUnitMoves(unitId: string) {
     // ⚡ ОПТИМИЗАЦИЯ: Debounce для предотвращения множественных запросов
@@ -262,7 +272,11 @@ export default function WarehouseMapPage() {
     }
   }, [searchParams, cells]);
 
-  const visibleCells = cells.filter((c) => zoneFilters[c.cell_type as Zone] !== false);
+  // ⚡ OPTIMIZATION: Memoized filtered cells
+  const visibleCells = useMemo(
+    () => cells.filter((c) => zoneFilters[c.cell_type as Zone] !== false),
+    [cells, zoneFilters]
+  );
 
   return (
     <>

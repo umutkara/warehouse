@@ -3,8 +3,8 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ConditionalLayout from "./ui/ConditionalLayout";
 
-// Force dynamic rendering - all pages under /app require authentication
-export const dynamic = 'force-dynamic';
+// ⚡ OPTIMIZATION: Removed force-dynamic to allow Next.js to optimize static pages
+// Dynamic pages (warehouse-map, inventory, etc.) handle this individually
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const supabase = await supabaseServer();

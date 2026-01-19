@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 type Unit = {
@@ -36,6 +36,9 @@ type Unit = {
   };
 };
 
+// ⚡ Force dynamic for real-time data
+export const dynamic = 'force-dynamic';
+
 export default function UnitsListPage() {
   const router = useRouter();
   const [units, setUnits] = useState<Unit[]>([]);
@@ -46,11 +49,8 @@ export default function UnitsListPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
 
-  useEffect(() => {
-    loadUnits();
-  }, [ageFilter, statusFilter, searchQuery]);
-
-  async function loadUnits() {
+  // ⚡ OPTIMIZATION: Memoized load function
+  const loadUnits = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -64,7 +64,7 @@ export default function UnitsListPage() {
       }
 
       const res = await fetch(`/api/units/list?${params.toString()}`, {
-        cache: "no-store",
+        next: { revalidate: 30 } // ⚡ Cache for 30 seconds
       });
 
       if (!res.ok) {
@@ -84,19 +84,24 @@ export default function UnitsListPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [ageFilter, statusFilter, searchQuery, router]);
 
-  function handleSearch(e: React.FormEvent) {
+  useEffect(() => {
+    loadUnits();
+  }, [loadUnits]);
+
+  // ⚡ OPTIMIZATION: Memoized handlers
+  const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setSearchQuery(searchInput);
-  }
+  }, [searchInput]);
 
-  function clearSearch() {
+  const clearSearch = useCallback(() => {
     setSearchInput("");
     setSearchQuery("");
-  }
+  }, []);
 
-  async function handleExportToExcel() {
+  const handleExportToExcel = useCallback(async () => {
     try {
       const params = new URLSearchParams({ 
         age: ageFilter,
@@ -127,16 +132,17 @@ export default function UnitsListPage() {
     } catch (e: any) {
       setError("Ошибка экспорта");
     }
-  }
+  }, [ageFilter, statusFilter, searchQuery]);
 
-  function formatAge(hours: number): string {
+  // ⚡ OPTIMIZATION: Memoized helper function
+  const formatAge = useCallback((hours: number): string => {
     if (hours < 1) return "< 1ч";
     if (hours < 24) return `${hours}ч`;
     const days = Math.floor(hours / 24);
     const remainingHours = hours % 24;
     if (remainingHours === 0) return `${days}д`;
     return `${days}д ${remainingHours}ч`;
-  }
+  }, []);
 
   function getAgeColor(hours: number): string {
     if (hours > 168) return "#dc2626"; // > 7 days - red

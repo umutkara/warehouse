@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+
+// ⚡ Force dynamic for real-time inventory progress
+export const dynamic = 'force-dynamic';
 
 type Task = {
   id: string;
@@ -29,16 +32,12 @@ export default function InventoryProgressPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadTasks();
-    // Auto-refresh every 5 seconds
-    const interval = setInterval(loadTasks, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  async function loadTasks() {
+  // ⚡ OPTIMIZATION: Memoized load function
+  const loadTasks = useCallback(async () => {
     try {
-      const res = await fetch("/api/inventory/tasks", { cache: "no-store" });
+      const res = await fetch("/api/inventory/tasks", { 
+        next: { revalidate: 5 } // ⚡ Cache for 5 seconds
+      });
 
       if (res.status === 401) {
         router.push("/login");
@@ -71,14 +70,30 @@ export default function InventoryProgressPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [router]);
 
-  const pendingTasks = tasks.filter((t) => t.status === "pending");
-  const scannedTasks = tasks.filter((t) => t.status === "scanned");
+  useEffect(() => {
+    loadTasks();
+    // ⚡ OPTIMIZATION: Increased interval from 5s to 10s (less server load)
+    // Only refresh if session is active
+    const shouldRefresh = sessionInfo?.sessionStatus === "active";
+    if (!shouldRefresh) return;
+    
+    const interval = setInterval(loadTasks, 10000); // 10 seconds instead of 5
+    return () => clearInterval(interval);
+  }, [loadTasks, sessionInfo?.sessionStatus]);
+
+  // ⚡ OPTIMIZATION: Memoized computed values
+  const pendingTasks = useMemo(() => tasks.filter((t) => t.status === "pending"), [tasks]);
+  const scannedTasks = useMemo(() => tasks.filter((t) => t.status === "scanned"), [tasks]);
   const totalTasks = tasks.length;
-  const progress = totalTasks > 0 ? Math.round((scannedTasks.length / totalTasks) * 100) : 0;
+  const progress = useMemo(
+    () => (totalTasks > 0 ? Math.round((scannedTasks.length / totalTasks) * 100) : 0),
+    [totalTasks, scannedTasks.length]
+  );
 
-  function getCellColor(cellType: string): string {
+  // ⚡ OPTIMIZATION: Memoized helper function
+  const getCellColor = useCallback((cellType: string): string => {
     const colors: Record<string, string> = {
       storage: "#dbeafe",
       shipping: "#fce7f3",
@@ -87,7 +102,7 @@ export default function InventoryProgressPage() {
       diagnostic: "#e0e7ff",
     };
     return colors[cellType] || "#f3f4f6";
-  }
+  }, []);
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px" }}>
