@@ -125,7 +125,7 @@ export async function POST(
         photos: updatedPhotos,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", params.unitId);
+      .eq("id", unitId);
 
     if (updateError) {
       console.error("Update error:", updateError);
@@ -230,7 +230,7 @@ export async function DELETE(
         photos: updatedPhotos,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", params.unitId);
+      .eq("id", unitId);
 
     if (updateError) {
       console.error("Update error:", updateError);
