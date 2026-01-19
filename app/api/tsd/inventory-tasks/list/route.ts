@@ -77,14 +77,20 @@ export async function GET() {
 
     // Для простоты: показываем все pending задания
     // В реальности нужно проверить роль scanned_by
-    const formattedTasks = (tasks || []).map((task: any) => ({
-      id: task.id,
-      cellId: task.cell_id,
-      cellCode: task.warehouse_cells.code,
-      cellType: task.warehouse_cells.cell_type,
-      status: task.status,
-      isLockedByMe: task.scanned_by === authData.user.id,
-    }));
+    const formattedTasks = (tasks || []).map((task: any) => {
+      const warehouseCell = Array.isArray(task.warehouse_cells) 
+        ? task.warehouse_cells[0] 
+        : task.warehouse_cells;
+      
+      return {
+        id: task.id,
+        cellId: task.cell_id,
+        cellCode: warehouseCell?.code,
+        cellType: warehouseCell?.cell_type,
+        status: task.status,
+        isLockedByMe: task.scanned_by === authData.user.id,
+      };
+    });
 
     return NextResponse.json({
       ok: true,
