@@ -59,7 +59,10 @@ export async function GET(req: Request) {
         status,
         created_at,
         picked_at,
-        completed_at
+        completed_at,
+        units!inner (
+          barcode
+        )
       `)
       .eq("warehouse_id", profile.warehouse_id)
       .gte("created_at", startDate.toISOString())
@@ -109,9 +112,13 @@ export async function GET(req: Request) {
           const diffMs = completionTime.getTime() - createdTime;
           timeInHours = diffMs / (1000 * 60 * 60);
           completionTimes.push(timeInHours);
+          const unitBarcode = Array.isArray(task.units) 
+            ? task.units[0]?.barcode 
+            : task.units?.barcode;
+          
           completedTasks.push({
             id: task.id,
-            barcode: task.units?.barcode || "Unknown",
+            barcode: unitBarcode || "Unknown",
             status: task.status,
             created_at: task.created_at,
             completed_at: completionTime.toISOString(),
@@ -124,9 +131,13 @@ export async function GET(req: Request) {
         timeInHours = diffMs / (1000 * 60 * 60);
         currentWaitTimes.push(timeInHours);
 
+        const unitBarcode = Array.isArray(task.units) 
+          ? task.units[0]?.barcode 
+          : task.units?.barcode;
+        
         const taskData = {
           id: task.id,
-          barcode: task.units?.barcode || "Unknown",
+          barcode: unitBarcode || "Unknown",
           status: task.status,
           created_at: task.created_at,
           time_hours: timeInHours,
