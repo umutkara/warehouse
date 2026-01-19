@@ -7,9 +7,13 @@ import { supabaseServer } from "@/lib/supabase/server";
  */
 export async function GET(
   req: Request,
-  { params }: { params: { unitId: string } }
+  { params }: { params: Promise<{ unitId: string }> | { unitId: string } }
 ) {
   const supabase = await supabaseServer();
+  
+  // Await params for Next.js App Router compatibility
+  const resolvedParams = await params;
+  const unitId = resolvedParams.unitId;
 
   try {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -43,7 +47,7 @@ export async function GET(
         created_at,
         updated_at
       `)
-      .eq("id", params.unitId)
+      .eq("id", unitId)
       .eq("warehouse_id", profile.warehouse_id)
       .single();
 

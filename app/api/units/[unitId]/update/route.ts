@@ -8,9 +8,13 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  */
 export async function PATCH(
   req: Request,
-  { params }: { params: { unitId: string } }
+  { params }: { params: Promise<{ unitId: string }> | { unitId: string } }
 ) {
   const supabase = await supabaseServer();
+  
+  // Await params for Next.js App Router compatibility
+  const resolvedParams = await params;
+  const unitId = resolvedParams.unitId;
 
   try {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -38,7 +42,7 @@ export async function PATCH(
     const { data: unit, error: unitError } = await supabase
       .from("units")
       .select("id, barcode, warehouse_id, product_name, partner_name, price")
-      .eq("id", params.unitId)
+      .eq("id", unitId)
       .single();
 
     if (unitError || !unit) {
@@ -78,7 +82,7 @@ export async function PATCH(
     const { data: updatedUnit, error: updateError } = await supabaseAdmin
       .from("units")
       .update(updates)
-      .eq("id", params.unitId)
+      .eq("id", unitId)
       .select("id, barcode, product_name, partner_name, price, photos, status, created_at")
       .single();
 
@@ -94,7 +98,7 @@ export async function PATCH(
     await supabase.rpc("audit_log_event", {
       p_action: "unit.update",
       p_entity_type: "unit",
-      p_entity_id: params.unitId,
+      p_entity_id: unitId,
       p_summary: `Обновлена информация о ${unit.barcode}`,
       p_meta: updates,
     });

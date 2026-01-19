@@ -7,9 +7,13 @@ import { supabaseServer } from "@/lib/supabase/server";
  */
 export async function GET(
   req: Request,
-  { params }: { params: { unitId: string } }
+  { params }: { params: Promise<{ unitId: string }> | { unitId: string } }
 ) {
   const supabase = await supabaseServer();
+  
+  // Await params for Next.js App Router compatibility
+  const resolvedParams = await params;
+  const unitId = resolvedParams.unitId;
 
   try {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -30,7 +34,7 @@ export async function GET(
     // Call RPC function to get comprehensive history
     const { data: historyData, error: historyError } = await supabase.rpc(
       "get_unit_history",
-      { p_unit_id: params.unitId }
+      { p_unit_id: unitId }
     );
 
     if (historyError) {

@@ -9,9 +9,13 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  */
 export async function POST(
   req: Request,
-  { params }: { params: { unitId: string } }
+  { params }: { params: Promise<{ unitId: string }> | { unitId: string } }
 ) {
   const supabase = await supabaseServer();
+  
+  // Await params for Next.js App Router compatibility
+  const resolvedParams = await params;
+  const unitId = resolvedParams.unitId;
 
   try {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -33,7 +37,7 @@ export async function POST(
     const { data: unit, error: unitError } = await supabase
       .from("units")
       .select("id, barcode, warehouse_id, photos")
-      .eq("id", params.unitId)
+      .eq("id", unitId)
       .single();
 
     if (unitError || !unit) {
@@ -77,7 +81,7 @@ export async function POST(
     // Generate unique filename
     const timestamp = Date.now();
     const extension = photo.name.split(".").pop();
-    const filename = `${profile.warehouse_id}/${params.unitId}/${timestamp}.${extension}`;
+    const filename = `${profile.warehouse_id}/${unitId}/${timestamp}.${extension}`;
 
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -135,7 +139,7 @@ export async function POST(
     await supabase.rpc("audit_log_event", {
       p_action: "unit.photo_uploaded",
       p_entity_type: "unit",
-      p_entity_id: params.unitId,
+      p_entity_id: unitId,
       p_summary: `Загружено фото для ${unit.barcode}`,
       p_meta: { filename, photo_url: photoUrl },
     });
@@ -160,9 +164,13 @@ export async function POST(
  */
 export async function DELETE(
   req: Request,
-  { params }: { params: { unitId: string } }
+  { params }: { params: Promise<{ unitId: string }> | { unitId: string } }
 ) {
   const supabase = await supabaseServer();
+  
+  // Await params for Next.js App Router compatibility
+  const resolvedParams = await params;
+  const unitId = resolvedParams.unitId;
 
   try {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -191,7 +199,7 @@ export async function DELETE(
     const { data: unit, error: unitError } = await supabase
       .from("units")
       .select("id, barcode, warehouse_id, photos")
-      .eq("id", params.unitId)
+      .eq("id", unitId)
       .single();
 
     if (unitError || !unit) {
@@ -236,7 +244,7 @@ export async function DELETE(
     await supabase.rpc("audit_log_event", {
       p_action: "unit.photo_deleted",
       p_entity_type: "unit",
-      p_entity_id: params.unitId,
+      p_entity_id: unitId,
       p_summary: `Удалено фото для ${unit.barcode}`,
       p_meta: { filename },
     });

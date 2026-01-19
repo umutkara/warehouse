@@ -141,6 +141,39 @@ export default function TopBarExcel() {
           </span>
         </div>
 
+        {/* Units List Button */}
+        <button
+          onClick={() => router.push("/app/units")}
+          style={{
+            padding: "8px 16px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg)",
+            color: "var(--color-text)",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            transition: "all var(--transition-base)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--color-primary)";
+            e.currentTarget.style.color = "#ffffff";
+            e.currentTarget.style.borderColor = "var(--color-primary)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--color-bg)";
+            e.currentTarget.style.color = "var(--color-text)";
+            e.currentTarget.style.borderColor = "var(--color-border)";
+          }}
+        >
+          📦 Список заказов
+        </button>
+
         {/* SLA Button */}
         <button
           onClick={() => router.push("/app/sla")}
