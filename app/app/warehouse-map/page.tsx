@@ -274,7 +274,11 @@ export default function WarehouseMapPage() {
 
   // ⚡ OPTIMIZATION: Memoized filtered cells
   const visibleCells = useMemo(
-    () => cells.filter((c) => zoneFilters[c.cell_type as Zone] !== false),
+    () => cells.filter((c) => {
+      const zone = c.cell_type as Zone;
+      // Показываем ячейки которые не являются зонами (surplus и др.) ИЛИ зоны которые включены
+      return !ZONES.includes(zone) || zoneFilters[zone] !== false;
+    }),
     [cells, zoneFilters]
   );
 
