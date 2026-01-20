@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/telegram/send-sla-report",
-      "schedule": "0 6,15 * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
