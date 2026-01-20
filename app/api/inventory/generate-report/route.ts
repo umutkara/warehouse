@@ -144,7 +144,7 @@ export async function POST(req: Request) {
       console.error("Upload error details:", {
         message: uploadError.message,
         name: uploadError.name,
-        cause: uploadError.cause,
+        cause: (uploadError as any)?.cause,
         statusCode: (uploadError as any)?.statusCode,
       });
       
