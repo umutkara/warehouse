@@ -7,35 +7,16 @@
 -- 1. Добавляем новый тип ячейки в CHECK constraint (если есть)
 -- Обычно это делается через ALTER TABLE, но зависит от структуры БД
 
--- 2. Создаем ячейку SURPLUS-1 для первого склада
--- Получаем warehouse_id первого склада из таблицы warehouses
+-- 2. Создаем ячейку SURPLUS-1 для склада
 
-DO $$
-DECLARE
-  v_warehouse_id uuid;
-BEGIN
-  -- Получаем ID первого склада
-  SELECT id INTO v_warehouse_id 
-  FROM warehouses 
-  ORDER BY created_at 
-  LIMIT 1;
-
-  -- Если склад найден, создаем ячейку
-  IF v_warehouse_id IS NOT NULL THEN
-    INSERT INTO warehouse_cells_map (
-      code,
-      cell_type,
-      warehouse_id
-    )
-    VALUES
-      ('SURPLUS-1', 'surplus', v_warehouse_id)
-    ON CONFLICT (code, warehouse_id) DO NOTHING;
-    
-    RAISE NOTICE 'Created SURPLUS-1 cell for warehouse %', v_warehouse_id;
-  ELSE
-    RAISE NOTICE 'No warehouse found - skipping cell creation';
-  END IF;
-END $$;
+INSERT INTO warehouse_cells_map (
+  code,
+  cell_type,
+  warehouse_id
+)
+VALUES
+  ('SURPLUS-1', 'surplus', '0c99a861-3809-4bef-9106-79a37330b13c'::uuid)
+ON CONFLICT (code, warehouse_id) DO NOTHING;
 
 -- 3. Комментарий для документации
 COMMENT ON COLUMN warehouse_cells_map.cell_type IS 
