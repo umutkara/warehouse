@@ -77,16 +77,17 @@ export async function POST(req: Request) {
         .insert({
           barcode: normalizedBarcode,
           warehouse_id: profile.warehouse_id,
-          status: "received",
-          received_at: new Date().toISOString(),
-          cell_id: null, // Will be set by move_unit_to_cell
+          status: "receiving", // Используем стандартный статус как в receiving/scan
         })
         .select("id")
         .single();
 
       if (createError || !newUnit) {
         console.error("Create unit error:", createError);
-        return NextResponse.json({ error: "Failed to create unit" }, { status: 500 });
+        return NextResponse.json({ 
+          error: "Failed to create unit", 
+          details: createError?.message 
+        }, { status: 500 });
       }
 
       unitId = newUnit.id;
