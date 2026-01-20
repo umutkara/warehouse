@@ -26,7 +26,7 @@ type UnitInfo = {
   };
 };
 
-type Mode = "receiving" | "moving" | "inventory" | "shipping";
+type Mode = "receiving" | "moving" | "inventory" | "shipping" | "surplus";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -57,6 +57,10 @@ export default function TsdPage() {
   // Для режима Отгрузка (Shipping Tasks)
   const [shippingTasks, setShippingTasks] = useState<any[]>([]);
   const [currentTask, setCurrentTask] = useState<any | null>(null);
+  
+  // Для режима Излишки (Surplus)
+  const [surplusCell, setSurplusCell] = useState<CellInfo | null>(null);
+  const [surplusUnits, setSurplusUnits] = useState<UnitInfo[]>([]);
   const [shippingFromCell, setShippingFromCell] = useState<CellInfo | null>(null);
   const [shippingUnits, setShippingUnits] = useState<UnitInfo[]>([]); // Массив отсканированных заказов
   const [shippingToCell, setShippingToCell] = useState<CellInfo | null>(null);
@@ -217,6 +221,8 @@ export default function TsdPage() {
         handleInventoryScan();
       } else if (mode === "shipping") {
         handleShippingScan();
+      } else if (mode === "surplus") {
+        handleSurplusScan();
       }
     }
   }
@@ -974,6 +980,156 @@ export default function TsdPage() {
   }
 
   // Сброс состояния
+  // ============================================
+  // РЕЖИМ ИЗЛИШКИ (SURPLUS)
+  // ============================================
+  async function handleSurplusScan() {
+    const parsed = parseScan(scanValue);
+    if (!parsed) {
+      setError("Некорректный скан");
+      setScanValue("");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+
+    try {
+      if (parsed.type === "cell") {
+        // Сканируем ячейку surplus
+        const cellInfo = await loadCellInfo(parsed.code);
+        if (!cellInfo) {
+          setError(`Ячейка "${parsed.code}" не найдена`);
+          setScanValue("");
+          return;
+        }
+
+        // Проверка: ячейка ДОЛЖНА быть типа surplus
+        if (cellInfo.cell_type !== "surplus") {
+          setError(`Ячейка должна быть типа SURPLUS, а не ${cellInfo.cell_type.toUpperCase()}`);
+          setScanValue("");
+          return;
+        }
+
+        setSurplusCell(cellInfo);
+        setSuccess(`✓ Ячейка излишков: ${cellInfo.code}`);
+      } else {
+        // Сканируем unit barcode
+        if (!surplusCell) {
+          setError("Сначала отсканируйте ячейку SURPLUS");
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем, не отсканирован ли уже этот заказ
+        if (surplusUnits.some(u => u.barcode === parsed.code)) {
+          setError(`Заказ ${parsed.code} уже отсканирован (дубликат)`);
+          setScanValue("");
+          return;
+        }
+
+        const unitInfo = await loadUnitInfo(parsed.code);
+        if (!unitInfo) {
+          setError(`Заказ "${parsed.code}" не найден в системе`);
+          setScanValue("");
+          return;
+        }
+
+        // ⭐ ВАЖНАЯ ПРОВЕРКА: заказ НЕ должен быть размещен где-то на складе
+        if (unitInfo.cell_id && unitInfo.cell) {
+          setError(`❌ Заказ ${parsed.code} уже размещен в ячейке ${unitInfo.cell.code} (${unitInfo.cell.cell_type.toUpperCase()})`);
+          setScanValue("");
+          return;
+        }
+
+        // Добавляем в массив
+        setSurplusUnits([...surplusUnits, unitInfo]);
+        setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${surplusUnits.length + 1})`);
+      }
+    } catch (e: any) {
+      setError(e.message || "Ошибка обработки скана");
+    } finally {
+      setBusy(false);
+      setScanValue("");
+    }
+  }
+
+  // Подтверждение приемки излишков (массовое размещение в surplus ячейку)
+  async function handleConfirmSurplus() {
+    if (!surplusCell || surplusUnits.length === 0) {
+      setError("Нет данных для подтверждения");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      let successCount = 0;
+      let failedUnits: string[] = [];
+
+      // Перемещаем каждый unit в surplus ячейку
+      for (const unit of surplusUnits) {
+        try {
+          const res = await fetch("/api/units/assign", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              unitBarcode: unit.barcode,
+              cellCode: surplusCell.code,
+            }),
+          });
+
+          const json = await res.json().catch(() => ({}));
+
+          if (res.status === 423) {
+            setInventoryError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+            throw new Error("Инвентаризация активна");
+          }
+
+          if (!res.ok) {
+            failedUnits.push(`${unit.barcode}: ${json?.error || "ошибка"}`);
+          } else {
+            successCount++;
+          }
+        } catch (e: any) {
+          if (e.message === "Инвентаризация активна") {
+            throw e;
+          }
+          failedUnits.push(`${unit.barcode}: ${e.message}`);
+        }
+      }
+
+      if (successCount > 0) {
+        setSuccess(`✓ Принято ${successCount} излишков в ячейку ${surplusCell.code}${failedUnits.length > 0 ? ` (ошибок: ${failedUnits.length})` : ""}`);
+      }
+
+      if (failedUnits.length > 0 && successCount === 0) {
+        setError(`Ошибка: ${failedUnits.slice(0, 3).join(", ")}${failedUnits.length > 3 ? "..." : ""}`);
+      }
+
+      // Сброс состояния после успеха
+      if (successCount > 0) {
+        setTimeout(() => {
+          setSurplusCell(null);
+          setSurplusUnits([]);
+          if (failedUnits.length === 0) {
+            setSuccess(null);
+          }
+        }, 3000);
+      }
+    } catch (e: any) {
+      setError(e.message || "Ошибка приемки излишков");
+      if (inventoryError) {
+        setTimeout(() => setInventoryError(null), 5000);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleReset() {
     if (mode === "receiving") {
       setBinCell(null);
@@ -993,6 +1149,9 @@ export default function TsdPage() {
       setShippingUnits([]);
       setShippingToCell(null);
       // Не сбрасываем currentTask - он загружается автоматически
+    } else if (mode === "surplus") {
+      setSurplusCell(null);
+      setSurplusUnits([]);
     }
     setError(null);
     setSuccess(null);
@@ -1158,6 +1317,15 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Отгрузка
+          </Button>
+          <Button
+            variant={mode === "surplus" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("surplus")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Излишки
           </Button>
         </div>
 
@@ -1879,6 +2047,140 @@ export default function TsdPage() {
           </div>
         )}
 
+        {/* Режим ИЗЛИШКИ (SURPLUS) */}
+        {mode === "surplus" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* Ячейка SURPLUS */}
+            <div
+              style={{
+                padding: 16,
+                background: surplusCell ? "#fff3e0" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: surplusCell ? "#ff9800" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                Ячейка излишков (SURPLUS)
+              </div>
+              {surplusCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: "#ff9800",
+                      border: "1px solid #f57c00",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: "18px", fontWeight: 700, color: "#e65100" }}>
+                      {surplusCell.code}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#999" }}>
+                      Тип: {surplusCell.cell_type.toUpperCase()}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "24px", color: "#4caf50" }}>✓</div>
+                </div>
+              ) : (
+                <div style={{ color: "#999", fontSize: "14px" }}>
+                  Отсканируйте ячейку типа SURPLUS
+                </div>
+              )}
+            </div>
+
+            {/* Список отсканированных излишков */}
+            {surplusUnits.length > 0 && (
+              <div
+                style={{
+                  padding: 16,
+                  background: "#e8f5e9",
+                  borderRadius: 8,
+                  border: "2px solid #4caf50",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#2e7d32", fontWeight: 700, marginBottom: 12 }}>
+                  Отсканировано излишков: {surplusUnits.length}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 200, overflowY: "auto" }}>
+                  {surplusUnits.map((unit, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: 12,
+                        background: "white",
+                        borderRadius: 6,
+                        border: "1px solid #c8e6c9",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ 
+                        minWidth: 28, 
+                        height: 28, 
+                        borderRadius: "50%", 
+                        background: "#4caf50",
+                        color: "white",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 12,
+                        fontWeight: 700
+                      }}>
+                        {idx + 1}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: "#1b5e20" }}>{unit.barcode}</div>
+                      </div>
+                      <div style={{ fontSize: "18px", color: "#4caf50" }}>✓</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Инструкции */}
+            <div style={{ 
+              padding: 12, 
+              background: "#fff8e1", 
+              borderRadius: 8,
+              fontSize: 13,
+              color: "#f57f17"
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>📋 Порядок работы:</div>
+              <ol style={{ margin: 0, paddingLeft: 18 }}>
+                <li>Отсканируйте ячейку SURPLUS</li>
+                <li>Сканируйте заказы без ТТНК (один за другим)</li>
+                <li>Нажмите "Подтвердить приемку" для размещения</li>
+              </ol>
+              <div style={{ marginTop: 8, padding: 8, background: "#fff3e0", borderRadius: 4, fontSize: 12 }}>
+                ⚠️ <strong>Защита от дубликатов:</strong> заказы, уже размещенные на складе, будут отклонены
+              </div>
+            </div>
+
+            {/* Кнопка подтверждения */}
+            {surplusCell && surplusUnits.length > 0 && (
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={handleConfirmSurplus}
+                disabled={busy}
+                fullWidth
+                style={{
+                  background: "linear-gradient(135deg, #ff9800 0%, #f57c00 100%)",
+                  marginTop: 8
+                }}
+              >
+                ✓ Подтвердить приемку ({surplusUnits.length} шт.)
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Кнопки */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {mode === "shipping" && (
@@ -1981,6 +2283,15 @@ export default function TsdPage() {
               <li>Нажмите <strong>"Сохранить ячейку"</strong> - результаты отправятся на сервер</li>
               <li>Проверьте результат: ОК или расхождение (недостача/излишки)</li>
               <li>Нажмите <strong>"Сбросить"</strong> и выберите следующую ячейку</li>
+            </ol>
+          ) : mode === "surplus" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Отсканируйте ячейку SURPLUS</li>
+              <li>Отсканируйте заказы без ТТНК (один за другим)</li>
+              <li>Нажмите "Подтвердить приемку" - заказы будут размещены в SURPLUS</li>
+              <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+                ⚠️ Заказы, уже размещенные на складе, будут отклонены (защита от дубликатов)
+              </li>
             </ol>
           ) : (
             <ol style={{ margin: 0, paddingLeft: 18 }}>

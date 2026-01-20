@@ -105,6 +105,13 @@ const Icons = {
       <path d="M9 8h4M9 12h4M9 16h2" />
     </svg>
   ),
+  Surplus: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="6" width="14" height="10" rx="1" />
+      <path d="M7 6V4M13 6V4M7 10h6M7 13h4" />
+      <circle cx="15" cy="8" r="2" fill="currentColor" />
+    </svg>
+  ),
 };
 
 interface NavButtonProps {
@@ -354,6 +361,9 @@ export default function LeftNav({ role }: { role: string }) {
         )}
         <NavButton href="/app/inventory" icon={<Icons.Inventory />} isCollapsed={!shouldExpand}>
           Инвентаризация
+        </NavButton>
+        <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
+          Излишки
         </NavButton>
         <NavButton href="/app/archive" icon={<Icons.Archive />} isCollapsed={!shouldExpand}>
           Архив
