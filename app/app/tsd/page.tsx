@@ -491,7 +491,9 @@ export default function TsdPage() {
     // BIN → STORAGE ✅
     // BIN → SHIPPING ✅
     // STORAGE → SHIPPING ✅
+    // STORAGE → STORAGE ✅ (обратная совместимость)
     // SHIPPING → STORAGE ✅
+    // SHIPPING → SHIPPING ✅ (обратная совместимость)
     // Всё остальное ❌
 
     if (fromType === 'bin') {
@@ -505,22 +507,22 @@ export default function TsdPage() {
     }
 
     if (fromType === 'storage') {
-      if (toType === 'shipping') {
+      if (toType === 'shipping' || toType === 'storage') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из STORAGE можно переместить только в SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из STORAGE можно переместить только в SHIPPING или другую STORAGE. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
     if (fromType === 'shipping') {
-      if (toType === 'storage') {
+      if (toType === 'storage' || toType === 'shipping') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из SHIPPING можно переместить только в STORAGE. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из SHIPPING можно переместить только в STORAGE или другую SHIPPING. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
@@ -1969,7 +1971,7 @@ export default function TsdPage() {
               <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
               <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
               <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                📌 Разрешенные перемещения: BIN→STORAGE/SHIPPING, STORAGE↔SHIPPING
+                📌 Разрешено: BIN→STORAGE/SHIPPING, STORAGE↔SHIPPING/STORAGE, SHIPPING↔STORAGE/SHIPPING
               </li>
             </ol>
           ) : mode === "inventory" ? (

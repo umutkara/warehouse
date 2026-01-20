@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type Section = "statuses" | "cells" | "tasks" | "tsd" | "ops" | "logistics" | "inventory" | "meta" | "moves" | "tickets" | "shipments";
+type Section = "statuses" | "cells" | "tasks" | "tsd" | "tsd_move" | "ops" | "logistics" | "inventory" | "meta" | "moves" | "tickets" | "shipments";
 
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState<Section>("statuses");
@@ -12,6 +12,7 @@ export default function DocsPage() {
     { id: "cells" as Section, title: "🗄️ Типы ячеек", icon: "🗄️" },
     { id: "tasks" as Section, title: "✅ Статусы задач", icon: "✅" },
     { id: "tsd" as Section, title: "📱 ТСД Отгрузка", icon: "📱" },
+    { id: "tsd_move" as Section, title: "🔄 ТСД Перемещение", icon: "🔄" },
     { id: "inventory" as Section, title: "📋 Инвентаризация", icon: "📋" },
     { id: "ops" as Section, title: "👔 Инструкции для OPS", icon: "👔" },
     { id: "logistics" as Section, title: "🚛 Инструкции для логистов", icon: "🚛" },
@@ -77,6 +78,7 @@ export default function DocsPage() {
           {activeSection === "cells" && <CellsSection />}
           {activeSection === "tasks" && <TasksSection />}
           {activeSection === "tsd" && <TsdSection />}
+          {activeSection === "tsd_move" && <TsdMoveSection />}
           {activeSection === "inventory" && <InventorySection />}
           {activeSection === "ops" && <OpsSection />}
           {activeSection === "logistics" && <LogisticsSection />}
@@ -750,6 +752,271 @@ function TsdSection() {
             <div style={{ fontSize: 32, marginBottom: 8 }}>🚚</div>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280" }}>OUT</div>
             <div style={{ fontSize: 11, color: "#6b7280" }}>Отгрузка</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TsdMoveSection() {
+  return (
+    <div>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>🔄 ТСД Перемещение</h2>
+      <p style={{ color: "#6b7280", marginBottom: 24, lineHeight: 1.6 }}>
+        Режим работы терминала сбора данных для перемещения заказов между ячейками склада. 
+        Складчик может перемещать заказы из BIN в STORAGE/SHIPPING, а также между STORAGE и SHIPPING ячейками.
+      </p>
+
+      {/* Процесс работы */}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: "2px solid #10b981", marginBottom: 20 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: "#10b981" }}>
+          🔄 Процесс работы (3 шага)
+        </h3>
+
+        {/* Шаг 1 */}
+        <div style={{ marginBottom: 16, padding: 16, background: "#f0fdf4", borderRadius: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#166534", marginBottom: 8 }}>
+            Шаг 1: Сканировать FROM ячейку (откуда)
+          </div>
+          <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.6 }}>
+            Складчик сканирует ячейку, из которой будет брать заказы:<br/>
+            <strong>✅ Разрешенные типы:</strong> BIN, STORAGE, SHIPPING<br/>
+            <strong>❌ Запрещенные:</strong> PICKING, RECEIVING<br/><br/>
+            <strong style={{ color: "#dc2626" }}>Важно для BIN:</strong> Если выбрана ячейка типа BIN (например, B1), то можно сканировать только заказы, которые находятся именно в этой ячейке B1, а не в других BIN ячейках!
+          </div>
+        </div>
+
+        {/* Шаг 2 */}
+        <div style={{ marginBottom: 16, padding: 16, background: "#fffbeb", borderRadius: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>
+            Шаг 2: Сканировать заказы (от 1 до бесконечности)
+          </div>
+          <div style={{ fontSize: 13, color: "#78350f", lineHeight: 1.6 }}>
+            Сканирует штрихкоды заказов один за другим:<br/><br/>
+            
+            <strong>📦 Проверки в режиме ОНЛАЙН:</strong><br/>
+            
+            <strong>1️⃣ Заказ существует в системе</strong><br/>
+            • Если заказ не найден → ❌ ОШИБКА<br/><br/>
+            
+            <strong>2️⃣ Проверка для BIN ячеек (особая логика):</strong><br/>
+            • Заказ должен быть в конкретной FROM ячейке (например, в B1)<br/>
+            • Если заказ в другой BIN (B2, B3) → ❌ ОШИБКА<br/>
+            • Если заказ в STORAGE/SHIPPING/PICKING → ❌ ОШИБКА<br/>
+            • ✅ Можно брать только заказы из выбранной BIN ячейки<br/><br/>
+            
+            <strong>3️⃣ Проверка на дубликат:</strong><br/>
+            • Если заказ уже отсканирован → ❌ ОШИБКА: "дубликат"<br/><br/>
+            
+            <strong>4️⃣ Для STORAGE/SHIPPING:</strong><br/>
+            • Только базовые проверки (существование, дубликаты)<br/>
+            • Без проверки конкретной ячейки
+          </div>
+        </div>
+
+        {/* Шаг 3 */}
+        <div style={{ padding: 16, background: "#dcfce7", borderRadius: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#166534", marginBottom: 8 }}>
+            Шаг 3: Сканировать TO ячейку (куда)
+          </div>
+          <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.6 }}>
+            Сканирует ячейку назначения:<br/>
+            • Проверяется матрица разрешенных перемещений (см. ниже)<br/>
+            • Если перемещение разрешено → все отсканированные заказы автоматически перемещаются<br/>
+            • Каждый заказ: API вызов /api/units/move-by-scan<br/>
+            • После успешного перемещения список очищается → готов к новому перемещению
+          </div>
+        </div>
+      </div>
+
+      {/* Матрица разрешенных перемещений */}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: "2px solid #2563eb", marginBottom: 20 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: "#2563eb" }}>
+          📊 Матрица разрешенных перемещений
+        </h3>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#f3f4f6" }}>
+                <th style={{ padding: 12, textAlign: "left", border: "1px solid #e5e7eb", fontWeight: 700 }}>FROM ↓ / TO →</th>
+                <th style={{ padding: 12, textAlign: "center", border: "1px solid #e5e7eb", fontWeight: 700 }}>BIN</th>
+                <th style={{ padding: 12, textAlign: "center", border: "1px solid #e5e7eb", fontWeight: 700 }}>STORAGE</th>
+                <th style={{ padding: 12, textAlign: "center", border: "1px solid #e5e7eb", fontWeight: 700 }}>SHIPPING</th>
+                <th style={{ padding: 12, textAlign: "center", border: "1px solid #e5e7eb", fontWeight: 700 }}>PICKING</th>
+                <th style={{ padding: 12, textAlign: "center", border: "1px solid #e5e7eb", fontWeight: 700 }}>RECEIVING</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>BIN</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#d1fae5", color: "#065f46" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#d1fae5", color: "#065f46" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+              </tr>
+              <tr>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>STORAGE</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#dbeafe", color: "#1e40af" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#d1fae5", color: "#065f46" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+              </tr>
+              <tr>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>SHIPPING</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#d1fae5", color: "#065f46" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#dbeafe", color: "#1e40af" }}>✅</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+              </tr>
+              <tr>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>PICKING</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+              </tr>
+              <tr>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>RECEIVING</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 16, padding: 12, background: "#eff6ff", borderRadius: 8 }}>
+          <div style={{ fontSize: 13, color: "#1e40af", lineHeight: 1.6 }}>
+            <strong>Легенда:</strong><br/>
+            🟢 <strong style={{ color: "#065f46" }}>Зеленый</strong> — Основное направление<br/>
+            🔵 <strong style={{ color: "#1e40af" }}>Синий</strong> — Перемещение внутри типа (STORAGE→STORAGE, SHIPPING→SHIPPING)<br/>
+            🔴 <strong style={{ color: "#991b1b" }}>Красный</strong> — Запрещено
+          </div>
+        </div>
+      </div>
+
+      {/* Примеры использования */}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: "1px solid #e5e7eb", marginBottom: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📝 Примеры использования:</h3>
+        
+        <div style={{ display: "grid", gap: 16 }}>
+          {/* Пример 1 */}
+          <div style={{ padding: 16, background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#166534", marginBottom: 8 }}>
+              ✅ Пример 1: Перемещение из BIN в STORAGE
+            </div>
+            <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.6, fontFamily: "monospace" }}>
+              FROM: B1 (bin)<br/>
+              Сканирует: ORD-001 (в ячейке B1) → ✅ Добавлен<br/>
+              Сканирует: ORD-002 (в ячейке B1) → ✅ Добавлен<br/>
+              Сканирует: ORD-999 (в ячейке B2) → ❌ ОШИБКА: не в ячейке B1<br/>
+              TO: S5 (storage) → ✅ УСПЕХ: 2 заказа перемещены
+            </div>
+          </div>
+
+          {/* Пример 2 */}
+          <div style={{ padding: 16, background: "#eff6ff", borderRadius: 8, border: "1px solid #93c5fd" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>
+              ✅ Пример 2: Перемещение STORAGE → SHIPPING
+            </div>
+            <div style={{ fontSize: 13, color: "#1e3a8a", lineHeight: 1.6, fontFamily: "monospace" }}>
+              FROM: S5 (storage)<br/>
+              Сканирует: ORD-111 → ✅ Добавлен<br/>
+              Сканирует: ORD-222 → ✅ Добавлен<br/>
+              TO: SH3 (shipping) → ✅ УСПЕХ: 2 заказа перемещены
+            </div>
+          </div>
+
+          {/* Пример 3 */}
+          <div style={{ padding: 16, background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b", marginBottom: 8 }}>
+              ❌ Пример 3: Запрещенное перемещение
+            </div>
+            <div style={{ fontSize: 13, color: "#7f1d1d", lineHeight: 1.6, fontFamily: "monospace" }}>
+              FROM: S5 (storage)<br/>
+              Сканирует: ORD-333 → ✅ Добавлен<br/>
+              TO: B1 (bin) → ❌ ОШИБКА: Из STORAGE можно только в SHIPPING или другую STORAGE
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Визуальная схема */}
+      <div style={{ background: "#f9fafb", borderRadius: 12, padding: 24, border: "1px solid #e5e7eb" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📊 Визуальная схема потоков:</h3>
+        
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {/* BIN → STORAGE/SHIPPING */}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 12 }}>Из BIN:</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ textAlign: "center", padding: 16, background: "#fef3c7", borderRadius: 8, minWidth: 100 }}>
+                <div style={{ fontSize: 24, marginBottom: 4 }}>📥</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>BIN</div>
+                <div style={{ fontSize: 10, color: "#92400e" }}>B1, B2, B3...</div>
+              </div>
+              <div style={{ fontSize: 20, color: "#10b981" }}>→</div>
+              <div style={{ textAlign: "center", padding: 16, background: "#d1fae5", borderRadius: 8, minWidth: 100 }}>
+                <div style={{ fontSize: 24, marginBottom: 4 }}>📦</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>STORAGE</div>
+                <div style={{ fontSize: 10, color: "#065f46" }}>S1, S2...</div>
+              </div>
+              <div style={{ fontSize: 16, color: "#6b7280" }}>или</div>
+              <div style={{ textAlign: "center", padding: 16, background: "#dbeafe", borderRadius: 8, minWidth: 100 }}>
+                <div style={{ fontSize: 24, marginBottom: 4 }}>🚢</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>SHIPPING</div>
+                <div style={{ fontSize: 10, color: "#1e40af" }}>SH1, SH2...</div>
+              </div>
+            </div>
+          </div>
+
+          {/* STORAGE ↔ SHIPPING */}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 12 }}>Между STORAGE и SHIPPING:</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ textAlign: "center", padding: 16, background: "#d1fae5", borderRadius: 8, minWidth: 100 }}>
+                <div style={{ fontSize: 24, marginBottom: 4 }}>📦</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>STORAGE</div>
+              </div>
+              <div style={{ fontSize: 20, color: "#2563eb" }}>↔</div>
+              <div style={{ textAlign: "center", padding: 16, background: "#dbeafe", borderRadius: 8, minWidth: 100 }}>
+                <div style={{ fontSize: 24, marginBottom: 4 }}>🚢</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>SHIPPING</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Внутри типа */}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", marginBottom: 12 }}>Внутри одного типа:</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ textAlign: "center", padding: 12, background: "#d1fae5", borderRadius: 8, minWidth: 80 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>STORAGE-1</div>
+                </div>
+                <div style={{ fontSize: 16, color: "#2563eb" }}>→</div>
+                <div style={{ textAlign: "center", padding: 12, background: "#d1fae5", borderRadius: 8, minWidth: 80 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>STORAGE-2</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ textAlign: "center", padding: 12, background: "#dbeafe", borderRadius: 8, minWidth: 80 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>SHIPPING-1</div>
+                </div>
+                <div style={{ fontSize: 16, color: "#2563eb" }}>→</div>
+                <div style={{ textAlign: "center", padding: 12, background: "#dbeafe", borderRadius: 8, minWidth: 80 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>SHIPPING-2</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -131,6 +131,8 @@ export async function POST(req: Request) {
     const fileName = `inventory-report-${sessionId}-${Date.now()}.csv`;
     const filePath = `inventory-reports/${fileName}`;
 
+    console.log("Attempting to upload report:", { fileName, filePath, bufferSize: csvBuffer.length });
+
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
       .from("warehouse-files")
       .upload(filePath, csvBuffer, {
@@ -139,12 +141,26 @@ export async function POST(req: Request) {
       });
 
     if (uploadError) {
-      console.error("Upload error:", uploadError);
+      console.error("Upload error details:", {
+        message: uploadError.message,
+        name: uploadError.name,
+        cause: uploadError.cause,
+        statusCode: (uploadError as any)?.statusCode,
+      });
+      
       return NextResponse.json(
-        { error: "Ошибка сохранения файла", details: uploadError.message },
+        { 
+          error: "Ошибка сохранения файла", 
+          details: uploadError.message,
+          errorName: uploadError.name,
+          filePath,
+          fileName,
+        },
         { status: 500 }
       );
     }
+
+    console.log("Upload successful:", uploadData);
 
     // Get public URL
     const { data: urlData } = supabaseAdmin.storage

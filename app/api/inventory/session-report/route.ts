@@ -26,20 +26,33 @@ export async function GET(req: Request) {
     let sessionId = url.searchParams.get("sessionId");
 
     if (!sessionId) {
-      // Попробовать получить из активной сессии
+      // Попробовать получить из текущей или последней сессии
       const { data: warehouse } = await supabase
         .from("warehouses")
         .select("inventory_session_id, inventory_active")
         .eq("id", profile.warehouse_id)
         .single();
 
-      if (warehouse?.inventory_active && warehouse.inventory_session_id) {
+      if (warehouse?.inventory_session_id) {
         sessionId = warehouse.inventory_session_id;
       } else {
-        return NextResponse.json(
-          { error: "sessionId не указан и активная сессия не найдена" },
-          { status: 400 }
-        );
+        // If no session_id on warehouse, try to find the most recent session
+        const { data: lastSession } = await supabase
+          .from("inventory_sessions")
+          .select("id")
+          .eq("warehouse_id", profile.warehouse_id)
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (lastSession) {
+          sessionId = lastSession.id;
+        } else {
+          return NextResponse.json(
+            { error: "sessionId не указан и сессии не найдены" },
+            { status: 400 }
+          );
+        }
       }
     }
 
