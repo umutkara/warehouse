@@ -13,7 +13,7 @@ export function getCellColor(cell_type: string, meta?: any): string {
     case "storage": return "#e8f5e9"; // зелёный
     case "shipping": return "#f3e5f5"; // фиолетовый
     case "picking": return "#e3f2fd"; // голубой
-    case "surplus": return "#fff3e0"; // оранжевый (излишки)
+    case "surplus": return "#efebe9"; // коричневый (излишки)
     default: return "#ffffff"; // белый
   }
 }
