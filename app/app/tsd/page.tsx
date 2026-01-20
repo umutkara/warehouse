@@ -1029,23 +1029,29 @@ export default function TsdPage() {
           return;
         }
 
+        // Пытаемся загрузить unit (может не существовать - это нормально для излишков)
         const unitInfo = await loadUnitInfo(parsed.code);
-        if (!unitInfo) {
-          setError(`Заказ "${parsed.code}" не найден в системе`);
-          setScanValue("");
-          return;
+        
+        if (unitInfo) {
+          // Unit существует - проверяем что он НЕ размещен где-то на складе
+          if (unitInfo.cell_id && unitInfo.cell) {
+            setError(`❌ Заказ ${parsed.code} уже размещен в ячейке ${unitInfo.cell.code} (${unitInfo.cell.cell_type.toUpperCase()})`);
+            setScanValue("");
+            return;
+          }
+          // Unit существует но не размещен - добавляем
+          setSurplusUnits([...surplusUnits, unitInfo]);
+          setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${surplusUnits.length + 1})`);
+        } else {
+          // Unit НЕ существует - это нормально для излишков (товары без ТТНК)
+          // Создаем временный объект, unit будет создан при подтверждении
+          const newUnitInfo: UnitInfo = {
+            id: '', // будет создан при подтверждении
+            barcode: parsed.code,
+          };
+          setSurplusUnits([...surplusUnits, newUnitInfo]);
+          setSuccess(`✓ Новый излишек: ${parsed.code} (всего: ${surplusUnits.length + 1})`);
         }
-
-        // ⭐ ВАЖНАЯ ПРОВЕРКА: заказ НЕ должен быть размещен где-то на складе
-        if (unitInfo.cell_id && unitInfo.cell) {
-          setError(`❌ Заказ ${parsed.code} уже размещен в ячейке ${unitInfo.cell.code} (${unitInfo.cell.cell_type.toUpperCase()})`);
-          setScanValue("");
-          return;
-        }
-
-        // Добавляем в массив
-        setSurplusUnits([...surplusUnits, unitInfo]);
-        setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${surplusUnits.length + 1})`);
       }
     } catch (e: any) {
       setError(e.message || "Ошибка обработки скана");
@@ -1070,10 +1076,10 @@ export default function TsdPage() {
       let successCount = 0;
       let failedUnits: string[] = [];
 
-      // Перемещаем каждый unit в surplus ячейку
+      // Принимаем каждый unit в surplus ячейку (создаем если не существует)
       for (const unit of surplusUnits) {
         try {
-          const res = await fetch("/api/units/assign", {
+          const res = await fetch("/api/surplus/receive", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
