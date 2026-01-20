@@ -26,6 +26,23 @@ export async function GET() {
     }
 
     // Get all units in SURPLUS cells
+    // Сначала получаем ID всех surplus ячеек
+    const { data: surplusCells } = await supabase
+      .from("warehouse_cells_map")
+      .select("id")
+      .eq("cell_type", "surplus")
+      .eq("warehouse_id", profile.warehouse_id);
+
+    if (!surplusCells || surplusCells.length === 0) {
+      return NextResponse.json({
+        units: [],
+        total: 0,
+      });
+    }
+
+    const cellIds = surplusCells.map(c => c.id);
+
+    // Получаем units в этих ячейках
     const { data: units, error: unitsError } = await supabase
       .from("units")
       .select(`
@@ -33,17 +50,17 @@ export async function GET() {
         barcode,
         product_name,
         received_at,
+        created_at,
         cell_id,
-        warehouse_cells_map!inner (
+        warehouse_cells_map (
           id,
           code,
-          cell_type,
-          warehouse_id
+          cell_type
         )
       `)
-      .eq("warehouse_cells_map.cell_type", "surplus")
-      .eq("warehouse_cells_map.warehouse_id", profile.warehouse_id)
-      .order("received_at", { ascending: false });
+      .in("cell_id", cellIds)
+      .eq("warehouse_id", profile.warehouse_id)
+      .order("created_at", { ascending: false });
 
     if (unitsError) {
       console.error("Units query error:", unitsError);
@@ -60,7 +77,7 @@ export async function GET() {
         id: unit.id,
         barcode: unit.barcode,
         product_name: unit.product_name,
-        received_at: unit.received_at,
+        received_at: unit.received_at || unit.created_at, // fallback to created_at
         cell_id: unit.cell_id,
         cell_code: cell?.code,
         warehouse_id: profile.warehouse_id,
