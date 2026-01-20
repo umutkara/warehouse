@@ -46,22 +46,10 @@ export async function GET() {
     const cellIds = surplusCells.map(c => c.id);
     console.log("DEBUG cell IDs:", cellIds);
 
-    // Получаем units в этих ячейках
+    // Получаем units в этих ячейках (без join - упрощенный запрос)
     const { data: units, error: unitsError } = await supabase
       .from("units")
-      .select(`
-        id,
-        barcode,
-        product_name,
-        received_at,
-        created_at,
-        cell_id,
-        warehouse_cells_map (
-          id,
-          code,
-          cell_type
-        )
-      `)
+      .select("id, barcode, product_name, received_at, created_at, cell_id")
       .in("cell_id", cellIds)
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false });
@@ -69,15 +57,23 @@ export async function GET() {
     console.log("DEBUG units query:", { units, unitsError, cellIds });
 
     if (unitsError) {
-      console.error("Units query error:", unitsError);
-      return NextResponse.json({ error: "Failed to fetch units" }, { status: 500 });
+      console.error("Units query error FULL:", {
+        message: unitsError.message,
+        details: unitsError.details,
+        hint: unitsError.hint,
+        code: unitsError.code,
+      });
+      return NextResponse.json({ 
+        error: "Failed to fetch units",
+        details: unitsError.message,
+        code: unitsError.code,
+      }, { status: 500 });
     }
 
     // Transform data
     const transformedUnits = (units || []).map((unit: any) => {
-      const cell = Array.isArray(unit.warehouse_cells_map) 
-        ? unit.warehouse_cells_map[0]
-        : unit.warehouse_cells_map;
+      // Находим соответствующую ячейку из surplusCells
+      const cell = surplusCells.find(c => c.id === unit.cell_id);
 
       return {
         id: unit.id,
@@ -89,6 +85,8 @@ export async function GET() {
         warehouse_id: profile.warehouse_id,
       };
     });
+
+    console.log("DEBUG transformed units:", transformedUnits);
 
     return NextResponse.json({
       units: transformedUnits,
