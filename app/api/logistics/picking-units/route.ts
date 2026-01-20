@@ -57,21 +57,50 @@ export async function GET(req: Request) {
   const cellsMap = new Map(cells?.map(c => [c.id, c]) || []);
 
   // Get picking_tasks info to show scenario (read-only for logistics)
+  // After migration, units are linked via picking_task_units junction table
   const unitIds = units?.map(u => u.id) || [];
+  
+  // First, get picking_task_units to find which tasks contain these units
+  const { data: taskUnits } = await supabaseAdmin
+    .from("picking_task_units")
+    .select("unit_id, picking_task_id")
+    .in("unit_id", unitIds);
+  
+  // Also check legacy unit_id field for old tasks
+  const { data: legacyTasks } = await supabaseAdmin
+    .from("picking_tasks")
+    .select("unit_id, scenario, status")
+    .in("unit_id", unitIds)
+    .eq("status", "done");
+  
+  // Get task IDs from picking_task_units
+  const taskIds = [...new Set(taskUnits?.map(tu => tu.picking_task_id) || [])];
+  
+  // Get tasks with scenario
   const { data: tasks } = await supabaseAdmin
     .from("picking_tasks")
-    .select("unit_id, scenario")
-    .in("unit_id", unitIds)
+    .select("id, scenario, status")
+    .in("id", taskIds)
     .eq("status", "done"); // Only show completed tasks (unit already in picking)
-
-  const tasksMap = new Map(tasks?.map(t => [t.unit_id, t]) || []);
+  
+  // Create maps: unit_id -> scenario
+  const tasksMap = new Map(tasks?.map(t => [t.id, t]) || []);
+  const taskUnitsMap = new Map(taskUnits?.map(tu => [tu.unit_id, tu.picking_task_id]) || []);
+  const legacyTasksMap = new Map(legacyTasks?.map(t => [t.unit_id, t]) || []);
 
   // Enrich units with cell and scenario info
-  const enrichedUnits = (units || []).map(u => ({
-    ...u,
-    cell: cellsMap.get(u.cell_id) || null,
-    scenario: tasksMap.get(u.id)?.scenario || null,
-  }));
+  const enrichedUnits = (units || []).map(u => {
+    // Try new format first (via picking_task_units)
+    const taskId = taskUnitsMap.get(u.id);
+    const task = taskId ? tasksMap.get(taskId) : null;
+    const scenario = task?.scenario || legacyTasksMap.get(u.id)?.scenario || null;
+    
+    return {
+      ...u,
+      cell: cellsMap.get(u.cell_id) || null,
+      scenario,
+    };
+  });
 
   return NextResponse.json({
     ok: true,

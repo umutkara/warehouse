@@ -93,6 +93,7 @@ export default function OpsShippingPage() {
   const [loading, setLoading] = useState(false);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastCreatedCount, setLastCreatedCount] = useState<number | null>(null);
@@ -190,6 +191,41 @@ export default function OpsShippingPage() {
       setTasks([]);
     } finally {
       setLoadingTasks(false);
+    }
+  }
+
+  async function handleCancelTask(taskId: string) {
+    if (!confirm("Вы уверены? Все заказы в задаче вернутся в исходные ячейки, а задача исчезнет из ТСД.")) {
+      return;
+    }
+
+    setCancelingTaskId(taskId);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch(`/api/picking-tasks/${taskId}/cancel`, {
+        method: "POST",
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to cancel task");
+      }
+
+      setSuccess(`Задача отменена. Возвращено ${json.units_returned} заказов в исходные ячейки.`);
+      
+      // Обновить список задач
+      await loadTasks();
+      
+      // Обновить список доступных units
+      await loadAvailableUnits();
+
+    } catch (e: any) {
+      setError(`Ошибка отмены задачи: ${e.message}`);
+    } finally {
+      setCancelingTaskId(null);
     }
   }
 
@@ -623,6 +659,7 @@ export default function OpsShippingPage() {
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>TO</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>Сценарий</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>Создано</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>Действия</th>
                 </tr>
               </thead>
               <tbody>
@@ -673,6 +710,40 @@ export default function OpsShippingPage() {
                     </td>
                     <td style={{ padding: "12px", fontSize: 13, color: "#666" }}>
                       {new Date(task.created_at).toLocaleString("ru-RU")}
+                    </td>
+                    <td style={{ padding: "12px" }}>
+                      {(task.status === "open" || task.status === "in_progress") && (
+                        <button
+                          onClick={() => handleCancelTask(task.id)}
+                          disabled={cancelingTaskId === task.id}
+                          style={{
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: cancelingTaskId === task.id ? "#9ca3af" : "#dc2626",
+                            background: cancelingTaskId === task.id ? "#f3f4f6" : "#fef2f2",
+                            border: `1px solid ${cancelingTaskId === task.id ? "#d1d5db" : "#fecaca"}`,
+                            borderRadius: 6,
+                            cursor: cancelingTaskId === task.id ? "not-allowed" : "pointer",
+                            transition: "all 0.2s",
+                            opacity: cancelingTaskId === task.id ? 0.6 : 1,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (cancelingTaskId !== task.id) {
+                              e.currentTarget.style.background = "#fee2e2";
+                              e.currentTarget.style.borderColor = "#fca5a5";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (cancelingTaskId !== task.id) {
+                              e.currentTarget.style.background = "#fef2f2";
+                              e.currentTarget.style.borderColor = "#fecaca";
+                            }
+                          }}
+                        >
+                          {cancelingTaskId === task.id ? "Отмена..." : "Отменить"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

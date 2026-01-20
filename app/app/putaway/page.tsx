@@ -51,8 +51,8 @@ export default function PutawayPage() {
 
   async function load() {
     setErr(null);
-    // Загружаем units со статусом receiving
-    const r = await fetch(`/api/units/list?status=receiving`, { cache: "no-store" });
+    // Загружаем units со статусом bin
+    const r = await fetch(`/api/units/list?status=bin`, { cache: "no-store" });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       setErr(j.error ?? "Ошибка загрузки");
@@ -122,9 +122,9 @@ export default function PutawayPage() {
 
       // Определяем toStatus по cell_type целевой ячейки
       const toStatus = selectedCell.cell_type === "storage" 
-        ? "inventory_hold" 
+        ? "stored" 
         : selectedCell.cell_type === "shipping"
-        ? "shipped"
+        ? "shipping"
         : null;
 
       if (!toStatus) {

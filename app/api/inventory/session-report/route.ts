@@ -178,6 +178,10 @@ export async function GET(req: Request) {
             missingCount: missing.length,
             extraCount: extra.length,
             unknownCount: unknown.length,
+            // Добавляем подробные списки для отчетности
+            missing: missing,
+            extra: extra,
+            unknown: unknown,
           });
 
           unitsExpectedTotal += expected.length;

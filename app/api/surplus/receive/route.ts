@@ -77,7 +77,7 @@ export async function POST(req: Request) {
         .insert({
           barcode: normalizedBarcode,
           warehouse_id: profile.warehouse_id,
-          status: "receiving", // Используем стандартный статус как в receiving/scan
+          status: "bin", // Используем стандартный статус как в receiving/scan
         })
         .select("id")
         .single();

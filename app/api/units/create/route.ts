@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       .insert({
         barcode: digits,
         warehouse_id: profile.warehouse_id,
-        status: "receiving"
+        status: "bin"
       })
       .select("id, barcode, created_at, warehouse_id")
       .single();
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
       p_summary: `Создание unit ${createdUnit.barcode}`,
       p_meta: {
         barcode: createdUnit.barcode,
-        status: "receiving",
+        status: "bin",
       },
     });
 

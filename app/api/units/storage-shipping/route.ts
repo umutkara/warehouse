@@ -73,7 +73,7 @@ export async function GET(req: Request) {
   // Get all picking tasks that are open or in_progress
   const { data: pickingTasks, error: tasksError } = await supabase
     .from("picking_tasks")
-    .select("unit_id")
+    .select("unit_id, id")
     .eq("warehouse_id", profile.warehouse_id)
     .in("status", ["open", "in_progress"]);
 
@@ -82,10 +82,26 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: tasksError.message }, { status: 400 });
   }
 
-  // Create a set of unit IDs that are already in tasks
-  const unitIdsInTasks = new Set(
-    (pickingTasks || []).map((task) => task.unit_id).filter(Boolean)
-  );
+  // Get units from picking_task_units (new multi-unit schema)
+  const taskIds = (pickingTasks || []).map((t) => t.id).filter(Boolean);
+  let unitsFromMultiUnitTasks: string[] = [];
+  
+  if (taskIds.length > 0) {
+    const { data: taskUnits, error: taskUnitsError } = await supabase
+      .from("picking_task_units")
+      .select("unit_id")
+      .in("picking_task_id", taskIds);
+
+    if (!taskUnitsError && taskUnits) {
+      unitsFromMultiUnitTasks = taskUnits.map((tu) => tu.unit_id).filter(Boolean);
+    }
+  }
+
+  // Create a set of unit IDs that are already in tasks (both old and new schema)
+  const unitIdsInTasks = new Set([
+    ...(pickingTasks || []).map((task) => task.unit_id).filter(Boolean),
+    ...unitsFromMultiUnitTasks,
+  ]);
 
   // Filter units that are in storage or shipping cells AND not in picking tasks
   const unitsInStorageOrShipping = units

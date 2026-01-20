@@ -165,6 +165,8 @@ export async function GET(req: Request) {
         barcode: u.barcode,
         cell_id: u.cell_id,
         status: u.status,
+        from_cell_id: u.from_cell_id,
+        from_cell: u.from_cell_id ? cellsMap.get(u.from_cell_id) : null,
       })),
       fromCells: fromCells.map((cell: any) => ({
         code: cell.code,

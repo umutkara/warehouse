@@ -19,7 +19,13 @@ type UnitInfo = {
   id: string;
   barcode: string;
   cell_id?: string;
+  from_cell_id?: string;
   cell?: {
+    id: string;
+    code: string;
+    cell_type: string;
+  };
+  from_cell?: {
     id: string;
     code: string;
     cell_type: string;
@@ -57,6 +63,9 @@ export default function TsdPage() {
   // Для режима Отгрузка (Shipping Tasks)
   const [shippingTasks, setShippingTasks] = useState<any[]>([]);
   const [currentTask, setCurrentTask] = useState<any | null>(null);
+  const [shippingSteps, setShippingSteps] = useState<any[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [selectedFromCellStep, setSelectedFromCellStep] = useState<any | null>(null); // Выбранная ячейка для сбора
   
   // Для режима Излишки (Surplus)
   const [surplusCell, setSurplusCell] = useState<CellInfo | null>(null);
@@ -107,7 +116,7 @@ export default function TsdPage() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell]);
+  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell, selectedFromCellStep, busy]);
   
   // Load shipping tasks when mode is shipping
   useEffect(() => {
@@ -136,8 +145,78 @@ export default function TsdPage() {
     setShippingFromCell(null);
     setShippingUnits([]);
     setShippingToCell(null);
+    setSelectedFromCellStep(null); // Сброс выбранной ячейки
     setError(null);
     setSuccess(null);
+    
+    // Группировка units по from_cell_id
+    const unitsByFromCell = new Map<string, any[]>();
+    (task.units || []).forEach((unit: any) => {
+      const fromCellId = unit.from_cell_id || unit.cell_id;
+      if (!fromCellId) return;
+      
+      if (!unitsByFromCell.has(fromCellId)) {
+        unitsByFromCell.set(fromCellId, []);
+      }
+      unitsByFromCell.get(fromCellId)!.push(unit);
+    });
+    
+    // Создание массива шагов
+    const steps: any[] = [];
+    
+    // Шаги для каждой from-ячейки
+    unitsByFromCell.forEach((units, fromCellId) => {
+      const fromCell = units[0]?.from_cell; // Информация о ячейке из первого unit
+      steps.push({
+        type: 'from_cell',
+        fromCellId,
+        fromCell,
+        units,
+        scannedUnits: [],
+        completed: false, // Статус завершения ячейки
+        stepIndex: steps.length, // Добавляем stepIndex для удобства доступа
+      });
+    });
+    
+    // Финальный шаг - TO ячейка (picking)
+    steps.push({
+      type: 'to_cell',
+      targetCell: task.targetCell,
+    });
+    
+    setShippingSteps(steps);
+    setCurrentStepIndex(0); // Не используется в новой логике, но оставим для совместимости
+  }
+
+  // Выбор ячейки для сбора (по аналогии с инвентаризацией)
+  async function handleSelectFromCell(step: any, stepIndex: number) {
+    setError(null);
+    setSuccess(null);
+    
+    // Берём задачу в работу при первом выборе ячейки
+    if (!selectedFromCellStep && shippingUnits.length === 0) {
+      try {
+        const startRes = await fetch("/api/tsd/shipping-tasks/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId: currentTask.id }),
+        });
+
+        if (!startRes.ok) {
+          const startJson = await startRes.json().catch(() => ({}));
+          setError(startJson.error || "Не удалось взять задачу в работу");
+          return;
+        }
+      } catch (e: any) {
+        setError(`Ошибка: ${e.message}`);
+        return;
+      }
+    }
+    
+    setSelectedFromCellStep({ ...step, stepIndex });
+    setCurrentStepIndex(stepIndex);
+    setSuccess(`✓ Выбрана ячейка: ${step.fromCell?.code}. Отсканируйте ${step.units.length} заказов.`);
+    setTimeout(() => setSuccess(null), 2000);
   }
   
   async function loadShippingTasks() {
@@ -561,8 +640,8 @@ export default function TsdPage() {
       for (const unit of units) {
         try {
           const res = await fetch("/api/units/move-by-scan", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
+        method: "POST",
+        headers: { "content-type": "application/json" },
             body: JSON.stringify({
               fromCellCode: fromCell.code,
               toCellCode: effectiveToCell.code,
@@ -586,7 +665,7 @@ export default function TsdPage() {
           } else {
             successCount++;
           }
-        } catch (e: any) {
+    } catch (e: any) {
           failedUnits.push(`${unit.barcode}: ${e.message}`);
         }
       }
@@ -731,12 +810,12 @@ export default function TsdPage() {
     loadInventoryTasks(); // Перезагрузить список заданий
   }
 
-  // Обработка сканирования для режима Shipping (как режим Перемещение)
+  // Обработка сканирования для режима Shipping (логика с ручным выбором ячейки)
   async function handleShippingScan() {
     if (!scanValue.trim()) return;
 
     // Проверка наличия активной задачи
-    if (!currentTask) {
+    if (!currentTask || shippingSteps.length === 0) {
       setError("Сначала выберите задание из списка");
       setScanValue("");
       return;
@@ -754,113 +833,124 @@ export default function TsdPage() {
     setBusy(true);
 
     try {
-      if (parsed.type === "cell") {
-        // Сканируем ячейку
-        const cellInfo = await loadCellInfo(parsed.code);
-        if (!cellInfo) {
-          setError(`Ячейка "${parsed.code}" не найдена`);
-          setScanValue("");
-          return;
-        }
-
-        // Определяем FROM или TO
-        if (!shippingFromCell) {
-          // Первая ячейка - FROM
-          // Должна быть storage или shipping
-          if (cellInfo.cell_type !== "storage" && cellInfo.cell_type !== "shipping") {
-            setError(`FROM ячейка должна быть storage или shipping, а не ${cellInfo.cell_type}`);
+      // Проверяем завершены ли все from-ячейки
+      const allFromCellsCompleted = shippingSteps
+        .filter((s: any) => s.type === 'from_cell')
+        .every((s: any) => s.completed);
+      
+      if (allFromCellsCompleted) {
+        // Все ячейки собраны - финальный шаг (TO ячейка)
+        if (parsed.type === "cell") {
+          const cellInfo = await loadCellInfo(parsed.code);
+          if (!cellInfo) {
+            setError(`Ячейка "${parsed.code}" не найдена`);
             setScanValue("");
+            setBusy(false);
             return;
           }
           
-          // Взять задачу в работу (in_progress) - блокирует для других пользователей
-          try {
-            const startRes = await fetch("/api/tsd/shipping-tasks/start", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ taskId: currentTask.id }),
-            });
-
-            if (!startRes.ok) {
-              const startJson = await startRes.json().catch(() => ({}));
-              throw new Error(startJson.error || "Не удалось взять задачу в работу");
-            }
-          } catch (e: any) {
-            setError(`Ошибка: ${e.message}`);
+          // Проверка что это целевая picking-ячейка
+          if (!currentTask.targetCell || cellInfo.id !== currentTask.targetCell.id) {
+            setError(`TO ячейка должна быть ${currentTask.targetCell?.code || 'picking из задания'}`);
             setScanValue("");
+            setBusy(false);
             return;
           }
           
-          setShippingFromCell(cellInfo);
-          setSuccess(`✓ Задача в работе! FROM: ${cellInfo.code} (${cellInfo.cell_type})`);
-        } else {
-          // Вторая ячейка - TO
-          // Должен быть хотя бы один unit
-          if (shippingUnits.length === 0) {
-            setError("Сначала отсканируйте хотя бы один заказ");
-            setScanValue("");
-            return;
-          }
-
-          // TO ячейка должна совпадать с targetCell задачи
-          if (!currentTask.targetCell) {
-            setError("Целевая ячейка не найдена в задаче");
-            setScanValue("");
-            return;
-          }
-
-          if (cellInfo.id !== currentTask.targetCell.id) {
-            setError(`TO ячейка должна быть ${currentTask.targetCell.code} (из задания)`);
-            setScanValue("");
-            return;
-          }
-
-          // Verify target cell is picking type
           if (cellInfo.cell_type !== "picking") {
             setError(`TO ячейка должна быть picking, а не ${cellInfo.cell_type}`);
             setScanValue("");
+            setBusy(false);
             return;
           }
-
-          setShippingToCell(cellInfo);
-          setSuccess(`TO: ${cellInfo.code} (${cellInfo.cell_type})`);
           
-          // Автоматически выполняем перемещение (передаем toCell напрямую)
-          handleCompleteShippingTask(cellInfo);
+          setShippingToCell(cellInfo);
+          setSuccess(`✓ Picking: ${cellInfo.code}. Перемещение всех заказов...`);
+          
+          // Выполняем массовое перемещение всех собранных заказов
+          handleCompleteShippingTaskStepBased(cellInfo);
+        } else {
+          setError("Отсканируйте TO ячейку (picking). Все заказы собраны, осталось переместить их в picking.");
+          setScanValue("");
+          setBusy(false);
+          return;
         }
       } else {
-        // Сканируем unit barcode
-        if (!shippingFromCell) {
-          setError("Сначала отсканируйте FROM ячейку");
+        // Сбор заказов из выбранной from-ячейки
+        if (!selectedFromCellStep) {
+          setError("Сначала выберите ячейку из списка");
           setScanValue("");
+          setBusy(false);
           return;
         }
-
-        // Проверяем что unit не отсканирован уже
-        if (shippingUnits.some(u => u.barcode === parsed.code)) {
-          setError(`Заказ ${parsed.code} уже отсканирован`);
+        
+        if (parsed.type === "unit") {
+          const barcode = parsed.code;
+          
+          // Проверка что unit принадлежит выбранной ячейке
+          const unitInStep = selectedFromCellStep.units.find((u: any) => u.barcode === barcode);
+          if (!unitInStep) {
+            setError(`Заказ ${barcode} не из ячейки ${selectedFromCellStep.fromCell?.code}. Отсканируйте заказ только из этой ячейки.`);
+            setScanValue("");
+            setBusy(false);
+            return;
+          }
+          
+          // Проверка что unit не был уже отсканирован
+          if (selectedFromCellStep.scannedUnits.some((u: any) => u.barcode === barcode)) {
+            setError(`Заказ ${barcode} уже отсканирован`);
+            setScanValue("");
+            setBusy(false);
+            return;
+          }
+          
+          // Добавляем unit в отсканированные для текущей ячейки
+          const updatedSteps = [...shippingSteps];
+          const stepIdx = selectedFromCellStep.stepIndex;
+          
+          if (!updatedSteps[stepIdx]) {
+            setError(`Ошибка: шаг ${stepIdx} не найден в списке. Попробуйте выбрать ячейку заново.`);
+            setScanValue("");
+            setBusy(false);
+            return;
+          }
+          
+          if (!updatedSteps[stepIdx].scannedUnits) {
+            updatedSteps[stepIdx].scannedUnits = [];
+          }
+          
+          updatedSteps[stepIdx] = {
+            ...updatedSteps[stepIdx],
+            scannedUnits: [...updatedSteps[stepIdx].scannedUnits, unitInStep],
+            stepIndex: stepIdx, // Сохраняем stepIndex при обновлении
+          };
+          
+          // Также добавляем в общий список shippingUnits
+          setShippingUnits([...shippingUnits, unitInStep]);
+          
+          const scannedCount = updatedSteps[stepIdx].scannedUnits.length;
+          const totalInCell = updatedSteps[stepIdx].units.length;
+          
+          // Если все заказы из ячейки собраны - помечаем ячейку завершённой
+          if (scannedCount === totalInCell) {
+            const completedCellCode = selectedFromCellStep.fromCell?.code; // Сохраняем до сброса
+            updatedSteps[stepIdx].completed = true;
+            setShippingSteps(updatedSteps);
+            setSelectedFromCellStep(null); // Сброс выбранной ячейки
+            setSuccess(`✅ Ячейка ${completedCellCode} завершена! (${scannedCount}/${totalInCell})`);
+          } else {
+            const updatedStep = { ...updatedSteps[stepIdx], stepIndex: stepIdx };
+            setShippingSteps(updatedSteps);
+            // Сохраняем stepIndex при обновлении selectedFromCellStep
+            setSelectedFromCellStep(updatedStep);
+            setSuccess(`✓ ${barcode} (${scannedCount}/${totalInCell} из ${updatedStep.fromCell?.code})`);
+          }
+        } else {
+          setError("Отсканируйте заказ (не ячейку). Выберите ячейку из списка, затем сканируйте заказы.");
           setScanValue("");
+          setBusy(false);
           return;
         }
-
-        // Проверяем что unit принадлежит текущей задаче
-        const unitInTask = currentTask.units?.find((u: any) => u.barcode === parsed.code);
-        if (!unitInTask) {
-          setError(`Заказ ${parsed.code} не принадлежит текущему заданию`);
-          setScanValue("");
-          return;
-        }
-
-        const unitInfo = await loadUnitInfo(parsed.code);
-        if (!unitInfo) {
-          setError(`Unit "${parsed.code}" не найден`);
-          setScanValue("");
-          return;
-        }
-
-        // Добавляем в массив
-        setShippingUnits([...shippingUnits, unitInfo]);
-        setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${shippingUnits.length + 1}/${currentTask.unitCount})`);
       }
     } catch (e: any) {
       setError(e.message || "Ошибка обработки скана");
@@ -870,7 +960,120 @@ export default function TsdPage() {
     }
   }
 
-  // Выполнение задачи shipping (массовое перемещение)
+  // НОВАЯ функция для пошагового перемещения (из разных from-ячеек в одну TO)
+  async function handleCompleteShippingTaskStepBased(toCell: { id: string; code: string; cell_type: string }) {
+    if (!currentTask || shippingUnits.length === 0) {
+      setError("Нет данных для перемещения");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      let successCount = 0;
+      let failedUnits: string[] = [];
+      const movedUnitIds: string[] = [];
+
+      // Перемещаем каждый unit из его from-ячейки в TO ячейку
+      for (const unit of shippingUnits) {
+        try {
+          // Определяем from-ячейку для каждого unit
+          // Используем from_cell из структуры данных API (не cell, так как unit может уже быть перемещен)
+          const fromCellCode = unit.from_cell?.code || unit.cell?.code;
+          if (!fromCellCode) {
+            failedUnits.push(`${unit.barcode}: нет исходной ячейки`);
+            continue;
+          }
+
+          const res = await fetch("/api/units/move-by-scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              fromCellCode,
+              toCellCode: toCell.code,
+              unitBarcode: unit.barcode,
+            }),
+          });
+
+          const rawText = await res.text().catch(() => '');
+          let json: any = null;
+          try {
+            json = rawText ? JSON.parse(rawText) : null;
+          } catch {}
+          
+          if (res.status === 423) {
+            setInventoryError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+            throw new Error("Инвентаризация активна");
+          }
+
+          if (!res.ok) {
+            failedUnits.push(`${unit.barcode}: ${json?.error || rawText || "ошибка"}`);
+          } else {
+            successCount++;
+            movedUnitIds.push(unit.id);
+          }
+    } catch (e: any) {
+          if (e.message === "Инвентаризация активна") {
+            throw e;
+          }
+          failedUnits.push(`${unit.barcode}: ${e.message}`);
+        }
+      }
+
+      // Обновляем задачу
+      if (successCount > 0) {
+        try {
+          const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskId: currentTask.id,
+              movedUnitIds,
+            }),
+          });
+
+          const completeJson = await completeRes.json().catch(() => ({}));
+          
+          if (completeRes.ok && completeJson.taskCompleted) {
+            setSuccess(`✅ Задание завершено! Перемещено ${successCount} заказов в ${toCell.code}`);
+          } else {
+            setSuccess(`✓ Перемещено ${successCount}/${currentTask.unitCount} заказов. ${failedUnits.length > 0 ? `Ошибок: ${failedUnits.length}` : ""}`);
+          }
+        } catch (e: any) {
+          setSuccess(`✓ Перемещено ${successCount} заказов (ошибка обновления задания)`);
+        }
+      }
+
+      if (failedUnits.length > 0 && successCount === 0) {
+        setError(`Ошибка: ${failedUnits.slice(0, 3).join(", ")}${failedUnits.length > 3 ? "..." : ""}`);
+      }
+
+      // Сброс после успеха
+      setTimeout(() => {
+        setShippingFromCell(null);
+        setShippingUnits([]);
+        setShippingToCell(null);
+        setShippingSteps([]);
+        setCurrentStepIndex(0);
+        setCurrentTask(null);
+        if (failedUnits.length === 0) {
+          setSuccess(null);
+        }
+        loadShippingTasks();
+      }, 3000);
+    } catch (e: any) {
+      setError(e.message || "Ошибка перемещения");
+      if (inventoryError) {
+        setTimeout(() => setInventoryError(null), 5000);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Выполнение задачи shipping (массовое перемещение) - СТАРАЯ ВЕРСИЯ (не используется в новой логике)
   // toCell: optional override (used when called immediately after setState to avoid async race condition)
   async function handleCompleteShippingTask(toCell?: { id: string; code: string; cell_type: string }) {
     const effectiveToCell = toCell || shippingToCell;
@@ -1154,6 +1357,8 @@ export default function TsdPage() {
       setShippingFromCell(null);
       setShippingUnits([]);
       setShippingToCell(null);
+      setSelectedFromCellStep(null);
+      setShippingSteps([]);
       // Не сбрасываем currentTask - он загружается автоматически
     } else if (mode === "surplus") {
       setSurplusCell(null);
@@ -1239,7 +1444,7 @@ export default function TsdPage() {
           <Alert variant="error" style={{ fontSize: "18px", padding: "var(--spacing-lg)" }}>
             {inventoryError}
           </Alert>
-        </div>
+      </div>
       )}
 
       {/* Prominent 423 error for shipping tasks */}
@@ -1492,8 +1697,8 @@ export default function TsdPage() {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
+        </div>
+      )}
 
             {/* Текущее задание (ячейка) - если выбрано */}
             {currentInventoryTask && inventoryCell && (
@@ -1704,6 +1909,8 @@ export default function TsdPage() {
                         setShippingFromCell(null);
                         setShippingUnits([]);
                         setShippingToCell(null);
+                        setSelectedFromCellStep(null);
+                        setShippingSteps([]);
                         setError(null);
                         setSuccess(null);
                       }}
@@ -1737,64 +1944,213 @@ export default function TsdPage() {
                   )}
                 </div>
 
-                {/* FROM */}
-                <div
-                  style={{
-                    padding: 16,
-                    background: shippingFromCell ? "#e3f2fd" : "#f5f5f5",
-                    borderRadius: 8,
-                    border: "2px solid",
-                    borderColor: shippingFromCell ? "#2196f3" : "#ddd",
-                  }}
-                >
-                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
-                  {shippingFromCell ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {/* Список from-ячеек для выбора (если ячейка не выбрана) */}
+                {!selectedFromCellStep && shippingSteps.filter((s: any) => s.type === 'from_cell' && !s.completed).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: 12, color: "#374151" }}>
+                      Выберите ячейку для сбора ({shippingSteps.filter((s: any) => s.type === 'from_cell' && !s.completed).length} осталось):
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {shippingSteps.map((step: any, idx: number) => {
+                        if (step.type !== 'from_cell' || step.completed) return null;
+                        
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleSelectFromCell(step, idx)}
+                            style={{
+                              padding: 16,
+                              background: getCellColor(step.fromCell?.cell_type || 'storage', {}),
+                              borderRadius: 8,
+                              border: "2px solid #d1d5db",
+                              cursor: "pointer",
+                              transition: "all 0.2s",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = "scale(1.02)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = "scale(1)";
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <div
+                                style={{
+                                  width: 48,
+                                  height: 48,
+                                  background: getCellColor(step.fromCell?.cell_type || 'storage', {}),
+                                  border: "2px solid #9ca3af",
+                                  borderRadius: 8,
+                                  flexShrink: 0,
+                                }}
+                              />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: "18px", fontWeight: 700, color: "#111" }}>
+                                  {step.fromCell?.code || 'Ячейка'}
+                                </div>
+                                <div style={{ fontSize: "14px", color: "#666" }}>
+                                  {step.units.length} заказов ({step.scannedUnits.length} отсканировано)
+                                </div>
+                              </div>
+                              <div style={{ fontSize: "24px" }}>→</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Текущая выбранная ячейка */}
+                {selectedFromCellStep && (
+                  <div
+                    style={{
+                      padding: 16,
+                      background: getCellColor(selectedFromCellStep.fromCell?.cell_type || 'storage', {}),
+                      borderRadius: 8,
+                      border: "2px solid #2563eb",
+                    }}
+                  >
+                    <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Текущая ячейка:</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
                       <div
                         style={{
                           width: 32,
                           height: 32,
-                          backgroundColor: getCellColor(shippingFromCell.cell_type, shippingFromCell.meta),
+                          backgroundColor: getCellColor(selectedFromCellStep.fromCell?.cell_type || 'storage', {}),
                           border: "1px solid #ccc",
                           borderRadius: 4,
                           flexShrink: 0,
                         }}
                       />
                       <div>
-                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingFromCell.code}</div>
-                        <div style={{ fontSize: "14px", color: "#666" }}>{shippingFromCell.cell_type}</div>
+                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{selectedFromCellStep.fromCell?.code}</div>
+                        <div style={{ fontSize: "14px", color: "#666" }}>
+                          {selectedFromCellStep.scannedUnits.length} / {selectedFromCellStep.units.length} заказов
+                        </div>
                       </div>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
-                  )}
-                </div>
-
-                {/* UNITS (список отсканированных заказов) */}
-                <div
-                  style={{
-                    padding: 16,
-                    background: shippingUnits.length > 0 ? "#fff8e1" : "#f5f5f5",
-                    borderRadius: 8,
-                    border: "2px solid",
-                    borderColor: shippingUnits.length > 0 ? "#ffc107" : "#ddd",
-                  }}
-                >
-                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
-                    ЗАКАЗЫ (отсканировано: {shippingUnits.length}/{currentTask.unitCount})
+                    <button
+                      onClick={() => {
+                        setSelectedFromCellStep(null);
+                        setSuccess(null);
+                        setError(null);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        background: "#fff",
+                        border: "1px solid #2196f3",
+                        borderRadius: 6,
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#2196f3",
+                      }}
+                    >
+                      ← Сменить ячейку
+          </button>
                   </div>
-                  {shippingUnits.length > 0 ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-                      {shippingUnits.map((u, idx) => (
+                )}
+
+                {/* Список заказов для сбора из выбранной ячейки */}
+                {selectedFromCellStep && (
+                  <div
+                    style={{
+                      padding: 16,
+                      background: "#fff",
+                      borderRadius: 8,
+                      border: "2px solid #e0e0e0",
+                    }}
+                  >
+                    <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: 12, color: "#333" }}>
+                      📋 Заказы для сканирования из {selectedFromCellStep.fromCell?.code}:
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 300, overflowY: "auto" }}>
+                      {selectedFromCellStep.units.map((unit: any, idx: number) => {
+                        const isScanned = selectedFromCellStep.scannedUnits.some((u: any) => u.id === unit.id);
+                        
+                        return (
+                          <div 
+                            key={unit.id} 
+                            style={{ 
+                              fontSize: "16px", 
+                              fontWeight: 600, 
+                              padding: "10px 12px",
+                              background: isScanned ? "#e8f5e9" : "#fff",
+                              borderRadius: 6,
+                              border: isScanned ? "2px solid #4caf50" : "2px solid #e0e0e0",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              opacity: isScanned ? 0.7 : 1,
+                            }}
+                          >
+                            <span style={{ 
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minWidth: 28,
+                              height: 28,
+                              borderRadius: "50%",
+                              background: isScanned ? "#4caf50" : "#e0e0e0",
+                              color: isScanned ? "#fff" : "#666",
+                              fontSize: 13,
+                              fontWeight: 700,
+                              flexShrink: 0
+                            }}>
+                              {isScanned ? '✓' : (idx + 1)}
+                            </span>
+                            <span style={{ flex: 1, color: isScanned ? "#666" : "#111" }}>
+                              {unit.barcode}
+                            </span>
+                            {isScanned && (
+                              <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 600 }}>
+                                Отсканирован
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+            </div>
+          )}
+
+                {/* Если все from-ячейки завершены */}
+                {!selectedFromCellStep && shippingSteps.filter((s: any) => s.type === 'from_cell' && !s.completed).length === 0 && shippingSteps.filter((s: any) => s.type === 'from_cell').length > 0 && (
+                  <div style={{ padding: 16, background: "#e8f5e9", borderRadius: 8, border: "2px solid #4caf50" }}>
+                    <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: 8, color: "#2e7d32" }}>
+                      ✅ Все заказы собраны!
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>
+                      Отсканируйте picking-ячейку: <strong>{currentTask.targetCell?.code}</strong>
+                    </div>
+        </div>
+      )}
+
+                {/* Отсканированные заказы из текущей ячейки */}
+                {selectedFromCellStep && selectedFromCellStep.scannedUnits.length > 0 && (
+                  <div
+                    style={{
+                      padding: 16,
+                      background: "#e8f5e9",
+                      borderRadius: 8,
+                      border: "2px solid #4caf50",
+                    }}
+                  >
+                    <div style={{ fontSize: "14px", color: "#2e7d32", fontWeight: 700, marginBottom: 8 }}>
+                      ✓ Отсканировано из {selectedFromCellStep.fromCell?.code}: {selectedFromCellStep.scannedUnits.length}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 150, overflowY: "auto" }}>
+                      {selectedFromCellStep.scannedUnits.map((u: any, idx: number) => (
                         <div 
                           key={u.id} 
                           style={{ 
-                            fontSize: "16px", 
+                            fontSize: "14px", 
                             fontWeight: 600, 
-                            padding: "8px 12px",
+                            padding: "6px 10px",
                             background: "#fff",
-                            borderRadius: 6,
-                            border: "1px solid #ffc107",
+                            borderRadius: 4,
+                            border: "1px solid #4caf50",
                             display: "flex",
                             alignItems: "center",
                             gap: 8
@@ -1804,12 +2160,12 @@ export default function TsdPage() {
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            width: 24,
-                            height: 24,
+                            width: 20,
+                            height: 20,
                             borderRadius: "50%",
-                            background: "#ffc107",
+                            background: "#4caf50",
                             color: "#fff",
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight: 700,
                             flexShrink: 0
                           }}>
@@ -1818,111 +2174,27 @@ export default function TsdPage() {
                           <span style={{ flex: 1 }}>{u.barcode}</span>
                         </div>
                       ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
-                  )}
-                </div>
+          </div>
+        </div>
+      )}
 
-                {/* TO */}
-                <div
-                  style={{
-                    padding: 16,
-                    background: shippingToCell ? "#e8f5e9" : "#f5f5f5",
-                    borderRadius: 8,
-                    border: "2px solid",
-                    borderColor: shippingToCell ? "#4caf50" : "#ddd",
-                  }}
-                >
-                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>TO (picking ячейка)</div>
-                  {shippingToCell ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div
-                        style={{
-                          width: 32,
-                          height: 32,
-                          backgroundColor: getCellColor(shippingToCell.cell_type, shippingToCell.meta),
-                          border: "1px solid #ccc",
-                          borderRadius: 4,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <div>
-                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingToCell.code}</div>
-                        <div style={{ fontSize: "14px", color: "#666" }}>{shippingToCell.cell_type}</div>
+                {/* Прогресс сбора */}
+                {shippingSteps.filter((s: any) => s.type === 'from_cell').length > 0 && (
+                  <div style={{ padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e0e0e0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontSize: "14px", color: "#666" }}>
+                        Прогресс сбора:
+    </div>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#333" }}>
+                        {shippingSteps.filter((s: any) => s.type === 'from_cell' && s.completed).length} / {shippingSteps.filter((s: any) => s.type === 'from_cell').length} ячеек
                       </div>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
-                  )}
-                </div>
+                    <div style={{ fontSize: "13px", color: "#666", textAlign: "center" }}>
+                      Собрано заказов: <strong>{shippingUnits.length} / {currentTask.unitCount}</strong>
+                    </div>
+                  </div>
+                )}
 
-                {/* Инструкции */}
-                <div style={{ padding: 16, background: "#f9fafb", borderRadius: 8, fontSize: "14px", color: "#666", border: "2px solid #e0e0e0" }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8, fontSize: "16px", color: "#333" }}>📋 Инструкция:</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ 
-                        display: "inline-flex", 
-                        alignItems: "center", 
-                        justifyContent: "center",
-                        width: 24, 
-                        height: 24, 
-                        borderRadius: "50%", 
-                        background: shippingFromCell ? "#4caf50" : "#e0e0e0",
-                        color: shippingFromCell ? "#fff" : "#666",
-                        fontWeight: 700,
-                        fontSize: 12
-                      }}>1</span>
-                      <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>FROM</strong> ячейку (откуда)
-                      </span>
-                      {shippingFromCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ 
-                        display: "inline-flex", 
-                        alignItems: "center", 
-                        justifyContent: "center",
-                        width: 24, 
-                        height: 24, 
-                        borderRadius: "50%", 
-                        background: shippingUnits.length > 0 ? "#4caf50" : "#e0e0e0",
-                        color: shippingUnits.length > 0 ? "#fff" : "#666",
-                        fontWeight: 700,
-                        fontSize: 12
-                      }}>2</span>
-                      <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>заказы из задания</strong> (от 1 до {currentTask.unitCount})
-                      </span>
-                      {shippingUnits.length > 0 && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ 
-                        display: "inline-flex", 
-                        alignItems: "center", 
-                        justifyContent: "center",
-                        width: 24, 
-                        height: 24, 
-                        borderRadius: "50%", 
-                        background: shippingToCell ? "#4caf50" : "#e0e0e0",
-                        color: shippingToCell ? "#fff" : "#666",
-                        fontWeight: 700,
-                        fontSize: 12
-                      }}>3</span>
-                      <span style={{ flex: 1 }}>
-                        Отсканируйте <strong>TO</strong> ячейку ({currentTask.targetCell?.code || "picking"})
-                      </span>
-                      {shippingToCell && <span style={{ color: "#4caf50", fontWeight: 600 }}>✓</span>}
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 12, padding: 8, background: "#e8f5e9", borderRadius: 6, color: "#2e7d32", fontWeight: 600, fontSize: 13 }}>
-                    ✓ Задача берется в работу при скане FROM (блокируется для других)
-                  </div>
-                  <div style={{ marginTop: 8, padding: 8, background: "#e3f2fd", borderRadius: 6, color: "#1565c0", fontWeight: 600, fontSize: 13 }}>
-                    ✓ Все заказы переместятся автоматически после сканирования TO
-                  </div>
-                </div>
               </>
             )}
           </div>
@@ -2301,10 +2573,20 @@ export default function TsdPage() {
             </ol>
           ) : (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Выберите задание из списка (нажмите на него)</li>
-              <li>Отсканируйте FROM ячейку (откуда)</li>
-              <li>Отсканируйте заказы один за другим</li>
-              <li>Отсканируйте TO ячейку (picking) - заказы переместятся автоматически</li>
+              <li><strong>Выберите задание</strong> из списка (нажмите на него)</li>
+              <li><strong>Появится список ячеек</strong> с количеством заказов в каждой</li>
+              <li><strong>Выберите ячейку</strong> для сбора (можно в любом порядке, на ваш выбор)</li>
+              <li><strong>Увидите список заказов</strong> которые нужно отсканировать из этой ячейки</li>
+              <li><strong>Сканируйте заказы</strong> один за другим (только из списка для этой ячейки)</li>
+              <li><strong>После завершения</strong> ячейки автоматически вернётесь к списку - выберите следующую</li>
+              <li><strong>Когда все ячейки собраны</strong> - отсканируйте picking-ячейку (указана в задании)</li>
+              <li><strong>Все заказы переместятся</strong> автоматически в picking, задание завершится</li>
+              <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+                💡 Задача берётся в работу при выборе первой ячейки и блокируется для других работников
+              </li>
+              <li style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+                📋 Можно собирать ячейки в любом порядке (сначала ближние, потом дальние)
+              </li>
             </ol>
           )}
         </div>

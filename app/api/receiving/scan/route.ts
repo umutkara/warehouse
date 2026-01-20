@@ -152,7 +152,7 @@ export async function POST(req: Request) {
         .insert({
           barcode: digits,
           warehouse_id: profile.warehouse_id,
-          status: "receiving",
+          status: "receiving", // Временно используем "receiving" вместо "bin" до применения миграции enum
         })
         .select("id, barcode, created_at, warehouse_id")
         .single();
@@ -170,7 +170,7 @@ export async function POST(req: Request) {
         p_summary: `Создание unit ${createdUnit.barcode} при приемке`,
         p_meta: {
           barcode: createdUnit.barcode,
-          status: "receiving",
+          status: "receiving", // Временно используем "receiving" вместо "bin"
           cell_code: binCell.code,
           source: "receiving_scan",
         },
@@ -188,17 +188,32 @@ export async function POST(req: Request) {
     }
 
     // Check if unit has active OUT shipment BEFORE moving (to set correct note)
+    // Also check for recently returned shipments (status = "returned") to handle cases
+    // where shipment was already marked as returned but merchant_rejections weren't created
     const { data: activeShipment, error: shipmentCheckError } = await supabaseAdmin
       .from("outbound_shipments")
-      .select("id, status, courier_name, out_at")
+      .select("id, status, courier_name, out_at, returned_at, return_reason")
       .eq("unit_id", unitId)
-      .eq("status", "out")
+      .in("status", ["out", "returned"])
+      .order("out_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:191',message:'Checking for shipment',data:{unitId,hasShipment:!!activeShipment,shipmentStatus:activeShipment?.status,shipmentReturnReason:activeShipment?.return_reason},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
 
     if (shipmentCheckError) {
       console.error("Error checking outbound_shipments:", shipmentCheckError);
       // Don't fail the request, just log the error
     }
+    
+    // If shipment is already "returned" but doesn't have merchant_rejections set,
+    // we should still check for picking_task and create merchant_rejections if needed
+    const shouldProcessReturn = activeShipment && 
+      (activeShipment.status === "out" || 
+       (activeShipment.status === "returned" && 
+        activeShipment.return_reason === "Автоматический возврат при приемке в bin"));
 
     // Prepare move note and meta
     let moveNote = "Принято в BIN";
@@ -210,33 +225,92 @@ export async function POST(req: Request) {
     let pickingTask: any = null;
 
     // If active shipment exists, prepare return info
-    if (activeShipment) {
+    // Also process returns that were already marked as returned but merchant_rejections weren't created
+    if (shouldProcessReturn) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:213',message:'Checking for picking task with scenario',data:{unitId,activeShipmentId:activeShipment.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
       // Check if unit had a scenario from OPS (picking task)
-      const { data: task } = await supabaseAdmin
-        .from("picking_tasks")
-        .select("id, scenario, created_at")
+      // After migration, units are linked via picking_task_units junction table
+      // First, try new format (via picking_task_units)
+      const { data: taskUnit } = await supabaseAdmin
+        .from("picking_task_units")
+        .select("picking_task_id")
         .eq("unit_id", unitId)
-        .not("scenario", "is", null)
-        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:225',message:'Fetched picking_task_units',data:{hasTaskUnit:!!taskUnit,taskId:taskUnit?.picking_task_id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      let task: any = null;
+      
+      if (taskUnit?.picking_task_id) {
+        // Get task via picking_task_units (new format)
+        const { data: taskData } = await supabaseAdmin
+          .from("picking_tasks")
+          .select("id, scenario, created_at")
+          .eq("id", taskUnit.picking_task_id)
+          .not("scenario", "is", null)
+          .maybeSingle();
+        
+        task = taskData;
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:238',message:'Fetched picking_task via junction table',data:{hasTask:!!task,taskScenario:task?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+      }
+      
+      // Also check legacy format (old tasks with direct unit_id)
+      if (!task) {
+        const { data: legacyTask } = await supabaseAdmin
+          .from("picking_tasks")
+          .select("id, scenario, created_at")
+          .eq("unit_id", unitId)
+          .not("scenario", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        task = legacyTask;
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:252',message:'Fetched legacy picking_task',data:{hasLegacyTask:!!legacyTask,legacyTaskScenario:legacyTask?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+      }
 
       pickingTask = task;
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:260',message:'Final picking task result',data:{hasPickingTask:!!pickingTask,scenario:pickingTask?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       // Determine return type based on scenario keywords
       const scenarioLower = pickingTask?.scenario?.toLowerCase() || "";
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:290',message:'Determining return type',data:{scenario:pickingTask?.scenario,scenarioLower,hasPickingTask:!!pickingTask},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
       const isServiceCenterReturn =
         !!pickingTask?.scenario &&
         (scenarioLower.includes("сервис") ||
           scenarioLower.includes("ремонт") ||
           scenarioLower.includes("service"));
+      
+      // Fix: Only check for merchant keywords, not "not service"
       const isMerchantRejection =
         !!pickingTask?.scenario &&
         !isServiceCenterReturn &&
         (scenarioLower.includes("мерчант") ||
           scenarioLower.includes("магазин") ||
-          scenarioLower.includes("merchant") ||
-          !scenarioLower.includes("сервис"));
+          scenarioLower.includes("merchant"));
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:304',message:'Return type determined',data:{isServiceCenterReturn,isMerchantRejection,scenarioLower},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       returnReason = "Автоматический возврат при приемке в bin";
       returnAction = "logistics.auto_return_from_out";
@@ -390,7 +464,7 @@ export async function POST(req: Request) {
     const { data: rpcResult, error: rpcError } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
       p_to_cell_id: binCell.id,
-      p_to_status: "receiving",
+      p_to_status: "receiving", // Временно используем "receiving" вместо "bin" до применения миграции enum
       p_note: moveNote,
       p_source: "tsd",
       p_meta: moveMeta,
@@ -418,7 +492,7 @@ export async function POST(req: Request) {
       unitId,
       barcode: digits,
       cell: { id: binCell.id, code: binCell.code, cell_type: "bin" },
-      status: "receiving",
+      status: "receiving", // Временно используем "receiving" вместо "bin"
       message: "Принято в BIN",
     });
   } catch (e: any) {

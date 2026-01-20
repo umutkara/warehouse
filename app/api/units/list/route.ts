@@ -8,7 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * Query params:
  * - age: all | 24h | 48h | 7d (filter by time on warehouse)
  * - search: search by barcode (partial match)
- * - status: filter by status (receiving, stored, picking, shipped, out, inventory_hold, all)
+ * - status: filter by status (bin, stored, picking, shipping, out, all)
  *          OR by cell_type (bin, shipping) - filters units in cells of specific type
  */
 export async function GET(req: Request) {
@@ -75,10 +75,11 @@ export async function GET(req: Request) {
     // Apply status filter
     if (statusFilter && statusFilter !== "all") {
       if (statusFilter === "on_warehouse") {
-        // "На складе" includes: receiving, stored, picking, shipped
-        query = query.in("status", ["receiving", "stored", "picking", "shipped"]);
+        // "На складе" - фильтруем по cell_type (более надежно, не зависит от enum)
+        // Units на складе находятся в ячейках типов: bin, storage, shipping, picking
+        query = query.in("warehouse_cells.cell_type", ["bin", "storage", "shipping", "picking"]);
       } else if (statusFilter === "bin") {
-        // "BIN" - заказы в BIN ячейках (обычно со статусом receiving)
+        // "BIN" - заказы в BIN ячейках (обычно со статусом bin)
         // Фильтруем по cell_type через join
         query = query.eq("warehouse_cells.cell_type", "bin");
       } else if (statusFilter === "shipping") {

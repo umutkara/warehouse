@@ -3,9 +3,6 @@
 import { useEffect, useState, useMemo, useCallback, memo } from "react";
 import { useRouter } from "next/navigation";
 
-// ⚡ Force dynamic for real-time SLA metrics
-export const dynamic = 'force-dynamic';
-
 type Metrics = {
   total_units: number;
   units_over_24h: number;
@@ -58,7 +55,22 @@ type ShippingSLAMetrics = {
   avg_current_wait_time_hours: number;
   avg_current_wait_time_minutes: number;
   min_time_hours: number;
+  min_time_minutes: number;
   max_time_hours: number;
+  max_time_minutes: number;
+  p50_hours: number;
+  p50_minutes: number;
+  p90_hours: number;
+  p90_minutes: number;
+  p95_hours: number;
+  p95_minutes: number;
+  sla_target_hours: number;
+  sla_critical_hours: number;
+  tasks_within_sla: number;
+  tasks_exceeding_sla: number;
+  tasks_critical: number;
+  sla_compliance_percent: number;
+  hourly_distribution: Record<number, { count: number; avgTime: number }> | null;
 };
 
 type MerchantRejectionMetrics = {
@@ -286,19 +298,52 @@ export default function SLAPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New metrics states
-  const [processingMetrics, setProcessingMetrics] = useState<ProcessingMetrics | null>(null);
-  const [shippingSLAMetrics, setShippingSLAMetrics] = useState<ShippingSLAMetrics | null>(null);
+  // New metrics states - инициализируем с fallback значениями
+  const [processingMetrics, setProcessingMetrics] = useState<ProcessingMetrics>({
+    period: "today",
+    total_tasks: 0,
+    avg_processing_time_hours: 0,
+    avg_processing_time_minutes: 0,
+    min_time_hours: 0,
+    max_time_hours: 0,
+    tasks_count: 0,
+  });
+  const [shippingSLAMetrics, setShippingSLAMetrics] = useState<ShippingSLAMetrics>({
+    period: "today",
+    total_tasks: 0,
+    open_tasks: 0,
+    in_progress_tasks: 0,
+    completed_tasks: 0,
+    avg_completion_time_hours: 0,
+    avg_completion_time_minutes: 0,
+    avg_current_wait_time_hours: 0,
+    avg_current_wait_time_minutes: 0,
+    min_time_hours: 0,
+    min_time_minutes: 0,
+    max_time_hours: 0,
+    max_time_minutes: 0,
+    p50_hours: 0,
+    p50_minutes: 0,
+    p90_hours: 0,
+    p90_minutes: 0,
+    p95_hours: 0,
+    p95_minutes: 0,
+    sla_target_hours: 2,
+    sla_critical_hours: 4,
+    tasks_within_sla: 0,
+    tasks_exceeding_sla: 0,
+    tasks_critical: 0,
+    sla_compliance_percent: 0,
+    hourly_distribution: null,
+  });
   const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
 
   useEffect(() => {
     loadMetrics();
-    loadProcessingMetrics();
     loadShippingSLAMetrics();
     loadRejectionMetrics();
     const interval = setInterval(() => {
       loadMetrics();
-      loadProcessingMetrics();
       loadShippingSLAMetrics();
       loadRejectionMetrics();
     }, 60000); // Refresh every minute
@@ -334,24 +379,112 @@ export default function SLAPage() {
   async function loadProcessingMetrics() {
     try {
       const res = await fetch("/api/stats/processing-metrics?period=today", { cache: "no-store" });
+      
       if (res.ok) {
         const json = await res.json();
-        if (json.ok) setProcessingMetrics(json.metrics);
+        if (json.ok) {
+          setProcessingMetrics(json.metrics);
+        }
+      } else {
+        // Устанавливаем fallback значения если API вернул ошибку
+        console.error("Processing metrics API error:", res.status);
+        setProcessingMetrics({
+          period: "today",
+          total_tasks: 0,
+          avg_processing_time_hours: 0,
+          avg_processing_time_minutes: 0,
+          min_time_hours: 0,
+          max_time_hours: 0,
+          tasks_count: 0,
+        });
       }
     } catch (e) {
       console.error("Failed to load processing metrics:", e);
+      // Устанавливаем fallback значения при ошибке
+      setProcessingMetrics({
+        period: "today",
+        total_tasks: 0,
+        avg_processing_time_hours: 0,
+        avg_processing_time_minutes: 0,
+        min_time_hours: 0,
+        max_time_hours: 0,
+        tasks_count: 0,
+      });
     }
   }
 
   async function loadShippingSLAMetrics() {
     try {
       const res = await fetch("/api/stats/shipping-tasks-sla?period=today", { cache: "no-store" });
+      
       if (res.ok) {
         const json = await res.json();
-        if (json.ok) setShippingSLAMetrics(json.metrics);
+        if (json.ok) {
+          setShippingSLAMetrics(json.metrics);
+        }
+      } else {
+        // Устанавливаем fallback значения если API вернул ошибку
+        console.error("Shipping SLA metrics API error:", res.status);
+        setShippingSLAMetrics({
+          period: "today",
+          total_tasks: 0,
+          open_tasks: 0,
+          in_progress_tasks: 0,
+          completed_tasks: 0,
+          avg_completion_time_hours: 0,
+          avg_completion_time_minutes: 0,
+          avg_current_wait_time_hours: 0,
+          avg_current_wait_time_minutes: 0,
+          min_time_hours: 0,
+          min_time_minutes: 0,
+          max_time_hours: 0,
+          max_time_minutes: 0,
+          p50_hours: 0,
+          p50_minutes: 0,
+          p90_hours: 0,
+          p90_minutes: 0,
+          p95_hours: 0,
+          p95_minutes: 0,
+          sla_target_hours: 2,
+          sla_critical_hours: 4,
+          tasks_within_sla: 0,
+          tasks_exceeding_sla: 0,
+          tasks_critical: 0,
+          sla_compliance_percent: 0,
+          hourly_distribution: null,
+        });
       }
     } catch (e) {
       console.error("Failed to load shipping SLA metrics:", e);
+      // Устанавливаем fallback значения при ошибке
+      setShippingSLAMetrics({
+        period: "today",
+        total_tasks: 0,
+        open_tasks: 0,
+        in_progress_tasks: 0,
+        completed_tasks: 0,
+        avg_completion_time_hours: 0,
+        avg_completion_time_minutes: 0,
+        avg_current_wait_time_hours: 0,
+        avg_current_wait_time_minutes: 0,
+        min_time_hours: 0,
+        min_time_minutes: 0,
+        max_time_hours: 0,
+        max_time_minutes: 0,
+        p50_hours: 0,
+        p50_minutes: 0,
+        p90_hours: 0,
+        p90_minutes: 0,
+        p95_hours: 0,
+        p95_minutes: 0,
+        sla_target_hours: 2,
+        sla_critical_hours: 4,
+        tasks_within_sla: 0,
+        tasks_exceeding_sla: 0,
+        tasks_critical: 0,
+        sla_compliance_percent: 0,
+        hourly_distribution: null,
+      });
     }
   }
 
@@ -987,76 +1120,26 @@ export default function SLAPage() {
         )}
       </div>
 
-      {/* Processing Time: Storage/Shipping → OPS */}
-      {processingMetrics && (
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--spacing-lg)",
-            boxShadow: "var(--shadow-sm)",
-            marginTop: "var(--spacing-lg)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
-            ⏱️ Storage/Shipping → Создание задачи OPS
-          </h2>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
-            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>unit_moves</code> → 
-            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>picking_tasks</code>. 
-            Считается время от первого попадания заказа в ячейку storage/shipping до создания задачи OPS. Показывает как быстро OPS реагирует на доступные заказы.
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-            <MetricCard
-              title="Всего задач (сегодня)"
-              value={processingMetrics.total_tasks}
-              color="#374151"
-              info="📋 Общее количество задач на обработку (перемещение, приемка, размещение), созданных сегодня."
-            />
-            <MetricCard
-              title="Среднее время"
-              value={`${processingMetrics.avg_processing_time_hours}ч ${processingMetrics.avg_processing_time_minutes}м`}
-              color="#0284c7"
-              info="⏱️ Среднее время выполнения задачи от момента создания до завершения. Показывает общую эффективность обработки."
-            />
-            <MetricCard
-              title="Минимум"
-              value={`${processingMetrics.min_time_hours}ч`}
-              color="#10b981"
-              info="🚀 Самая быстрая задача за сегодня. Показывает минимально возможное время при идеальных условиях."
-            />
-            <MetricCard
-              title="Максимум"
-              value={`${processingMetrics.max_time_hours}ч`}
-              color="#dc2626"
-              info="⚠️ Самая долгая задача за сегодня. Высокое значение может указывать на проблемы или сложные задачи."
-            />
-          </div>
+      {/* Shipping Tasks SLA - всегда отображается */}
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: "var(--radius-lg)",
+          padding: "var(--spacing-lg)",
+          boxShadow: "var(--shadow-sm)",
+          marginTop: "var(--spacing-lg)",
+        }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+          📦 SLA Заданий на отгрузку (OPS → ТСД)
+        </h2>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
+          📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code>. 
+          Время от создания задания OPS (<code>created_at</code>) до завершения в ТСД (<code>completed_at</code> или <code>picked_at</code>). 
+          Открытые задания показывают текущее время ожидания. Помогает отслеживать загруженность ТСД и скорость обработки.
         </div>
-      )}
-
-      {/* Shipping Tasks SLA */}
-      {shippingSLAMetrics && (
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--spacing-lg)",
-            boxShadow: "var(--shadow-sm)",
-            marginTop: "var(--spacing-lg)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
-            📦 SLA Заданий на отгрузку (OPS → ТСД)
-          </h2>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
-            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code>. 
-            Время от создания задания OPS (<code>created_at</code>) до завершения в ТСД (<code>completed_at</code> или <code>picked_at</code>). 
-            Открытые задания показывают текущее время ожидания. Помогает отслеживать загруженность ТСД и скорость обработки.
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 16 }}>
             <MetricCard
               title="Всего задач (сегодня)"
               value={shippingSLAMetrics.total_tasks}
@@ -1082,16 +1165,96 @@ export default function SLAPage() {
               value={shippingSLAMetrics.completed_tasks}
               color="#10b981"
               subtitle="Выполнено сегодня"
-              info="✅ Задачи в статусе 'completed' — успешно завершены за сегодня. Заказы перемещены в зону отгрузки."
             />
             <MetricCard
-              title="Среднее (завершенные)"
+              title="Среднее время"
               value={`${shippingSLAMetrics.avg_completion_time_hours}ч ${shippingSLAMetrics.avg_completion_time_minutes}м`}
               color="#0284c7"
-              info="⚡ Среднее время выполнения завершенных задач отгрузки. Показывает скорость обработки отгрузки."
+              subtitle="Завершенные задачи"
+            />
+        </div>
+
+        {/* SLA Compliance */}
+        <div style={{ 
+          background: shippingSLAMetrics.sla_compliance_percent >= 80 ? "#f0fdf4" : 
+                      shippingSLAMetrics.sla_compliance_percent >= 60 ? "#fef3c7" : "#fef2f2",
+          border: `2px solid ${shippingSLAMetrics.sla_compliance_percent >= 80 ? "#86efac" : 
+                                shippingSLAMetrics.sla_compliance_percent >= 60 ? "#fcd34d" : "#fca5a5"}`,
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 16,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>
+                🎯 SLA Compliance (Целевое время: {shippingSLAMetrics.sla_target_hours}ч)
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                {shippingSLAMetrics.tasks_within_sla} из {shippingSLAMetrics.completed_tasks} задач выполнены в срок
+              </div>
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 700, 
+              color: shippingSLAMetrics.sla_compliance_percent >= 80 ? "#16a34a" : 
+                     shippingSLAMetrics.sla_compliance_percent >= 60 ? "#ca8a04" : "#dc2626"
+            }}>
+              {shippingSLAMetrics.sla_compliance_percent}%
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            <div style={{ textAlign: "center", padding: 12, background: "#fff", borderRadius: 8 }}>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>✅ В срок</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#16a34a" }}>
+                {shippingSLAMetrics.tasks_within_sla}
+              </div>
+            </div>
+            <div style={{ textAlign: "center", padding: 12, background: "#fff", borderRadius: 8 }}>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>⚠️ Превышение</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#ca8a04" }}>
+                {shippingSLAMetrics.tasks_exceeding_sla}
+              </div>
+            </div>
+            <div style={{ textAlign: "center", padding: 12, background: "#fff", borderRadius: 8 }}>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>🚨 Критично</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#dc2626" }}>
+                {shippingSLAMetrics.tasks_critical}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Statistics */}
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 12 }}>
+            📊 Подробная статистика
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            <MetricCard
+              title="Минимум"
+              value={`${shippingSLAMetrics.min_time_hours}ч ${shippingSLAMetrics.min_time_minutes}м`}
+              color="#10b981"
+              subtitle="Самая быстрая"
+            />
+            <MetricCard
+              title="Медиана (P50)"
+              value={`${shippingSLAMetrics.p50_hours}ч ${shippingSLAMetrics.p50_minutes}м`}
+              color="#0284c7"
+              subtitle="50% задач"
+            />
+            <MetricCard
+              title="P90"
+              value={`${shippingSLAMetrics.p90_hours}ч ${shippingSLAMetrics.p90_minutes}м`}
+              color="#f59e0b"
+              subtitle="90% задач"
+            />
+            <MetricCard
+              title="Максимум"
+              value={`${shippingSLAMetrics.max_time_hours}ч ${shippingSLAMetrics.max_time_minutes}м`}
+              color="#dc2626"
+              subtitle="Самая долгая"
             />
           </div>
-          {shippingSLAMetrics.avg_current_wait_time_hours > 0 && (
+        </div>
+        {shippingSLAMetrics.avg_current_wait_time_hours > 0 && (
             <div
               style={{
                 padding: 16,
@@ -1107,9 +1270,8 @@ export default function SLAPage() {
                 {shippingSLAMetrics.avg_current_wait_time_hours}ч {shippingSLAMetrics.avg_current_wait_time_minutes}м
               </div>
             </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Merchant Rejection Metrics */}
       {rejectionMetrics && rejectionMetrics.total_units > 0 && (

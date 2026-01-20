@@ -123,7 +123,7 @@ export default function ReceivingPage() {
       const res = await fetch("/api/units/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ unitId: id, toStatus: "receiving", cellId: selectedCellId }),
+        body: JSON.stringify({ unitId: id, toStatus: "bin", cellId: selectedCellId }),
       });
 
       const text = await res.text();
@@ -207,13 +207,13 @@ export default function ReceivingPage() {
                 <tr key={u.id} style={{ borderBottom: "1px solid var(--color-border-light)" }}>
                   <td style={{ padding: "var(--spacing-md)", color: "var(--color-text)" }}>{u.barcode}</td>
                   <td style={{ padding: "var(--spacing-md)" }}>
-                    <Badge variant={u.status === "receiving" ? "info" : "default"}>{u.status}</Badge>
+                    <Badge variant={u.status === "bin" ? "info" : "default"}>{u.status}</Badge>
                   </td>
                   <td style={{ padding: "var(--spacing-md)", color: "var(--color-text-secondary)", fontSize: "13px" }}>
                     {new Date(u.created_at).toLocaleString("ru-RU")}
                   </td>
                   <td style={{ padding: "var(--spacing-md)" }}>
-                    {u.status === "receiving" && (
+                    {u.status === "bin" && (
                       <div style={{ display: "flex", gap: "var(--spacing-md)", alignItems: "center", flexWrap: "wrap" }}>
                         <select
                           value={selectedCellIds[u.id] || ""}

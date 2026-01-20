@@ -1,23 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function TopBarExcel() {
   const router = useRouter();
-  const [activeTasks, setActiveTasks] = useState<number>(0);
-
-  async function loadActiveTasks() {
-    const r = await fetch("/api/stats/active-tasks", { cache: "no-store" });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok && j.ok) setActiveTasks(j.count || 0);
-  }
-
-  useEffect(() => {
-    loadActiveTasks();
-    const t = setInterval(loadActiveTasks, 30000);
-    return () => clearInterval(t);
-  }, []);
 
   return (
     <header
@@ -37,35 +23,6 @@ export default function TopBarExcel() {
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
-
-      {/* Active Tasks Counter */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "8px 16px",
-          background: "#fff",
-          border: "1px solid #e5e7eb",
-          borderRadius: "var(--radius-md)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <span style={{ fontSize: "14px", color: "#6b7280", fontWeight: 600 }}>
-          Активные задачи на отгрузку:
-        </span>
-        <span
-          style={{
-            fontSize: "18px",
-            fontWeight: 700,
-            color: activeTasks > 0 ? "#2563eb" : "#9ca3af",
-            minWidth: "24px",
-            textAlign: "center",
-          }}
-        >
-          {activeTasks}
-        </span>
-      </div>
 
       {/* Units List Button */}
       <button

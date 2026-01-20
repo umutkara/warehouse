@@ -37,13 +37,15 @@ export async function GET(req: Request) {
     let endDate: Date;
 
     if (period === "today") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      // Use UTC to avoid timezone issues
+      startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+      endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
     } else if (period === "yesterday") {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
-      endDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59);
+      // Use UTC for yesterday
+      const yesterdayUTC = new Date(now);
+      yesterdayUTC.setUTCDate(yesterdayUTC.getUTCDate() - 1);
+      startDate = new Date(Date.UTC(yesterdayUTC.getUTCFullYear(), yesterdayUTC.getUTCMonth(), yesterdayUTC.getUTCDate(), 0, 0, 0));
+      endDate = new Date(Date.UTC(yesterdayUTC.getUTCFullYear(), yesterdayUTC.getUTCMonth(), yesterdayUTC.getUTCDate(), 23, 59, 59));
     } else {
       // all - last 30 days
       startDate = new Date(now);

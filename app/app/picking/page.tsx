@@ -50,10 +50,10 @@ export default function PickingPage() {
 
   async function load() {
     setErr(null);
-    // Загружаем units из storage (inventory_hold) и shipping (shipped)
+    // Загружаем units из storage (stored) и shipping (shipping)
     const [storageRes, shippingRes] = await Promise.all([
-      fetch(`/api/units/list?status=inventory_hold`, { cache: "no-store" }),
-      fetch(`/api/units/list?status=shipped`, { cache: "no-store" }),
+      fetch(`/api/units/list?status=stored`, { cache: "no-store" }),
+      fetch(`/api/units/list?status=shipping`, { cache: "no-store" }),
     ]);
     
     const storageJson = await storageRes.json().catch(() => ({}));
@@ -126,9 +126,9 @@ export default function PickingPage() {
       // Определяем целевую ячейку и статус
       let toStatus: string;
       if (selectedCell.cell_type === "storage") {
-        toStatus = "inventory_hold";
+        toStatus = "stored";
       } else if (selectedCell.cell_type === "shipping") {
-        toStatus = "shipped";
+        toStatus = "shipping";
       } else {
         setErr("Недопустимый тип целевой ячейки");
         setLoading(false);

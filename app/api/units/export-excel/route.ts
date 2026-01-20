@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * Exports units to Excel with last action info
  * Query params:
  * - age: all | 24h | 48h | 7d
- * - status: on_warehouse | receiving | stored | picking | shipped | out | all
+ * - status: on_warehouse | bin | stored | picking | shipping | out | all
  * - search: search by barcode
  */
 export async function GET(req: Request) {
@@ -73,7 +73,7 @@ export async function GET(req: Request) {
     // Apply status filter
     if (statusFilter && statusFilter !== "all") {
       if (statusFilter === "on_warehouse") {
-        query = query.in("status", ["receiving", "stored", "picking", "shipped"]);
+        query = query.in("status", ["bin", "stored", "picking", "shipping"]);
       } else {
         query = query.eq("status", statusFilter);
       }

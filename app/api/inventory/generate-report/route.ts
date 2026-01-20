@@ -123,6 +123,41 @@ export async function POST(req: Request) {
         `${row.cell.code},${row.cell.cell_type},${row.expectedCount},${row.scannedCount},${row.missingCount},${row.extraCount},${row.unknownCount}`
       );
     }
+    
+    // Подробная информация по расхождениям
+    csvLines.push("");
+    csvLines.push("ПОДРОБНАЯ ИНФОРМАЦИЯ ПО РАСХОЖДЕНИЯМ:");
+    csvLines.push("");
+    
+    for (const row of reportData.rows) {
+      const hasDiff = row.missingCount > 0 || row.extraCount > 0 || row.unknownCount > 0;
+      if (!hasDiff) continue; // Пропускаем ячейки без расхождений
+      
+      csvLines.push(`Ячейка: ${row.cell.code} (${row.cell.cell_type})`);
+      
+      if (row.missingCount > 0 && row.missing) {
+        csvLines.push(`  НЕ НАЙДЕНО (${row.missingCount}):`);
+        row.missing.forEach((barcode: string) => {
+          csvLines.push(`    ${barcode}`);
+        });
+      }
+      
+      if (row.extraCount > 0 && row.extra) {
+        csvLines.push(`  ЛИШНИЕ (${row.extraCount}):`);
+        row.extra.forEach((barcode: string) => {
+          csvLines.push(`    ${barcode}`);
+        });
+      }
+      
+      if (row.unknownCount > 0 && row.unknown) {
+        csvLines.push(`  НЕИЗВЕСТНЫЕ (${row.unknownCount}):`);
+        row.unknown.forEach((barcode: string) => {
+          csvLines.push(`    ${barcode}`);
+        });
+      }
+      
+      csvLines.push(""); // Пустая строка между ячейками
+    }
 
     const csvContent = csvLines.join("\n");
     const csvBuffer = Buffer.from("\ufeff" + csvContent, "utf-8"); // Add BOM for Excel
@@ -136,7 +171,7 @@ export async function POST(req: Request) {
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
       .from("warehouse-files")
       .upload(filePath, csvBuffer, {
-        contentType: "text/csv; charset=utf-8",
+        contentType: "text/csv",
         upsert: false,
       });
 

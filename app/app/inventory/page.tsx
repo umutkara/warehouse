@@ -132,8 +132,15 @@ export default function InventoryPage() {
       const json = await res.json();
       
       if (json.ok && json.publicUrl) {
-        // Download the file
-        window.open(json.publicUrl, "_blank");
+        // Download the file programmatically to avoid popup blockers
+        const link = document.createElement("a");
+        link.href = json.publicUrl;
+        link.download = json.fileName || "inventory-report.csv";
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
         setSuccess(`Отчёт сгенерирован: ${json.fileName}`);
       } else {
         setError("Ошибка генерации отчёта");
