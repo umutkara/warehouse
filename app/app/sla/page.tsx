@@ -290,6 +290,10 @@ export default function SLAPage() {
   const [processingMetrics, setProcessingMetrics] = useState<ProcessingMetrics | null>(null);
   const [shippingSLAMetrics, setShippingSLAMetrics] = useState<ShippingSLAMetrics | null>(null);
   const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
+  
+  // Telegram notification states
+  const [sendingTelegram, setSendingTelegram] = useState(false);
+  const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
 
   useEffect(() => {
     loadMetrics();
@@ -364,6 +368,31 @@ export default function SLAPage() {
       }
     } catch (e) {
       console.error("Failed to load rejection metrics:", e);
+    }
+  }
+
+  async function sendToTelegram() {
+    setSendingTelegram(true);
+    setTelegramStatus(null);
+    
+    try {
+      const res = await fetch('/api/telegram/send-sla-report', {
+        method: 'POST',
+      });
+      
+      const json = await res.json();
+      
+      if (res.ok) {
+        setTelegramStatus('✅ Отправлено в Telegram');
+      } else {
+        setTelegramStatus('❌ ' + (json.error || 'Ошибка отправки'));
+      }
+    } catch (e: any) {
+      setTelegramStatus('❌ ' + (e.message || 'Ошибка отправки'));
+    } finally {
+      setSendingTelegram(false);
+      // Auto-hide status after 5 seconds
+      setTimeout(() => setTelegramStatus(null), 5000);
     }
   }
 
@@ -558,44 +587,101 @@ export default function SLAPage() {
             Мониторинг производительности и задержек на складе • Обновляется каждую минуту
           </p>
         </div>
-        <button
-          onClick={loadMetrics}
-          disabled={loading}
-          style={{
-            padding: "12px 20px",
-            background: loading 
-              ? "#e5e7eb"
-              : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            color: loading ? "#9ca3af" : "white",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: loading ? "not-allowed" : "pointer",
-            boxShadow: loading 
-              ? "none"
-              : "0 4px 12px rgba(102, 126, 234, 0.3)",
-            transition: "all 0.2s",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-          onMouseEnter={(e) => {
-            if (!loading) {
-              e.currentTarget.style.transform = "translateY(-2px)";
-              e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.4)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!loading) {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.3)";
-            }
-          }}
-        >
-          <span>{loading ? "⏳" : "🔄"}</span>
-          <span>{loading ? "Обновление..." : "Обновить"}</span>
-        </button>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={loadMetrics}
+            disabled={loading}
+            style={{
+              padding: "12px 20px",
+              background: loading 
+                ? "#e5e7eb"
+                : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+              color: loading ? "#9ca3af" : "white",
+              border: "none",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: loading ? "not-allowed" : "pointer",
+              boxShadow: loading 
+                ? "none"
+                : "0 4px 12px rgba(102, 126, 234, 0.3)",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.4)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.3)";
+              }
+            }}
+          >
+            <span>{loading ? "⏳" : "🔄"}</span>
+            <span>{loading ? "Обновление..." : "Обновить"}</span>
+          </button>
+
+          <button
+            onClick={sendToTelegram}
+            disabled={sendingTelegram}
+            style={{
+              padding: "12px 20px",
+              background: sendingTelegram 
+                ? "#e5e7eb"
+                : "linear-gradient(135deg, #0088cc 0%, #00a8e8 100%)",
+              color: sendingTelegram ? "#9ca3af" : "white",
+              border: "none",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: sendingTelegram ? "not-allowed" : "pointer",
+              boxShadow: sendingTelegram 
+                ? "none"
+                : "0 4px 12px rgba(0, 136, 204, 0.3)",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            onMouseEnter={(e) => {
+              if (!sendingTelegram) {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 6px 16px rgba(0, 136, 204, 0.4)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!sendingTelegram) {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 136, 204, 0.3)";
+              }
+            }}
+          >
+            <span>{sendingTelegram ? "⏳" : "📱"}</span>
+            <span>{sendingTelegram ? "Отправка..." : "Отправить в Telegram"}</span>
+          </button>
+
+          {telegramStatus && (
+            <div style={{
+              padding: "12px 20px",
+              background: telegramStatus.startsWith('✅') ? "#d1fae5" : "#fee2e2",
+              color: telegramStatus.startsWith('✅') ? "#065f46" : "#991b1b",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
+            }}>
+              {telegramStatus}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Key Metrics Cards */}
