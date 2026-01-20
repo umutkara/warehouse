@@ -235,7 +235,7 @@ async function fetchSLAMetrics(warehouseId: string) {
 }
 
 /**
- * Format SLA metrics into Telegram message (HTML format)
+ * Format SLA metrics into Telegram message (HTML format) - ПОЛНЫЙ ОТЧЕТ
  */
 function formatSLAReport(metrics: any): string {
   const now = new Date();
@@ -247,43 +247,103 @@ function formatSLAReport(metrics: any): string {
     minute: '2-digit'
   });
 
-  let report = `📊 <b>SLA ОТЧЕТ</b>\n${escapeHtml(date)}\n\n`;
+  let report = `📊 <b>ПОЛНЫЙ SLA ОТЧЕТ</b>\n${escapeHtml(date)}\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  // Key metrics
-  report += `✅ <b>Основные показатели:</b>\n`;
-  report += `• Всего заказов: ${metrics.total_units}\n`;
-  report += `• Залежалые (&gt;24ч): ${metrics.units_over_24h} ${metrics.units_over_24h > 10 ? '🔴' : metrics.units_over_24h > 5 ? '🟠' : '🟢'}\n`;
-  report += `• Возвратов: ${metrics.out_return_rate_percent}% ${metrics.out_return_rate_percent > 20 ? '🔴' : '🟢'}\n\n`;
+  // ========== КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ ==========
+  report += `✅ <b>КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ</b>\n`;
+  report += `• Всего заказов: <b>${metrics.total_units}</b>\n`;
+  report += `• Залежалые (&gt;24ч): <b>${metrics.units_over_24h}</b> ${metrics.units_over_24h > 10 ? '🔴' : metrics.units_over_24h > 5 ? '🟠' : '🟢'}\n`;
+  report += `• Среднее время обработки: <b>${metrics.avg_processing_time_hours}ч</b>\n`;
+  report += `• Процент возвратов: <b>${metrics.out_return_rate_percent}%</b> ${metrics.out_return_rate_percent > 20 ? '🔴' : '🟢'}\n`;
+  report += `\n`;
 
-  // Status breakdown
+  // ========== ВСЕ СТАТУСЫ ==========
   if (Object.keys(metrics.units_by_status).length > 0) {
-    report += `📦 <b>По статусам:</b>\n`;
+    report += `📦 <b>РАСПРЕДЕЛЕНИЕ ПО СТАТУСАМ</b>\n`;
     const statuses = Object.entries(metrics.units_by_status)
-      .sort(([, a]: any, [, b]: any) => b - a)
-      .slice(0, 5);
+      .sort(([, a]: any, [, b]: any) => b - a);
     
     for (const [status, count] of statuses) {
-      report += `• ${escapeHtml(status)}: ${count}\n`;
+      report += `• ${escapeHtml(status)}: <b>${count}</b>\n`;
     }
-    report += '\n';
+    report += `\n`;
   }
 
-  // Old units warning
-  if (metrics.units_over_24h > 0 && metrics.top_oldest_units?.length > 0) {
-    report += `⚠️ <b>Требуют внимания:</b>\n`;
+  // ========== ЗАЛЕЖАЛЫЕ ЗАКАЗЫ ПО СТАТУСАМ ==========
+  if (metrics.old_units_by_status && Object.keys(metrics.old_units_by_status).length > 0) {
+    report += `⏰ <b>ЗАЛЕЖАЛЫЕ (&gt;24ч) ПО СТАТУСАМ</b>\n`;
+    const oldStatuses = Object.entries(metrics.old_units_by_status)
+      .sort(([, a]: any, [, b]: any) => b - a);
+    
+    for (const [status, count] of oldStatuses) {
+      report += `• ${escapeHtml(status)}: <b>${count}</b> 🔴\n`;
+    }
+    report += `\n`;
+  }
+
+  // ========== ТОП-10 САМЫХ ДОЛГИХ ЗАКАЗОВ ==========
+  if (metrics.top_oldest_units?.length > 0) {
+    report += `🚨 <b>ТОП-10 САМЫХ ДОЛГИХ ЗАКАЗОВ</b>\n`;
     for (const unit of metrics.top_oldest_units) {
-      report += `• ${escapeHtml(unit.barcode)} - ${unit.age_hours}ч (${escapeHtml(unit.status)})\n`;
+      const emoji = unit.age_hours > 48 ? '🔴' : '🟠';
+      report += `${emoji} ${escapeHtml(unit.barcode)}\n`;
+      report += `   └ ${unit.age_hours}ч в статусе ${escapeHtml(unit.status)}\n`;
     }
-    report += '\n';
+    report += `\n`;
   }
 
-  // Performance
-  report += `🎯 <b>Производительность:</b>\n`;
+  // ========== PICKING ПРОИЗВОДИТЕЛЬНОСТЬ ==========
+  report += `⏱️ <b>PICKING ПРОИЗВОДИТЕЛЬНОСТЬ</b>\n`;
   const completionRate = metrics.picking_total_tasks > 0
     ? Math.round((metrics.picking_completed_tasks / metrics.picking_total_tasks) * 100)
     : 0;
-  report += `• Задачи: ${metrics.picking_completed_tasks}/${metrics.picking_total_tasks} (${completionRate}%)\n`;
-  report += `• Среднее picking: ${metrics.picking_avg_time_hours}ч\n`;
+  report += `• Всего задач: <b>${metrics.picking_total_tasks}</b>\n`;
+  report += `• Завершено: <b>${metrics.picking_completed_tasks}</b> (${completionRate}%)\n`;
+  report += `• Среднее время: <b>${metrics.picking_avg_time_hours}ч</b>\n`;
+  report += `\n`;
+
+  // ========== OUT ОТПРАВКИ ==========
+  report += `📦 <b>OUT ОТПРАВКИ (7 дней)</b>\n`;
+  report += `• Всего отправок: <b>${metrics.out_total_shipments}</b>\n`;
+  report += `• Возвращено: <b>${metrics.out_returned_shipments}</b>\n`;
+  report += `• % возвратов: <b>${metrics.out_return_rate_percent}%</b> ${metrics.out_return_rate_percent > 20 ? '🔴' : '🟢'}\n`;
+  report += `• Успешно доставлено: <b>${metrics.out_total_shipments - metrics.out_returned_shipments}</b>\n`;
+  report += `\n`;
+
+  // ========== BIN ЯЧЕЙКИ (если есть) ==========
+  if (metrics.bin_cells && metrics.bin_cells.length > 0) {
+    report += `🗄️ <b>BIN ЯЧЕЙКИ (топ-5 по времени)</b>\n`;
+    const topBins = metrics.bin_cells.slice(0, 5);
+    for (const bin of topBins) {
+      const totalHours = bin.time_in_cell_hours;
+      const emoji = totalHours > 48 ? '🔴' : totalHours > 24 ? '🟠' : '🟢';
+      report += `${emoji} ${escapeHtml(bin.cell_code)}: ${escapeHtml(bin.unit_barcode)}\n`;
+      report += `   └ ${bin.time_in_cell_hours}ч ${bin.time_in_cell_minutes}мин в ячейке\n`;
+    }
+    report += `\n`;
+  }
+
+  // ========== ВОЗРАСТНОЕ РАСПРЕДЕЛЕНИЕ ==========
+  if (metrics.age_distribution) {
+    const dist = metrics.age_distribution;
+    const hasData = Object.values(dist).some((v: any) => v > 0);
+    
+    if (hasData) {
+      report += `📊 <b>ВОЗРАСТНОЕ РАСПРЕДЕЛЕНИЕ</b>\n`;
+      if (dist.under_1h > 0) report += `• &lt;1ч: ${dist.under_1h}\n`;
+      if (dist["1_6h"] > 0) report += `• 1-6ч: ${dist["1_6h"]}\n`;
+      if (dist["6_12h"] > 0) report += `• 6-12ч: ${dist["6_12h"]}\n`;
+      if (dist["12_24h"] > 0) report += `• 12-24ч: ${dist["12_24h"]}\n`;
+      if (dist["24_48h"] > 0) report += `• 24-48ч: ${dist["24_48h"]} 🟠\n`;
+      if (dist.over_48h > 0) report += `• &gt;48ч: ${dist.over_48h} 🔴\n`;
+      report += `\n`;
+    }
+  }
+
+  // ========== ИТОГО ==========
+  report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  report += `📱 <a href="${process.env.NEXT_PUBLIC_SITE_URL || ''}/app/sla">Открыть дашборд</a>`;
 
   return report;
 }
