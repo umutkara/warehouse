@@ -465,6 +465,7 @@ export default function WarehouseMapPage() {
             <option value="storage">Storage</option>
             <option value="picking">Picking</option>
             <option value="shipping">Shipping</option>
+            <option value="surplus">Surplus</option>
           </select>
           <button
             onClick={async () => {
