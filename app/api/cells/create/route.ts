@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   }
 
   // Validate cellType
-  const validCellTypes = ["bin", "storage", "picking", "shipping", "receiving", "transfer"];
+  const validCellTypes = ["bin", "storage", "picking", "shipping", "receiving", "transfer", "surplus"];
   if (!validCellTypes.includes(cellType)) {
     return NextResponse.json({ error: `Invalid cellType. Must be one of: ${validCellTypes.join(", ")}` }, { status: 400 });
   }
