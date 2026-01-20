@@ -41,7 +41,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           chat_id: process.env.TELEGRAM_CHAT_ID,
           text: report,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
         }),
       }
     );
@@ -101,24 +101,26 @@ export async function GET(req: Request) {
       statusCounts[u.status] = (statusCounts[u.status] || 0) + 1;
     });
 
-    const report = `📊 *SLA ОТЧЕТ*
-${now.toLocaleString('ru-RU', { 
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit'
-})}
+    const dateStr = now.toLocaleString('ru-RU', { 
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
 
-✅ *Основные показатели:*
+    const report = `📊 <b>SLA ОТЧЕТ</b>
+${escapeHtml(dateStr)}
+
+✅ <b>Основные показатели:</b>
 • Всего заказов: ${totalUnits}
-• Залежалые (>24ч): ${oldUnits} ${oldUnits > 10 ? '🔴' : oldUnits > 5 ? '🟠' : '🟢'}
+• Залежалые (&gt;24ч): ${oldUnits} ${oldUnits > 10 ? '🔴' : oldUnits > 5 ? '🟠' : '🟢'}
 
-📦 *По статусам:*
+📦 <b>По статусам:</b>
 ${Object.entries(statusCounts)
   .sort(([, a], [, b]) => b - a)
   .slice(0, 5)
-  .map(([status, count]) => `• ${status}: ${count}`)
+  .map(([status, count]) => `• ${escapeHtml(String(status))}: ${count}`)
   .join('\n')}
 
 📱 Полный отчет: ${process.env.NEXT_PUBLIC_SITE_URL || ''}/app/sla`;
@@ -131,7 +133,7 @@ ${Object.entries(statusCounts)
         body: JSON.stringify({
           chat_id: process.env.TELEGRAM_CHAT_ID,
           text: report,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
         }),
       }
     );
@@ -233,7 +235,7 @@ async function fetchSLAMetrics(warehouseId: string) {
 }
 
 /**
- * Format SLA metrics into Telegram message
+ * Format SLA metrics into Telegram message (HTML format)
  */
 function formatSLAReport(metrics: any): string {
   const now = new Date();
@@ -245,38 +247,38 @@ function formatSLAReport(metrics: any): string {
     minute: '2-digit'
   });
 
-  let report = `📊 *SLA ОТЧЕТ*\n${date}\n\n`;
+  let report = `📊 <b>SLA ОТЧЕТ</b>\n${escapeHtml(date)}\n\n`;
 
   // Key metrics
-  report += `✅ *Основные показатели:*\n`;
+  report += `✅ <b>Основные показатели:</b>\n`;
   report += `• Всего заказов: ${metrics.total_units}\n`;
-  report += `• Залежалые (>24ч): ${metrics.units_over_24h} ${metrics.units_over_24h > 10 ? '🔴' : metrics.units_over_24h > 5 ? '🟠' : '🟢'}\n`;
+  report += `• Залежалые (&gt;24ч): ${metrics.units_over_24h} ${metrics.units_over_24h > 10 ? '🔴' : metrics.units_over_24h > 5 ? '🟠' : '🟢'}\n`;
   report += `• Возвратов: ${metrics.out_return_rate_percent}% ${metrics.out_return_rate_percent > 20 ? '🔴' : '🟢'}\n\n`;
 
   // Status breakdown
   if (Object.keys(metrics.units_by_status).length > 0) {
-    report += `📦 *По статусам:*\n`;
+    report += `📦 <b>По статусам:</b>\n`;
     const statuses = Object.entries(metrics.units_by_status)
       .sort(([, a]: any, [, b]: any) => b - a)
       .slice(0, 5);
     
     for (const [status, count] of statuses) {
-      report += `• ${status}: ${count}\n`;
+      report += `• ${escapeHtml(status)}: ${count}\n`;
     }
     report += '\n';
   }
 
   // Old units warning
   if (metrics.units_over_24h > 0 && metrics.top_oldest_units?.length > 0) {
-    report += `⚠️ *Требуют внимания:*\n`;
+    report += `⚠️ <b>Требуют внимания:</b>\n`;
     for (const unit of metrics.top_oldest_units) {
-      report += `• #${unit.barcode} - ${unit.age_hours}ч (${unit.status})\n`;
+      report += `• ${escapeHtml(unit.barcode)} - ${unit.age_hours}ч (${escapeHtml(unit.status)})\n`;
     }
     report += '\n';
   }
 
   // Performance
-  report += `🎯 *Производительность:*\n`;
+  report += `🎯 <b>Производительность:</b>\n`;
   const completionRate = metrics.picking_total_tasks > 0
     ? Math.round((metrics.picking_completed_tasks / metrics.picking_total_tasks) * 100)
     : 0;
@@ -284,4 +286,16 @@ function formatSLAReport(metrics: any): string {
   report += `• Среднее picking: ${metrics.picking_avg_time_hours}ч\n`;
 
   return report;
+}
+
+/**
+ * Escape HTML special characters for Telegram
+ */
+function escapeHtml(text: string): string {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
