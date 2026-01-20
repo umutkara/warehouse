@@ -100,6 +100,9 @@ export async function GET(req: Request) {
       missingCount: number;
       extraCount: number;
       unknownCount: number;
+      missing: string[];
+      extra: string[];
+      unknown: string[];
     }> = [];
 
     let unitsExpectedTotal = 0;
