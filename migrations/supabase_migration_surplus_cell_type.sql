@@ -13,12 +13,10 @@
 INSERT INTO warehouse_cells_map (
   code,
   cell_type,
-  warehouse_id,
-  created_at,
-  updated_at
+  warehouse_id
 )
 VALUES
-  ('SURPLUS-1', 'surplus', 1, NOW(), NOW())
+  ('SURPLUS-1', 'surplus', 1)
 ON CONFLICT (code, warehouse_id) DO NOTHING;
 
 -- 3. Комментарий для документации
