@@ -291,7 +291,7 @@ export default function SLAPage() {
   const [shippingSLAMetrics, setShippingSLAMetrics] = useState<ShippingSLAMetrics | null>(null);
   const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
   
-  // Telegram notification states
+  // Telegram notification states (v2)
   const [sendingTelegram, setSendingTelegram] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
 
