@@ -18,17 +18,7 @@ VALUES
   ('SURPLUS-1', 'surplus', '0c99a861-3809-4bef-9106-79a37330b13c'::uuid)
 ON CONFLICT (code, warehouse_id) DO NOTHING;
 
--- 3. Комментарий для документации
-COMMENT ON COLUMN warehouse_cells_map.cell_type IS 
-'Типы ячеек: bin, storage, shipping, picking, receiving, surplus. 
-surplus - для товаров без ТТНК (излишки)';
-
--- 4. Создаем индекс для быстрого поиска ячеек типа surplus
-CREATE INDEX IF NOT EXISTS idx_warehouse_cells_surplus 
-ON warehouse_cells_map(warehouse_id, cell_type) 
-WHERE cell_type = 'surplus';
-
--- 5. Уведомление PostgREST о изменении схемы
+-- 3. Уведомление PostgREST о изменении схемы
 NOTIFY pgrst, 'reload schema';
 
 -- =====================================================
