@@ -18,6 +18,12 @@ type CellInfo = {
 type UnitInfo = {
   id: string;
   barcode: string;
+  cell_id?: string;
+  cell?: {
+    id: string;
+    code: string;
+    cell_type: string;
+  };
 };
 
 type Mode = "receiving" | "moving" | "inventory" | "shipping";
@@ -275,6 +281,12 @@ export default function TsdPage() {
         return {
           id: json.unit.id,
           barcode: json.unit.barcode,
+          cell_id: json.unit.cell_id,
+          cell: json.cell ? {
+            id: json.cell.id,
+            code: json.cell.code,
+            cell_type: json.cell.cell_type,
+          } : undefined,
         };
       }
       return null;
@@ -388,6 +400,14 @@ export default function TsdPage() {
         // Определяем, куда записать (FROM или TO)
         if (!fromCell) {
           // Первый скан - FROM
+          // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping
+          const allowedFromTypes = ['bin', 'storage', 'shipping'];
+          if (!allowedFromTypes.includes(cellInfo.cell_type)) {
+            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING`);
+            setScanValue("");
+            return;
+          }
+
           setFromCell(cellInfo);
           setSuccess(`FROM: ${cellInfo.code} (${cellInfo.cell_type})`);
         } else {
@@ -395,6 +415,14 @@ export default function TsdPage() {
           // Должен быть хотя бы один отсканированный заказ
           if (units.length === 0) {
             setError("Сначала отсканируйте хотя бы один заказ");
+            setScanValue("");
+            return;
+          }
+
+          // ⭐ НОВАЯ ПРОВЕРКА: проверяем матрицу разрешенных перемещений
+          const isValidMove = validateMove(fromCell.cell_type, cellInfo.cell_type);
+          if (!isValidMove.valid) {
+            setError(isValidMove.error || "Перемещение запрещено");
             setScanValue("");
             return;
           }
@@ -413,18 +441,36 @@ export default function TsdPage() {
           return;
         }
 
-        // Проверяем, не отсканирован ли уже этот заказ
+        // Проверяем, не отсканирован ли уже этот заказ (дубликат)
         if (units.some(u => u.barcode === parsed.code)) {
-          setError(`Заказ ${parsed.code} уже отсканирован`);
+          setError(`Заказ ${parsed.code} уже отсканирован (дубликат)`);
           setScanValue("");
           return;
         }
 
         const unitInfo = await loadUnitInfo(parsed.code);
         if (!unitInfo) {
-          setError(`Unit "${parsed.code}" не найден`);
+          setError(`Заказ "${parsed.code}" не найден в системе`);
           setScanValue("");
           return;
+        }
+
+        // ⭐ НОВЫЕ ПРОВЕРКИ для FROM = BIN
+        if (fromCell.cell_type === 'bin') {
+          // Проверка 1: заказ должен быть в конкретной FROM ячейке
+          if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
+            setScanValue("");
+            return;
+          }
+
+          // Проверка 2: заказ НЕ должен быть в storage/shipping/picking
+          const forbiddenTypes = ['storage', 'shipping', 'picking'];
+          if (unitInfo.cell && forbiddenTypes.includes(unitInfo.cell.cell_type)) {
+            setError(`Заказ ${parsed.code} находится в ячейке типа ${unitInfo.cell.cell_type.toUpperCase()}. Можно перемещать только из BIN`);
+            setScanValue("");
+            return;
+          }
         }
 
         // Добавляем в массив
@@ -437,6 +483,52 @@ export default function TsdPage() {
       setBusy(false);
       setScanValue("");
     }
+  }
+
+  // ⭐ НОВАЯ ФУНКЦИЯ: проверка матрицы разрешенных перемещений
+  function validateMove(fromType: string, toType: string): { valid: boolean; error?: string } {
+    // Матрица разрешенных перемещений:
+    // BIN → STORAGE ✅
+    // BIN → SHIPPING ✅
+    // STORAGE → SHIPPING ✅
+    // SHIPPING → STORAGE ✅
+    // Всё остальное ❌
+
+    if (fromType === 'bin') {
+      if (toType === 'storage' || toType === 'shipping') {
+        return { valid: true };
+      }
+      return { 
+        valid: false, 
+        error: `Из BIN можно переместить только в STORAGE или SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+      };
+    }
+
+    if (fromType === 'storage') {
+      if (toType === 'shipping') {
+        return { valid: true };
+      }
+      return { 
+        valid: false, 
+        error: `Из STORAGE можно переместить только в SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+      };
+    }
+
+    if (fromType === 'shipping') {
+      if (toType === 'storage') {
+        return { valid: true };
+      }
+      return { 
+        valid: false, 
+        error: `Из SHIPPING можно переместить только в STORAGE. Выбрано: ${toType.toUpperCase()}` 
+      };
+    }
+
+    // Другие типы не поддерживаются
+    return { 
+      valid: false, 
+      error: `Перемещение из ${fromType.toUpperCase()} не поддерживается` 
+    };
   }
 
   // Выполнение перемещения (массовое)
@@ -1873,9 +1965,12 @@ export default function TsdPage() {
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте FROM ячейку (откуда)</li>
+              <li>Отсканируйте FROM ячейку (откуда): BIN, STORAGE или SHIPPING</li>
               <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
               <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
+              <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+                📌 Разрешенные перемещения: BIN→STORAGE/SHIPPING, STORAGE↔SHIPPING
+              </li>
             </ol>
           ) : mode === "inventory" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
