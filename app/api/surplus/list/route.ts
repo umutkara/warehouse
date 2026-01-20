@@ -27,13 +27,16 @@ export async function GET() {
 
     // Get all units in SURPLUS cells
     // Сначала получаем ID всех surplus ячеек
-    const { data: surplusCells } = await supabase
+    const { data: surplusCells, error: cellsError } = await supabase
       .from("warehouse_cells_map")
-      .select("id")
+      .select("id, code, cell_type")
       .eq("cell_type", "surplus")
       .eq("warehouse_id", profile.warehouse_id);
 
+    console.log("DEBUG surplus cells:", { surplusCells, cellsError, warehouse_id: profile.warehouse_id });
+
     if (!surplusCells || surplusCells.length === 0) {
+      console.log("No surplus cells found, returning empty");
       return NextResponse.json({
         units: [],
         total: 0,
@@ -41,6 +44,7 @@ export async function GET() {
     }
 
     const cellIds = surplusCells.map(c => c.id);
+    console.log("DEBUG cell IDs:", cellIds);
 
     // Получаем units в этих ячейках
     const { data: units, error: unitsError } = await supabase
@@ -61,6 +65,8 @@ export async function GET() {
       .in("cell_id", cellIds)
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false });
+
+    console.log("DEBUG units query:", { units, unitsError, cellIds });
 
     if (unitsError) {
       console.error("Units query error:", unitsError);
