@@ -87,3 +87,7 @@ coverage
 # SQL migrations and documentation (keep local, don't commit)
 *.sql
 *.md
+
+# SQL migrations and documentation (keep local, don't commit)
+*.sql
+*.md

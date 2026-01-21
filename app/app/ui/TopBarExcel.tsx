@@ -1,9 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function TopBarExcel() {
   const router = useRouter();
+
+  async function handleLogout() {
+    const supabase = supabaseBrowser();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <header
@@ -124,6 +131,40 @@ export default function TopBarExcel() {
         }}
       >
         📖 Справочник
+      </button>
+
+      {/* Logout Button */}
+      <button
+        onClick={handleLogout}
+        style={{
+          padding: "8px 16px",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid #dc2626",
+          background: "var(--color-bg)",
+          color: "#dc2626",
+          fontSize: "14px",
+          fontWeight: 600,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          transition: "all var(--transition-base)",
+          boxShadow: "var(--shadow-sm)",
+          marginLeft: "var(--spacing-md)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#dc2626";
+          e.currentTarget.style.color = "#ffffff";
+          e.currentTarget.style.borderColor = "#dc2626";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "var(--color-bg)";
+          e.currentTarget.style.color = "#dc2626";
+          e.currentTarget.style.borderColor = "#dc2626";
+        }}
+      >
+        🚪 Выход
       </button>
     </header>
   );
