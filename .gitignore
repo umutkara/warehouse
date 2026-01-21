@@ -84,3 +84,6 @@ coverage
 
 # DynamoDB Local files
 .dynamodb/
+# SQL migrations and documentation (keep local, don't commit)
+*.sql
+*.md

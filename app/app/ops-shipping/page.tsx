@@ -72,13 +72,55 @@ type UnitDetails = {
 // Scenario configuration
 const SCENARIO_FROM = "Склад Возвратов";
 
+// Список пудо точек (можно расширять)
+// Для добавления новых точек просто добавьте строку в массив ниже
+const PUDO_POINTS = [
+  "Birmarket_Masazır_66, Bakı, Bakı şəh.Abşeron r-on.Masazır \"Yeni Baki\" yaşayış kompleksi",
+  "Birmarket_Yasamal_Mərkəzi_Park_282, Bakı, Bakı şəh.Yasamal.Nəriman Nərimanov pr ,57/24",
+  "Birmarket_Xırdalan_Kristal_257, Bakı, Baku şəh.Xırdalan.H.Əliyev pr ,11",
+  "Birmarket_Qaraçuxur_277, Bakı, Bakı şəh.Suraxanı r-on.Rafiq Alıcanov.4057-4060 mikroray",
+  "Birmarket_Azadliq_pr._Inqlab_204, Bakı, Bakı şəh.Nərimanov.Möhsün Sənani küç ,153",
+  "Birmarket_Lökbatan_208, Bakı, Bakı şəh.Qaradağ.Lökbatan qəsəbəsi, 28 May küç,18Ф",
+  "Birmarket_Xətai_Ganja_ave_56, Bakı, Baki şəh.Xətai r-on.Gəncə pr 34 A.",
+  "Birmarket_Nəsrəddin_Tusi_276, Bakı, Bakı şəh.Xətai.Nəsrəddin Tusi küç, 55",
+  "Birmarket_6cı_Paralel_6, Bakı, Bakı şəh.Yasamal r-on.Məhəmməd Naxçivani küç",
+  "Birmarket_Xalqlar_207, Bakı, Bakı şəh.Nizami r-on.Bəhruz Nuriyev küç, 29",
+  "Birmarket_Nizami_26, Bakı, Bakı şəh.Nizami r-on.Elşən Suleymanov küç. 124",
+  "Birmarket_Yasamal_ATV_258, Bakı, Bakı şəh.Yasamal.A.M.Şərifzadə küç,12",
+  "Birmarket_Nizami_29, Bakı, Məmmədəli Şərifli küçəsi 239B",
+  "Birmarket_Armoni_Residence_310, Bakı, Bakı şəh, Tələt Şıxəliyev küç, ev ,3",
+  "003 Birmarket Bravo Khatai', Bakı, Bakı şəh.Xətai r-on.Sabit Orucov küç 13,1",
+  "Birmarket_Binəqədi_261, Bakı, Bakı şəh.Binəqədi . M.Ə. Rəsulzadə qəsəbəsi, Binəqədi şossesi, ,287Д",
+  "Birmarket_Yasamal_Əsəd_Əhmədov_259, Bakı, Bakı şəh.Yasamal.Yeni Yasamal yaşyış massivi, Xarici Dairəvi Yolu, 20",
+  "Birmarket_Nəsimi_70, Bakı, Bakı şəh.Nəsimi r-on.Cəlil Məmmədquluzadə küç, 118",
+  "Birmarket_Baki_4mkr_186, Bakı, Bakı şəh.Nəsimi r-on.Hüseyn Seyidzadə,27А",
+  "Birmarket_Seyid_Əzim_Şirvani_260, Bakı, Bakı şəh.Xətai .Seyid Əzim Şirvani küç ,47А",
+  "Birmarket_Aygun_Mall_73, Bakı, Bakı şəh.Sabunçu r-on.Bakixanov qəsəbəsi, Gənclik küç ,39",
+  "Birmarket_Xırdalan_307, Bakı, Bakı şəh.Abşeron r-on. Xirdalan, 27ci dalan ,21",
+  "Birmarket_Yeni_Yasamal_67, Bakı, Bakı şəh.Yasamal r-on.Məhəmməd Xiyabani küç,33",
+  "Birmarket_Əmircan_309, Bakı, Bakı şəh.Suraxanı r-on, Bülbülə qəs. S.Bəhlulzadə küç. ,95B",
+  "Birmarket_Xirdalan_1_191, Bakı, Baku şəh.Abşeron.28-ci məhəllə ,7В",
+  "002 Birmarket BRAVO 20 Января', Bakı, Bakı şəh.Nəsimi r-on..Tbilisi pr,3007",
+  "Birmarket_Nərimanov_5, Bakı, Bakı şəh.Nərimanov r-on.Əhməd Rəcəbli küç, 4/6",
+  "Birmarket_Baku_Bakixanov_Akkord_166, Bakı, Bakı şəh.Sabunçu r-on.Sabunçu qəs, Yavər Əliyev küç ,49а",
+  "Birmarket_Bakixanov24_185, Bakı, Bakı şəh.Nəsimi r-on.Bakıxanov küç ,24",
+  "Birmarket_Xetai_Metro_171, Bakı, Bakı şəh.Xətai r-on.Xocalı pr ,29",
+  "Birmarket_Baku_Uzeyir_Hacibeyov_str._169, Bakı, Bakı şəh.Səbail r-on.Üzeyir Hacıbəyov küç ,34/43",
+  "001 Birmarket BRAVO Ахмадли', Bakı, Bakı şəh.Xətai r-on.Ramiz Quliyev küç ,4",
+  "Birmarket_Badamdar_69, Bakı, Bakı şəh.Səbail r-on.Badamdar şossesi 77",
+  "412 Birmarket Bravo Chocolate tower_7, Bakı, Bakı şəh.Yasamal r-on.574-cü məhəllə Həsən Bəy Zərdabi pr",
+  "Другое",
+];
+
+// Категории с выпадающим списком (только Pudo)
 const SCENARIO_TO_OPTIONS = {
-  Pudo: ["Pudo Point 1", "Pudo Point 2", "Pudo Point 3"],
-  Мерчант: ["Merchant 1", "Merchant 2", "Merchant 3"],
-  Сервис: ["Service Center 1", "Service Center 2", "Service Center 3"],
+  Pudo: PUDO_POINTS,
 } as const;
 
-type ScenarioCategory = keyof typeof SCENARIO_TO_OPTIONS;
+// Категории с ручным вводом
+type ManualInputCategory = "Мерчант" | "Сервис" | "Азерпочта" | "Клиент";
+type DropdownCategory = keyof typeof SCENARIO_TO_OPTIONS;
+type ScenarioCategory = ManualInputCategory | DropdownCategory | "";
 
 export default function OpsShippingPage() {
   const [availableUnits, setAvailableUnits] = useState<UnitWithCell[]>([]);
@@ -314,6 +356,11 @@ export default function OpsShippingPage() {
 
     if (!selectedPickingCellId) {
       setError("Выберите целевую ячейку picking");
+      return;
+    }
+
+    if (scenarioCategory && !scenarioDestination.trim()) {
+      setError(`Заполните поле "Точка назначения" для категории "${scenarioCategory}"`);
       return;
     }
 
@@ -560,6 +607,8 @@ export default function OpsShippingPage() {
               <option value="Pudo">Pudo</option>
               <option value="Мерчант">Мерчант</option>
               <option value="Сервис">Сервис</option>
+              <option value="Азерпочта">Азерпочта</option>
+              <option value="Клиент">Клиент</option>
             </select>
           </div>
 
@@ -567,28 +616,76 @@ export default function OpsShippingPage() {
           {scenarioCategory && (
             <div>
               <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#666" }}>
-                Точка назначения
+                {scenarioCategory === "Pudo" ? "Точка назначения (выберите из списка)" : "Точка назначения (введите вручную)"}
               </label>
-              <select
-                value={scenarioDestination}
-                onChange={(e) => setScenarioDestination(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #ddd",
-                  borderRadius: 6,
-                  fontSize: 14,
-                  background: "#fff",
-                }}
-                disabled={loading}
-              >
-                <option value="">Выберите точку</option>
-                {SCENARIO_TO_OPTIONS[scenarioCategory].map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+              {scenarioCategory === "Pudo" ? (
+                // Dropdown для Pudo с возможностью ввода "Другое"
+                <>
+                  <select
+                    value={scenarioDestination === "Другое" || (scenarioDestination && !SCENARIO_TO_OPTIONS[scenarioCategory].includes(scenarioDestination as any)) ? "" : scenarioDestination}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "Другое") {
+                        setScenarioDestination(""); // Очищаем для ввода в input
+                      } else {
+                        setScenarioDestination(value);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      border: "1px solid #ddd",
+                      borderRadius: 6,
+                      fontSize: 14,
+                      background: "#fff",
+                      marginBottom: scenarioDestination === "" || (scenarioDestination && !SCENARIO_TO_OPTIONS[scenarioCategory].includes(scenarioDestination as any)) ? "8px" : "0",
+                    }}
+                    disabled={loading}
+                  >
+                    <option value="">Выберите пудо точку</option>
+                    {SCENARIO_TO_OPTIONS[scenarioCategory].map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  {/* Показываем input если выбрано "Другое" или введён произвольный текст (не из списка) */}
+                  {(scenarioDestination === "" || (scenarioDestination && !SCENARIO_TO_OPTIONS[scenarioCategory].includes(scenarioDestination as any))) && (
+                    <input
+                      type="text"
+                      value={scenarioDestination}
+                      onChange={(e) => setScenarioDestination(e.target.value)}
+                      placeholder="Введите название пудо точки вручную"
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        border: "1px solid #ddd",
+                        borderRadius: 6,
+                        fontSize: 14,
+                        background: "#fff",
+                      }}
+                      disabled={loading}
+                    />
+                  )}
+                </>
+              ) : (
+                // Input для Мерчант, Сервис, Азерпочта, Клиент
+                <input
+                  type="text"
+                  value={scenarioDestination}
+                  onChange={(e) => setScenarioDestination(e.target.value)}
+                  placeholder={`Введите ${scenarioCategory.toLowerCase() === "мерчант" ? "название мерчанта" : scenarioCategory.toLowerCase() === "сервис" ? "название сервисного центра" : scenarioCategory.toLowerCase() === "азерпочта" ? "адрес или название отделения" : "имя клиента или адрес"}`}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    border: "1px solid #ddd",
+                    borderRadius: 6,
+                    fontSize: 14,
+                    background: "#fff",
+                  }}
+                  disabled={loading}
+                />
+              )}
             </div>
           )}
 
@@ -613,7 +710,7 @@ export default function OpsShippingPage() {
       {/* Create button */}
       <Button
         onClick={handleCreateTasks}
-        disabled={loading || selectedUnitIds.size === 0 || !selectedPickingCellId}
+        disabled={Boolean(loading || selectedUnitIds.size === 0 || !selectedPickingCellId || (scenarioCategory && !scenarioDestination.trim()))}
         style={{ width: "100%" }}
         variant="primary"
       >

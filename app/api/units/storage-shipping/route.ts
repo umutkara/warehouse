@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
  * GET /api/units/storage-shipping
@@ -8,6 +9,7 @@ import { supabaseServer } from "@/lib/supabase/server";
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
+  // Use supabaseAdmin to bypass RLS and avoid recursive policy checks
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userData?.user) {
@@ -29,8 +31,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Get all units for the warehouse
-  const { data: units, error: unitsError } = await supabase
+  // Get all units for the warehouse (use supabaseAdmin to bypass RLS)
+  const { data: units, error: unitsError } = await supabaseAdmin
     .from("units")
     .select("id, barcode, status, cell_id, created_at")
     .eq("warehouse_id", profile.warehouse_id)
@@ -53,8 +55,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, units: [] });
   }
 
-  // Get cells info via warehouse_cells_map
-  const { data: cells, error: cellsError } = await supabase
+  // Get cells info via warehouse_cells_map (use supabaseAdmin to bypass RLS)
+  const { data: cells, error: cellsError } = await supabaseAdmin
     .from("warehouse_cells_map")
     .select("id, code, cell_type")
     .in("id", cellIds);
@@ -70,8 +72,8 @@ export async function GET(req: Request) {
     cellsMap.set(cell.id, cell);
   });
 
-  // Get all picking tasks that are open or in_progress
-  const { data: pickingTasks, error: tasksError } = await supabase
+  // Get all picking tasks that are open or in_progress (use supabaseAdmin to bypass RLS)
+  const { data: pickingTasks, error: tasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select("unit_id, id")
     .eq("warehouse_id", profile.warehouse_id)
@@ -87,7 +89,7 @@ export async function GET(req: Request) {
   let unitsFromMultiUnitTasks: string[] = [];
   
   if (taskIds.length > 0) {
-    const { data: taskUnits, error: taskUnitsError } = await supabase
+    const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
       .from("picking_task_units")
       .select("unit_id")
       .in("picking_task_id", taskIds);
