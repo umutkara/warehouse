@@ -60,15 +60,16 @@ export async function GET(req: Request) {
     });
   }
 
-  // Filter: show only tasks that are "open" OR "in_progress" by current user
-  // Hide "in_progress" tasks by other users
+  // Filter: show all "open" tasks AND all "in_progress" tasks (visible to everyone)
+  // This allows multiple users to see tasks even if they're in progress by others
+  // For "Отгрузка (НОВАЯ)" mode, all tasks should be visible to coordinate work
   const filteredTasks = tasks.filter((t: any) => {
     if (t.status === "open") return true;
-    if (t.status === "in_progress" && t.picked_by === userData.user.id) return true;
+    if (t.status === "in_progress") return true; // Show all in_progress tasks to everyone
     return false;
   });
 
-  // Sort: in_progress for current user first, then by created_at
+  // Sort: in_progress for current user first, then open tasks, then in_progress by others
   const sortedTasks = filteredTasks.sort((a: any, b: any) => {
     // Priority 1: in_progress for current user
     const aIsMyInProgress = a.status === "in_progress" && a.picked_by === userData.user.id;
@@ -76,12 +77,17 @@ export async function GET(req: Request) {
     if (aIsMyInProgress && !bIsMyInProgress) return -1;
     if (!aIsMyInProgress && bIsMyInProgress) return 1;
     
-    // Priority 2: by created_at
+    // Priority 2: open tasks before in_progress by others
+    if (a.status === "open" && b.status === "in_progress" && b.picked_by !== userData.user.id) return -1;
+    if (a.status === "in_progress" && a.picked_by !== userData.user.id && b.status === "open") return 1;
+    
+    // Priority 3: by created_at
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
 
   // Get units for each task from picking_task_units
   const taskIds = sortedTasks.map((t: any) => t.id);
+  
   const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
     .from("picking_task_units")
     .select(`
