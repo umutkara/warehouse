@@ -56,11 +56,11 @@ function CellLabel({ cell, onPrint, printMode = "small" }: {
           format: "CODE128",
           displayValue: true,
           margin: 10,
-          height: 120,
-          width: 3,
+          height: 80,
+          width: 2.5,
           background: "#ffffff",
-          fontSize: 24,
-          textMargin: 8,
+          fontSize: 20,
+          textMargin: 6,
         });
       } catch (e) {
         console.error("Ошибка генерации штрихкода A4:", e);
@@ -84,100 +84,94 @@ function CellLabel({ cell, onPrint, printMode = "small" }: {
         <div
           className="label-content label-content-a4"
           style={{
-            width: "210mm",
-            height: "297mm",
+            width: "297mm",
+            height: "210mm",
             border: "0",
             borderRadius: "0",
             outline: "none",
             padding: "20mm",
             display: "flex",
-            flexDirection: "column",
+            flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            gap: "20mm",
+            gap: "30mm",
             background: "#ffffff",
             boxSizing: "border-box",
             position: "relative",
           }}
         >
-          {/* Штрихкод - на всю ширину */}
+          {/* Левая часть: Штрихкод */}
           <div
             style={{
-              width: "100%",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "15mm",
-              flex: 1,
               justifyContent: "center",
+              gap: "10mm",
+              flex: 1,
             }}
           >
             <svg 
               ref={barcodeRefA4} 
               style={{ 
                 width: "100%", 
-                maxWidth: "170mm",
+                maxWidth: "200mm",
                 height: "auto",
               }} 
             />
           </div>
 
-          {/* Информация о ячейке внизу */}
+          {/* Правая часть: Информация о ячейке */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "8mm",
-              width: "100%",
+              justifyContent: "center",
+              gap: "15mm",
+              flex: 1,
             }}
           >
             <div
               style={{
+                width: "50mm",
+                height: "50mm",
+                backgroundColor: cellColor,
+                border: "3px solid #000",
+                borderRadius: "10mm",
+                boxShadow: `0 4px 12px ${cellColor}60`,
+              }}
+            />
+            <div
+              style={{
                 display: "flex",
+                flexDirection: "column",
                 alignItems: "center",
-                gap: "10mm",
+                gap: "5mm",
               }}
             >
               <div
                 style={{
-                  width: "40mm",
-                  height: "40mm",
-                  backgroundColor: cellColor,
-                  border: "3px solid #000",
-                  borderRadius: "8mm",
-                  boxShadow: `0 4px 12px ${cellColor}60`,
-                }}
-              />
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: "4mm",
+                  fontSize: "56px",
+                  fontWeight: 900,
+                  color: "#000",
+                  letterSpacing: "2px",
+                  textAlign: "center",
                 }}
               >
-                <div
-                  style={{
-                    fontSize: "48px",
-                    fontWeight: 900,
-                    color: "#000",
-                    letterSpacing: "2px",
-                  }}
-                >
-                  {cell.code}
-                </div>
-                <div
-                  style={{
-                    fontSize: "24px",
-                    fontWeight: 600,
-                    color: "#666",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  }}
-                >
-                  {cell.cell_type}
-                </div>
+                {cell.code}
+              </div>
+              <div
+                style={{
+                  fontSize: "28px",
+                  fontWeight: 600,
+                  color: "#666",
+                  textTransform: "uppercase",
+                  letterSpacing: "1px",
+                  textAlign: "center",
+                }}
+              >
+                {cell.cell_type}
               </div>
             </div>
           </div>
@@ -544,7 +538,7 @@ export default function CellLabelsPage() {
     <>
       <style>{`
         @page { 
-          size: ${printMode === "a4" ? "A4" : "58mm 30mm"}; 
+          size: ${printMode === "a4" ? "A4 landscape" : "58mm 30mm"}; 
           margin: 0; 
         }
         @media print {
