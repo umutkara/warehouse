@@ -191,10 +191,18 @@ export async function POST(req: Request) {
   };
 
   // Use supabaseAdmin to bypass RLS (avoid recursive policies)
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:194',message:'Before inserting picking_task',data:{taskToInsert:{warehouse_id:taskToInsert.warehouse_id,unit_count:allUnits.length,targetPickingCellId:taskToInsert.target_picking_cell_id,scenario:taskToInsert.scenario}},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
   const { data: insertedTasks, error: insertError } = await supabaseAdmin
     .from("picking_tasks")
     .insert([taskToInsert])
     .select();
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:200',message:'After inserting picking_task',data:{hasError:!!insertError,error:insertError?.message,insertedTaskId:insertedTasks?.[0]?.id,insertedWarehouseId:insertedTasks?.[0]?.warehouse_id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   if (insertError) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
@@ -212,9 +220,17 @@ export async function POST(req: Request) {
     from_cell_id: unit.cell_id, // Snapshot current cell
   }));
 
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:209',message:'Before inserting picking_task_units',data:{taskId,unitCount:allUnits.length,unitIds:allUnits.map(u=>u.id),taskUnitsToInsert},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
   const { error: unitsInsertError } = await supabaseAdmin
     .from("picking_task_units")
     .insert(taskUnitsToInsert);
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:217',message:'After inserting picking_task_units',data:{hasError:!!unitsInsertError,error:unitsInsertError?.message,insertedCount:taskUnitsToInsert.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
 
   if (unitsInsertError) {
     // Rollback: delete the task
@@ -222,7 +238,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: unitsInsertError.message }, { status: 500 });
   }
 
-  // Audit logging: log task creation with details
+  // Audit logging: log task creation with details (for the task itself)
   const taskBarcodes = allUnits.map((u) => u.barcode);
   const { error: auditError } = await supabase.rpc("audit_log_event", {
     p_action: "picking_task_create",
@@ -244,6 +260,34 @@ export async function POST(req: Request) {
     console.error("Audit log error:", auditError);
     // Don't fail the request if audit logging fails
   }
+
+  // Audit logging: log task creation for EACH unit (so it appears in unit history)
+  // This allows each unit to see that a task was created for it
+  const auditPromises = allUnits.map((unit) =>
+    supabase.rpc("audit_log_event", {
+      p_action: "picking_task_create",
+      p_entity_type: "unit",
+      p_entity_id: unit.id,
+      p_summary: `Создано задание на отгрузку в ячейку ${targetCell.code}${scenario ? ` (${scenario})` : ""}`,
+      p_meta: {
+        task_id: taskId,
+        target_picking_cell_id: targetPickingCellId,
+        target_picking_cell_code: targetCell.code,
+        created_by_name: creatorName,
+        scenario,
+      },
+    })
+  );
+
+  // Execute all audit logs in parallel (don't fail if some fail)
+  const auditResults = await Promise.allSettled(auditPromises);
+  auditResults.forEach((result, idx) => {
+    if (result.status === "rejected") {
+      console.error(`Audit log error for unit ${allUnits[idx].barcode}:`, result.reason);
+    } else if (result.value.error) {
+      console.error(`Audit log error for unit ${allUnits[idx].barcode}:`, result.value.error);
+    }
+  });
 
   return NextResponse.json({
     ok: true,

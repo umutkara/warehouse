@@ -107,7 +107,26 @@ export default function UnitDetailPage() {
       const json = await res.json();
 
       if (res.ok) {
-        setHistory(json.history || []);
+        const historyList = json.history || [];
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/app/units/[unitId]/page.tsx:110',message:'History loaded in UI',data:{totalEvents:historyList.length,eventTypes:historyList.map((e:any)=>e.event_type),taskEvents:historyList.filter((e:any)=>e.event_type?.includes('picking_task')).map((e:any)=>({type:e.event_type,details:e.details}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        
+        console.log(`[Unit History] Loaded ${historyList.length} events`);
+        console.log(`[Unit History] Events:`, historyList.map((e: any) => ({
+          type: e.event_type,
+          date: e.created_at,
+          details: e.details
+        })));
+        
+        // Count task events
+        const taskEvents = historyList.filter((e: any) => 
+          e.event_type?.includes("picking_task")
+        );
+        console.log(`[Unit History] Task events: ${taskEvents.length}`, taskEvents);
+        
+        setHistory(historyList);
       } else {
         console.error("Failed to load history:", json.error);
       }
@@ -268,11 +287,112 @@ export default function UnitDetailPage() {
         }
         break;
 
+      case "picking_task_created":
+        const { task_id: createdTaskId, scenario: createdScenario, target_cell: createdTargetCell, status: createdStatus, created_by_name: createdByName } = event.details;
+        return (
+          <div key={uniqueKey} style={{ ...styles.historyItem, background: "#f0fdf4", borderColor: "#bbf7d0" }}>
+            <div style={styles.historyIcon}>📋</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Создана задача на отгрузку</div>
+              {createdScenario && (
+                <div style={styles.historyScenario}>
+                  Сценарий: {createdScenario}
+                </div>
+              )}
+              <div style={styles.historyText}>
+                Целевая ячейка: {createdTargetCell || "?"} • Статус: {createdStatus === "open" ? "Открыта" : createdStatus === "in_progress" ? "В работе" : createdStatus}
+              </div>
+              <div style={styles.historyMeta}>
+                {createdByName || "Система"} • {date}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "picking_task_canceled":
+        const { task_id: canceledTaskId, scenario: canceledScenario, target_cell: canceledTargetCell, canceled_at: canceledAt, canceled_by: canceledBy, created_by_name: canceledCreatedByName } = event.details;
+        return (
+          <div key={uniqueKey} style={{ ...styles.historyItem, background: "#fef2f2", borderColor: "#fecaca" }}>
+            <div style={styles.historyIcon}>❌</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Задача отменена</div>
+              {canceledScenario && (
+                <div style={styles.historyScenario}>
+                  Сценарий: {canceledScenario}
+                </div>
+              )}
+              <div style={styles.historyText}>
+                Целевая ячейка: {canceledTargetCell || "?"}
+              </div>
+              <div style={styles.historyMeta}>
+                {canceledCreatedByName || "Система"} • {date}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "picking_task_completed":
+        const { task_id: completedTaskId, scenario: completedScenario, target_cell: completedTargetCell, completed_at: completedAt, completed_by: completedBy, created_by_name: completedCreatedByName } = event.details;
+        return (
+          <div key={uniqueKey} style={{ ...styles.historyItem, background: "#f0fdf4", borderColor: "#86efac" }}>
+            <div style={styles.historyIcon}>✅</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Задача завершена</div>
+              {completedScenario && (
+                <div style={styles.historyScenario}>
+                  Сценарий: {completedScenario}
+                </div>
+              )}
+              <div style={styles.historyText}>
+                Целевая ячейка: {completedTargetCell || "?"}
+              </div>
+              <div style={styles.historyMeta}>
+                {completedCreatedByName || "Система"} • {date}
+              </div>
+            </div>
+          </div>
+        );
+
       case "audit":
         const { action, summary, actor_name: auditActor, actor_role: auditRole, meta } = event.details;
         let icon = "📝";
         let bgColor = "#f9fafb";
         let borderColor = "#e5e7eb";
+
+        // Special handling for picking_task_create (from audit log)
+        if (action === "picking_task_create") {
+          icon = "📋";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
+          return (
+            <div
+              key={uniqueKey}
+              style={{
+                ...styles.historyItem,
+                background: bgColor,
+                borderColor: borderColor,
+              }}
+            >
+              <div style={styles.historyIcon}>{icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={styles.historyTitle}>Создана задача на отгрузку</div>
+                {meta?.scenario && (
+                  <div style={styles.historyScenario}>
+                    Сценарий: {meta.scenario}
+                  </div>
+                )}
+                {meta?.target_picking_cell_code && (
+                  <div style={styles.historyText}>
+                    Целевая ячейка: {meta.target_picking_cell_code}
+                  </div>
+                )}
+                <div style={styles.historyMeta}>
+                  {meta?.created_by_name || auditActor || "Система"} {auditRole ? `(${auditRole})` : ""} • {date}
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         // Special handling for merchant rejection and service center return
         if (action === "logistics.merchant_rejection") {
