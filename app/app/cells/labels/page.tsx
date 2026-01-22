@@ -14,36 +14,209 @@ type Cell = {
   meta?: any;
 };
 
-function CellLabel({ cell, onPrint }: { cell: Cell; onPrint: () => void }) {
+type PrintMode = "small" | "a4";
+
+function CellLabel({ cell, onPrint, printMode = "small" }: { 
+  cell: Cell; 
+  onPrint: () => void;
+  printMode?: PrintMode;
+}) {
   const barcodeRef = useRef<SVGSVGElement | null>(null);
+  const barcodeRefA4 = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
-    if (!barcodeRef.current) return;
-
-    // Кодируем строку вида "CELL:<CODE>"
-    const barcodeValue = `CELL:${cell.code}`;
-
-    try {
-      // Очищаем предыдущий штрихкод
-      while (barcodeRef.current.firstChild) {
-        barcodeRef.current.removeChild(barcodeRef.current.firstChild);
+    // Для маленьких этикеток
+    if (barcodeRef.current && printMode === "small") {
+      const barcodeValue = `CELL:${cell.code}`;
+      try {
+        while (barcodeRef.current.firstChild) {
+          barcodeRef.current.removeChild(barcodeRef.current.firstChild);
+        }
+        JsBarcode(barcodeRef.current, barcodeValue, {
+          format: "CODE128",
+          displayValue: false,
+          margin: 0,
+          height: 34,
+          width: 1.2,
+          background: "#ffffff",
+        });
+      } catch (e) {
+        console.error("Ошибка генерации штрихкода:", e);
       }
-
-      JsBarcode(barcodeRef.current, barcodeValue, {
-        format: "CODE128",
-        displayValue: false,
-        margin: 0,
-        height: 34,
-        width: 1.2,
-        background: "#ffffff",
-      });
-    } catch (e) {
-      console.error("Ошибка генерации штрихкода:", e);
     }
-  }, [cell.code]);
+
+    // Для A4 этикеток (большой штрихкод)
+    if (barcodeRefA4.current && printMode === "a4") {
+      const barcodeValue = `CELL:${cell.code}`;
+      try {
+        while (barcodeRefA4.current.firstChild) {
+          barcodeRefA4.current.removeChild(barcodeRefA4.current.firstChild);
+        }
+        JsBarcode(barcodeRefA4.current, barcodeValue, {
+          format: "CODE128",
+          displayValue: true,
+          margin: 10,
+          height: 120,
+          width: 3,
+          background: "#ffffff",
+          fontSize: 24,
+          textMargin: 8,
+        });
+      } catch (e) {
+        console.error("Ошибка генерации штрихкода A4:", e);
+      }
+    }
+  }, [cell.code, printMode]);
 
   const cellColor = getCellColor(cell.cell_type, cell.meta);
 
+  // Если режим A4 - возвращаем другой layout
+  if (printMode === "a4") {
+    return (
+      <div
+        className="label-container label-container-a4"
+        data-cell-id={cell.id}
+        style={{
+          display: "inline-block",
+          margin: "16px",
+        }}
+      >
+        <div
+          className="label-content label-content-a4"
+          style={{
+            width: "210mm",
+            height: "297mm",
+            border: "0",
+            borderRadius: "0",
+            outline: "none",
+            padding: "20mm",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "20mm",
+            background: "#ffffff",
+            boxSizing: "border-box",
+            position: "relative",
+          }}
+        >
+          {/* Штрихкод - на всю ширину */}
+          <div
+            style={{
+              width: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "15mm",
+              flex: 1,
+              justifyContent: "center",
+            }}
+          >
+            <svg 
+              ref={barcodeRefA4} 
+              style={{ 
+                width: "100%", 
+                maxWidth: "170mm",
+                height: "auto",
+              }} 
+            />
+          </div>
+
+          {/* Информация о ячейке внизу */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8mm",
+              width: "100%",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10mm",
+              }}
+            >
+              <div
+                style={{
+                  width: "40mm",
+                  height: "40mm",
+                  backgroundColor: cellColor,
+                  border: "3px solid #000",
+                  borderRadius: "8mm",
+                  boxShadow: `0 4px 12px ${cellColor}60`,
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: "4mm",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "48px",
+                    fontWeight: 900,
+                    color: "#000",
+                    letterSpacing: "2px",
+                  }}
+                >
+                  {cell.code}
+                </div>
+                <div
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: 600,
+                    color: "#666",
+                    textTransform: "uppercase",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  {cell.cell_type}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Кнопка печати */}
+        <button
+          className="label-print-btn"
+          onClick={onPrint}
+          style={{
+            marginTop: "10px",
+            padding: "8px 16px",
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: 600,
+            width: "100%",
+            boxShadow: "0 2px 6px rgba(102, 126, 234, 0.3)",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "translateY(-1px)";
+            e.currentTarget.style.boxShadow = "0 4px 10px rgba(102, 126, 234, 0.4)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.boxShadow = "0 2px 6px rgba(102, 126, 234, 0.3)";
+          }}
+        >
+          🖨️ Печать A4
+        </button>
+      </div>
+    );
+  }
+
+  // Оригинальный код для маленьких этикеток
   return (
     <div
       className="label-container"
@@ -214,6 +387,7 @@ export default function CellLabelsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [printCellId, setPrintCellId] = useState<string | null>(null);
+  const [printMode, setPrintMode] = useState<PrintMode>("small");
 
   // ⚡ OPTIMIZATION: Memoized load function
   const loadCells = useCallback(async () => {
@@ -369,20 +543,39 @@ export default function CellLabelsPage() {
   return (
     <>
       <style>{`
-        @page { size: 58mm 30mm; margin: 0; }
+        @page { 
+          size: ${printMode === "a4" ? "A4" : "58mm 30mm"}; 
+          margin: 0; 
+        }
         @media print {
           body { margin: 0 !important; }
           body * { visibility: hidden; }
           .labels-print-root, .labels-print-root * { visibility: visible; }
           .label-print-btn, button, h1, p { display: none !important; }
-          .label-container { margin: 0 !important; page-break-after: always; break-after: page; }
           
-          /* Reset styles for print */
+          /* Для маленьких этикеток */
+          .label-container:not(.label-container-a4) { 
+            margin: 0 !important; 
+            page-break-after: always; 
+            break-after: page; 
+          }
+          
+          /* Для A4 этикеток */
+          .label-container-a4 {
+            margin: 0 !important;
+            page-break-after: always;
+            break-after: page;
+          }
+          
           .label-content {
             border-radius: 0 !important;
             box-shadow: none !important;
             background: white !important;
             outline: 0.2mm solid #ddd !important;
+          }
+
+          .label-content-a4 {
+            outline: none !important;
           }
 
           .labels-print-root[data-print-one="1"] .label-container { display: none !important; }
@@ -430,7 +623,49 @@ export default function CellLabelsPage() {
             </p>
           </div>
           
-          <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {/* Переключатель режима печати */}
+            <div style={{
+              display: "flex",
+              background: "#f3f4f6",
+              borderRadius: 10,
+              padding: 4,
+              gap: 4,
+            }}>
+              <button
+                onClick={() => setPrintMode("small")}
+                style={{
+                  padding: "8px 16px",
+                  background: printMode === "small" ? "#667eea" : "transparent",
+                  color: printMode === "small" ? "#fff" : "#374151",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  transition: "all 0.2s",
+                }}
+              >
+                📏 Маленькие (58×30mm)
+              </button>
+              <button
+                onClick={() => setPrintMode("a4")}
+                style={{
+                  padding: "8px 16px",
+                  background: printMode === "a4" ? "#667eea" : "transparent",
+                  color: printMode === "a4" ? "#fff" : "#374151",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  transition: "all 0.2s",
+                }}
+              >
+                📄 A4 (большой штрихкод)
+              </button>
+            </div>
+
             <button
               onClick={printAll}
               style={{
@@ -498,9 +733,9 @@ export default function CellLabelsPage() {
             <CellLabel
               key={cell.id}
               cell={cell}
+              printMode={printMode}
               onPrint={() => {
                 setPrintCellId(cell.id);
-                // даём React применить state
                 setTimeout(() => window.print(), 50);
               }}
             />
