@@ -7,6 +7,8 @@ type Cell = {
   id: string;
   code: string;
   cell_type: string;
+  units_count?: number;
+  meta?: any;
 };
 
 type Unit = {
@@ -14,6 +16,7 @@ type Unit = {
   barcode: string;
   cell_id?: string;
   status?: string;
+  created_at?: string;
 };
 
 type UnitWithCell = Unit & {
@@ -127,6 +130,7 @@ export default function OpsShippingPage() {
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [pickingCells, setPickingCells] = useState<Cell[]>([]);
   const [selectedPickingCellId, setSelectedPickingCellId] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   
   // Scenario state
   const [scenarioCategory, setScenarioCategory] = useState<ScenarioCategory | "">("");
@@ -284,12 +288,36 @@ export default function OpsShippingPage() {
     });
   }
 
-  // Select all units
+  // Filter units by search query
+  const filteredAvailableUnits = availableUnits.filter((unit) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase().trim();
+    return (
+      unit.barcode?.toLowerCase().includes(query) ||
+      unit.cell?.code?.toLowerCase().includes(query) ||
+      unit.status?.toLowerCase().includes(query) ||
+      unit.cell?.cell_type?.toLowerCase().includes(query)
+    );
+  });
+
+  // Select all units (based on filtered list)
   function handleSelectAll() {
-    if (selectedUnitIds.size === availableUnits.length) {
-      setSelectedUnitIds(new Set());
+    if (selectedUnitIds.size === filteredAvailableUnits.length && filteredAvailableUnits.length > 0) {
+      // Deselect all filtered units
+      const filteredIds = new Set(filteredAvailableUnits.map((u) => u.id));
+      setSelectedUnitIds((prev) => {
+        const next = new Set(prev);
+        filteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
     } else {
-      setSelectedUnitIds(new Set(availableUnits.map((u) => u.id)));
+      // Select all filtered units
+      const filteredIds = new Set(filteredAvailableUnits.map((u) => u.id));
+      setSelectedUnitIds((prev) => {
+        const next = new Set(prev);
+        filteredIds.forEach((id) => next.add(id));
+        return next;
+      });
     }
   }
 
@@ -345,6 +373,67 @@ export default function OpsShippingPage() {
   function handleCloseModal() {
     setModalUnitId(null);
     setModalUnitDetails(null);
+  }
+
+  // Export available units to Excel
+  async function handleExportToExcel() {
+    if (availableUnits.length === 0) {
+      setError("Нет заказов для экспорта");
+      return;
+    }
+
+    try {
+      // Generate CSV headers
+      const headers = [
+        "Штрихкод",
+        "Статус",
+        "Ячейка",
+        "Тип ячейки",
+        "Создан",
+      ];
+
+      // Generate CSV rows
+      const rows = availableUnits.map((unit) => {
+        const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
+        
+        return [
+          unit.barcode || "",
+          unit.status || "",
+          unit.cell?.code || "",
+          unit.cell?.cell_type || "",
+          createdAt,
+        ];
+      });
+
+      // Generate CSV content
+      const csvContent = [
+        headers.join(","),
+        ...rows.map((row) => 
+          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+        ),
+      ].join("\n");
+
+      // Add BOM for UTF-8 Excel compatibility
+      const bom = "\uFEFF";
+      const csvWithBom = bom + csvContent;
+
+      // Create blob and download
+      const blob = new Blob([csvWithBom], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `units_storage_shipping_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setSuccess(`Экспортировано ${availableUnits.length} заказов`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e: any) {
+      console.error("Export error:", e);
+      setError("Ошибка экспорта в Excel");
+    }
   }
 
   // Create tasks
@@ -428,12 +517,52 @@ export default function OpsShippingPage() {
           <label style={{ fontWeight: 600, fontSize: 16 }}>
             📦 Доступные заказы для создания задач
           </label>
-          <Button variant="secondary" size="sm" onClick={loadAvailableUnits} disabled={loadingUnits}>
-            {loadingUnits ? "Загрузка..." : "Обновить"}
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              onClick={handleExportToExcel} 
+              disabled={loadingUnits || availableUnits.length === 0}
+              style={{ 
+                background: availableUnits.length > 0 ? "#10b981" : undefined,
+                color: availableUnits.length > 0 ? "#fff" : undefined,
+                borderColor: availableUnits.length > 0 ? "#10b981" : undefined
+              }}
+            >
+              📊 Экспорт в Excel
+            </Button>
+            <Button variant="secondary" size="sm" onClick={loadAvailableUnits} disabled={loadingUnits}>
+              {loadingUnits ? "Загрузка..." : "Обновить"}
+            </Button>
+          </div>
         </div>
         <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
           Заказы из ячеек storage/shipping, которые еще не добавлены в задачи
+        </div>
+        
+        {/* Поиск */}
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder="🔍 Поиск по штрихкоду, ячейке, статусу..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              fontSize: 14,
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = "#2196f3";
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = "#ddd";
+            }}
+          />
         </div>
 
         {loadingUnits ? (
@@ -444,15 +573,24 @@ export default function OpsShippingPage() {
           <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
             Нет доступных заказов. Все заказы из storage/shipping уже добавлены в задачи или ячейки пусты.
           </div>
+        ) : filteredAvailableUnits.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
+            {searchQuery.trim() ? `По запросу "${searchQuery}" ничего не найдено` : "Нет доступных заказов"}
+          </div>
         ) : (
           <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
+            {searchQuery.trim() && (
+              <div style={{ padding: "8px 12px", background: "#f0f9ff", borderBottom: "1px solid #ddd", fontSize: 13, color: "#666" }}>
+                Найдено: {filteredAvailableUnits.length} из {availableUnits.length} заказов
+              </div>
+            )}
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead style={{ position: "sticky", top: 0, background: "#f5f5f5", zIndex: 1 }}>
                 <tr>
                   <th style={{ padding: "12px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 600 }}>
                     <input
                       type="checkbox"
-                      checked={availableUnits.length > 0 && selectedUnitIds.size === availableUnits.length}
+                      checked={filteredAvailableUnits.length > 0 && filteredAvailableUnits.every((u) => selectedUnitIds.has(u.id))}
                       onChange={handleSelectAll}
                       style={{ cursor: "pointer", width: 16, height: 16 }}
                     />
@@ -464,7 +602,7 @@ export default function OpsShippingPage() {
                 </tr>
               </thead>
               <tbody>
-                {availableUnits.map((unit) => (
+                {filteredAvailableUnits.map((unit) => (
                   <tr 
                     key={unit.id} 
                     style={{ 
@@ -545,11 +683,23 @@ export default function OpsShippingPage() {
           disabled={loading}
         >
           <option value="">Выберите ячейку picking</option>
-          {pickingCells.map((cell) => (
-            <option key={cell.id} value={cell.id}>
-              {cell.code} ({cell.cell_type})
-            </option>
-          ))}
+          {pickingCells.map((cell) => {
+            // Формируем дополнительную информацию для отображения
+            const infoParts: string[] = [];
+            if (cell.units_count !== undefined && cell.units_count !== null) {
+              infoParts.push(`${cell.units_count} ед.`);
+            }
+            if (cell.meta?.description) {
+              infoParts.push(cell.meta.description);
+            }
+            const infoText = infoParts.length > 0 ? ` (${infoParts.join(', ')})` : '';
+            
+            return (
+              <option key={cell.id} value={cell.id}>
+                {cell.code}{infoText}
+              </option>
+            );
+          })}
         </select>
       </div>
 

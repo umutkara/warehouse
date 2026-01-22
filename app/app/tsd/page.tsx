@@ -32,7 +32,7 @@ type UnitInfo = {
   };
 };
 
-type Mode = "receiving" | "moving" | "inventory" | "shipping" | "surplus";
+type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "surplus";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -66,6 +66,20 @@ export default function TsdPage() {
   const [shippingSteps, setShippingSteps] = useState<any[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [selectedFromCellStep, setSelectedFromCellStep] = useState<any | null>(null); // Выбранная ячейка для сбора
+  
+  // Для режима Отгрузка (НОВАЯ) - с группировкой по picking ячейкам
+  const [shippingNewTasks, setShippingNewTasks] = useState<any[]>([]);
+  const [shippingNewCells, setShippingNewCells] = useState<Map<string, { code: string; description?: string; meta?: any }>>(new Map());
+  const [shippingNewGrouped, setShippingNewGrouped] = useState<Map<string, any[]>>(new Map());
+  const [currentTaskNew, setCurrentTaskNew] = useState<any | null>(null); // Объединенная задача для picking ячейки
+  const [loadingTasksNew, setLoadingTasksNew] = useState(false);
+  
+  // Состояния для работы с объединенной задачей
+  const [shippingNewFromCells, setShippingNewFromCells] = useState<Array<{ id: string; code: string; cell_type: string; units: any[] }>>([]);
+  const [shippingNewSelectedFromCell, setShippingNewSelectedFromCell] = useState<{ id: string; code: string; cell_type: string; units: any[] } | null>(null);
+  const [shippingNewScannedUnits, setShippingNewScannedUnits] = useState<UnitInfo[]>([]); // Отсканированные заказы из текущей from-ячейки
+  const [shippingNewToCell, setShippingNewToCell] = useState<CellInfo | null>(null); // TO ячейка (picking)
+  const [shippingNewAllUnits, setShippingNewAllUnits] = useState<UnitInfo[]>([]); // Все заказы из всех задач
   
   // Для режима Излишки (Surplus)
   const [surplusCell, setSurplusCell] = useState<CellInfo | null>(null);
@@ -122,6 +136,13 @@ export default function TsdPage() {
   useEffect(() => {
     if (mode === "shipping") {
       loadShippingTasks();
+    }
+  }, [mode]);
+  
+  // Load shipping tasks (NEW) when mode is shipping_new
+  useEffect(() => {
+    if (mode === "shipping_new") {
+      loadShippingNewTasks();
     }
   }, [mode]);
   
@@ -187,6 +208,314 @@ export default function TsdPage() {
     setShippingSteps(steps);
     setCurrentStepIndex(0); // Не используется в новой логике, но оставим для совместимости
   }
+  
+  // Выбор объединенной задачи в новом режиме (по picking ячейке)
+  async function handleSelectTaskNew(targetCellId: string, tasks: any[]) {
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+    
+    try {
+      // Объединяем все задачи для одной picking ячейки
+      // Собираем все заказы из всех задач
+      const allUnits: UnitInfo[] = [];
+      const fromCellsMap = new Map<string, { id: string; code: string; cell_type: string; units: any[] }>();
+      
+      tasks.forEach((task: any) => {
+        // Берем задачу в работу (если еще не взята)
+        if (task.status === "open") {
+          // Будем брать в работу при первом сканировании
+        }
+        
+        // Собираем все units из задачи
+        (task.units || []).forEach((unit: any) => {
+          const fromCellId = unit.from_cell_id || unit.cell_id;
+          if (!fromCellId) return;
+          
+          // Добавляем unit в общий список
+          allUnits.push({
+            id: unit.id,
+            barcode: unit.barcode,
+            cell_id: unit.cell_id,
+            from_cell_id: unit.from_cell_id,
+            cell: unit.cell,
+            from_cell: unit.from_cell,
+          });
+          
+          // Группируем по from-ячейкам
+          if (!fromCellsMap.has(fromCellId)) {
+            const fromCell = unit.from_cell || unit.cell;
+            fromCellsMap.set(fromCellId, {
+              id: fromCellId,
+              code: fromCell?.code || "?",
+              cell_type: fromCell?.cell_type || "?",
+              units: [],
+            });
+          }
+          fromCellsMap.get(fromCellId)!.units.push(unit);
+        });
+      });
+      
+      // Получаем информацию о TO ячейке (picking)
+      const targetCellInfo = shippingNewCells.get(targetCellId);
+      if (!targetCellInfo) {
+        setError("Информация о picking ячейке не найдена");
+        return;
+      }
+      
+      // Создаем объединенную задачу
+      const mergedTask = {
+        targetCellId,
+        targetCell: {
+          id: targetCellId,
+          code: targetCellInfo.code,
+          cell_type: "picking",
+        },
+        tasks, // Все исходные задачи
+        allUnits,
+        fromCells: Array.from(fromCellsMap.values()),
+        totalUnitCount: allUnits.length,
+      };
+      
+      setCurrentTaskNew(mergedTask);
+      setShippingNewAllUnits(allUnits);
+      setShippingNewFromCells(Array.from(fromCellsMap.values()));
+      setShippingNewSelectedFromCell(null);
+      setShippingNewScannedUnits([]);
+      setShippingNewToCell(null);
+      
+      setSuccess(`✓ Выбрана задача: ${targetCellInfo.code}${targetCellInfo.description ? ` (${targetCellInfo.description})` : ""} - ${tasks.length} ${tasks.length === 1 ? "задача" : "задач"}, ${allUnits.length} ${allUnits.length === 1 ? "заказ" : "заказов"}`);
+    } catch (e: any) {
+      setError(e.message || "Ошибка выбора задачи");
+    } finally {
+      setBusy(false);
+    }
+  }
+  
+  // Выбор from-ячейки для сбора заказов
+  function handleSelectFromCellNew(fromCell: { id: string; code: string; cell_type: string; units: any[] }) {
+    setError(null);
+    setSuccess(null);
+    
+    // Берем первую задачу в работу при первом выборе from-ячейки
+    if (currentTaskNew && currentTaskNew.tasks && currentTaskNew.tasks.length > 0) {
+      const firstOpenTask = currentTaskNew.tasks.find((t: any) => t.status === "open");
+      if (firstOpenTask) {
+        // Берем задачу в работу асинхронно (не блокируем UI)
+        fetch("/api/tsd/shipping-tasks/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId: firstOpenTask.id }),
+        }).catch(() => {});
+      }
+    }
+    
+    setShippingNewSelectedFromCell(fromCell);
+    // НЕ сбрасываем shippingNewScannedUnits - сохраняем все отсканированные заказы
+    setSuccess(`✓ Выбрана ячейка: ${fromCell.code}. Отсканируйте ${fromCell.units.length} ${fromCell.units.length === 1 ? "заказ" : "заказов"}`);
+  }
+  
+  // Обработка сканирования в новом режиме
+  async function handleShippingNewScan(scanValue: string) {
+    if (!currentTaskNew) {
+      setError("Сначала выберите задачу из списка");
+      setScanValue("");
+      return;
+    }
+    
+    // Если from-ячейка не выбрана, нельзя сканировать заказы
+    if (!shippingNewSelectedFromCell) {
+      setError("Сначала выберите from-ячейку для сбора");
+      setScanValue("");
+      return;
+    }
+    
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+    
+    try {
+      const parsed = parseScan(scanValue);
+      if (!parsed) {
+        setError("Некорректный скан");
+        setScanValue("");
+        return;
+      }
+      
+      // Если сканируется ячейка - это TO ячейка (только если все from-ячейки завершены)
+      if (parsed.type === "cell") {
+        const cellCode = parsed.code;
+        if (cellCode.toUpperCase() === currentTaskNew.targetCell.code.toUpperCase()) {
+          // Проверяем, что все from-ячейки завершены
+          const allFromCellsCompleted = shippingNewFromCells.every((fc) => {
+            const scannedCount = shippingNewScannedUnits.filter(
+              (u) => u.from_cell_id === fc.id || (u.cell_id === fc.id && !u.from_cell_id)
+            ).length;
+            return scannedCount >= fc.units.length;
+          });
+          
+          if (!allFromCellsCompleted) {
+            setError("Сначала завершите сбор из всех from-ячеек");
+            setScanValue("");
+            return;
+          }
+          
+          // Сканирование TO ячейки - завершение задачи
+          await handleCompleteShippingNewTask(cellCode);
+          setScanValue("");
+          return;
+        } else {
+          setError(`Ожидается ячейка ${currentTaskNew.targetCell.code}, отсканирована ${cellCode}`);
+          setScanValue("");
+          return;
+        }
+      }
+      
+      // Сканирование заказа
+      const barcode = parsed.code;
+      
+      // Проверяем, что заказ из выбранной from-ячейки
+      const unit = shippingNewSelectedFromCell.units.find((u: any) => u.barcode === barcode);
+      if (!unit) {
+        setError(`Заказ ${barcode} не найден в ячейке ${shippingNewSelectedFromCell.code}`);
+        setScanValue("");
+        return;
+      }
+      
+      // Проверяем, не отсканирован ли уже
+      if (shippingNewScannedUnits.some((u) => u.barcode === barcode)) {
+        setError(`Заказ ${barcode} уже отсканирован`);
+        setScanValue("");
+        return;
+      }
+      
+      // Добавляем в отсканированные
+      const unitInfo: UnitInfo = {
+        id: unit.id,
+        barcode: unit.barcode,
+        cell_id: unit.cell_id,
+        from_cell_id: unit.from_cell_id,
+        cell: unit.cell,
+        from_cell: unit.from_cell,
+      };
+      
+      const updatedScanned = [...shippingNewScannedUnits, unitInfo];
+      setShippingNewScannedUnits(updatedScanned);
+      
+      // Проверяем, завершена ли текущая from-ячейка
+      const scannedInThisCell = updatedScanned.filter(
+        (u) => u.from_cell_id === shippingNewSelectedFromCell.id || (u.cell_id === shippingNewSelectedFromCell.id && !u.from_cell_id)
+      ).length;
+      
+      if (scannedInThisCell >= shippingNewSelectedFromCell.units.length) {
+        setSuccess(`✅ Ячейка ${shippingNewSelectedFromCell.code} завершена! (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length})`);
+        // Автоматически сбрасываем выбор from-ячейки для выбора следующей
+        setTimeout(() => {
+          setShippingNewSelectedFromCell(null);
+        }, 2000);
+      } else {
+        setSuccess(`✓ ${barcode} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
+      }
+      
+      setScanValue("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка обработки скана");
+      setScanValue("");
+    } finally {
+      setBusy(false);
+    }
+  }
+  
+  // Завершение задачи (после сканирования TO ячейки)
+  async function handleCompleteShippingNewTask(toCellCode: string) {
+    if (!currentTaskNew) {
+      setError("Нет активной задачи");
+      return;
+    }
+    
+    // Проверяем, что все заказы отсканированы
+    if (shippingNewScannedUnits.length < shippingNewAllUnits.length) {
+      setError(`Отсканировано ${shippingNewScannedUnits.length} из ${shippingNewAllUnits.length} заказов`);
+      return;
+    }
+    
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      // Получаем информацию о TO ячейке
+      const toCellInfo = await loadCellInfo(toCellCode);
+      if (!toCellInfo || toCellInfo.cell_type !== "picking") {
+        setError(`Ячейка ${toCellCode} не является picking ячейкой`);
+        return;
+      }
+      
+      // Перемещаем все отсканированные заказы в TO ячейку
+      const movedUnitIds = shippingNewScannedUnits.map((u) => u.id);
+      
+      // Завершаем каждую задачу отдельно
+      const taskResults = [];
+      for (const task of currentTaskNew.tasks) {
+        // Получаем заказы, которые относятся к этой задаче
+        const taskUnitIds = (task.units || []).map((u: any) => u.id);
+        const movedInThisTask = movedUnitIds.filter((id) => taskUnitIds.includes(id));
+        
+        if (movedInThisTask.length === 0) continue;
+        
+        // Перемещаем заказы в TO ячейку
+        for (const unitId of movedInThisTask) {
+          const moveRes = await fetch("/api/units/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              unitId,
+              toCellId: toCellInfo.id,
+            }),
+          });
+          
+          if (!moveRes.ok) {
+            const json = await moveRes.json().catch(() => ({}));
+            throw new Error(json.error || `Ошибка перемещения заказа ${unitId}`);
+          }
+        }
+        
+        // Завершаем задачу
+        const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            taskId: task.id,
+            movedUnitIds: movedInThisTask,
+          }),
+        });
+        
+        if (!completeRes.ok) {
+          const json = await completeRes.json().catch(() => ({}));
+          throw new Error(json.error || `Ошибка завершения задачи ${task.id}`);
+        }
+        
+        taskResults.push({ taskId: task.id, movedCount: movedInThisTask.length });
+      }
+      
+      setSuccess(`✅ Задача завершена! ${shippingNewScannedUnits.length} заказов перемещено в ${toCellCode}`);
+      
+      // Сброс состояния
+      setTimeout(() => {
+        setCurrentTaskNew(null);
+        setShippingNewFromCells([]);
+        setShippingNewSelectedFromCell(null);
+        setShippingNewScannedUnits([]);
+        setShippingNewToCell(null);
+        setShippingNewAllUnits([]);
+        loadShippingNewTasks(); // Обновить список задач
+      }, 2000);
+    } catch (e: any) {
+      setError(e.message || "Ошибка завершения задачи");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Выбор ячейки для сбора (по аналогии с инвентаризацией)
   async function handleSelectFromCell(step: any, stepIndex: number) {
@@ -232,6 +561,65 @@ export default function TsdPage() {
       console.error("Failed to load shipping tasks:", e);
     } finally {
       setLoadingTasks(false);
+    }
+  }
+  
+  // Загрузка задач для нового режима с группировкой по picking ячейкам
+  async function loadShippingNewTasks() {
+    setLoadingTasksNew(true);
+    try {
+      // Загружаем задачи
+      const tasksRes = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store" });
+      const tasksJson = await tasksRes.json();
+      
+      if (!tasksRes.ok) {
+        setError("Ошибка загрузки задач");
+        return;
+      }
+      
+      const tasks = tasksJson.tasks || [];
+      setShippingNewTasks(tasks);
+      
+      // Загружаем ячейки с описаниями
+      const cellsRes = await fetch("/api/cells/list", { cache: "no-store" });
+      const cellsJson = await cellsRes.json();
+      
+      if (cellsRes.ok) {
+        const cells = cellsJson.cells || [];
+        const cellsMap = new Map<string, { code: string; description?: string; meta?: any }>();
+        
+        cells.forEach((cell: any) => {
+          if (cell.cell_type === "picking") {
+            cellsMap.set(cell.id, {
+              code: cell.code,
+              description: cell.meta?.description,
+              meta: cell.meta,
+            });
+          }
+        });
+        
+        setShippingNewCells(cellsMap);
+      }
+      
+      // Группируем задачи по targetCell.id
+      const grouped = new Map<string, any[]>();
+      
+      tasks.forEach((task: any) => {
+        if (task.targetCell?.id) {
+          const cellId = task.targetCell.id;
+          if (!grouped.has(cellId)) {
+            grouped.set(cellId, []);
+          }
+          grouped.get(cellId)!.push(task);
+        }
+      });
+      
+      setShippingNewGrouped(grouped);
+    } catch (e) {
+      console.error("Failed to load shipping tasks (new):", e);
+      setError("Ошибка загрузки задач");
+    } finally {
+      setLoadingTasksNew(false);
     }
   }
 
@@ -300,6 +688,8 @@ export default function TsdPage() {
         handleInventoryScan();
       } else if (mode === "shipping") {
         handleShippingScan();
+      } else if (mode === "shipping_new") {
+        handleShippingNewScan(scanValue);
       } else if (mode === "surplus") {
         handleSurplusScan();
       }
@@ -1360,6 +1750,11 @@ export default function TsdPage() {
       setSelectedFromCellStep(null);
       setShippingSteps([]);
       // Не сбрасываем currentTask - он загружается автоматически
+    } else if (mode === "shipping_new") {
+      setCurrentTaskNew(null);
+      setShippingNewTasks([]);
+      setShippingNewGrouped(new Map());
+      // Не сбрасываем shippingNewCells - они загружаются один раз
     } else if (mode === "surplus") {
       setSurplusCell(null);
       setSurplusUnits([]);
@@ -1528,6 +1923,15 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Отгрузка
+          </Button>
+          <Button
+            variant={mode === "shipping_new" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("shipping_new")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Отгрузка (НОВАЯ)
           </Button>
           <Button
             variant={mode === "surplus" ? "primary" : "secondary"}
@@ -2459,6 +2863,334 @@ export default function TsdPage() {
           </div>
         )}
 
+        {/* Режим ОТГРУЗКА (НОВАЯ) - с группировкой по picking ячейкам */}
+        {mode === "shipping_new" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {loadingTasksNew ? (
+              <div style={{ padding: 16, textAlign: "center", color: "#666" }}>Загрузка задач...</div>
+            ) : !currentTaskNew ? (
+              // Список объединенных задач (по picking ячейкам)
+              shippingNewGrouped.size === 0 ? (
+                <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: "18px", color: "#666" }}>Нет активных задач</div>
+                  <div style={{ fontSize: "14px", color: "#999", marginTop: 8 }}>Создайте задачу в разделе Ops</div>
+                </div>
+              ) : (
+                <div style={{ padding: 16 }}>
+                  <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: 16 }}>
+                    Задачи по picking ячейкам ({shippingNewGrouped.size} ячеек, {shippingNewTasks.length} задач)
+                  </h2>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {Array.from(shippingNewGrouped.entries())
+                      .sort(([cellIdA], [cellIdB]) => {
+                        const cellA = shippingNewCells.get(cellIdA);
+                        const cellB = shippingNewCells.get(cellIdB);
+                        return (cellA?.code || "").localeCompare(cellB?.code || "");
+                      })
+                      .map(([cellId, tasks]) => {
+                        const cellInfo = shippingNewCells.get(cellId);
+                        const totalUnits = tasks.reduce((sum, task) => sum + (task.unitCount || 0), 0);
+                        const cellCode = cellInfo?.code || "?";
+                        const cellDescription = cellInfo?.description ? ` (${cellInfo.description})` : "";
+                        
+                        return (
+                          <div
+                            key={cellId}
+                            style={{
+                              padding: 16,
+                              background: "#fff",
+                              borderRadius: 8,
+                              border: "2px solid #e0e0e0",
+                              cursor: "pointer",
+                              transition: "all 0.2s",
+                            }}
+                            onClick={() => handleSelectTaskNew(cellId, tasks)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = "#2196f3";
+                              e.currentTarget.style.background = "#f5f5f5";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = "#e0e0e0";
+                              e.currentTarget.style.background = "#fff";
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div>
+                                <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: 4 }}>
+                                  📦 {cellCode}{cellDescription}
+                                </div>
+                                <div style={{ fontSize: "14px", color: "#666" }}>
+                                  {tasks.length} {tasks.length === 1 ? "задача" : tasks.length < 5 ? "задачи" : "задач"}, {totalUnits} {totalUnits === 1 ? "заказ" : totalUnits < 5 ? "заказа" : "заказов"}
+                                </div>
+                              </div>
+                              <div style={{
+                                padding: "8px 16px",
+                                background: "#2196f3",
+                                color: "#fff",
+                                borderRadius: 6,
+                                fontSize: "14px",
+                                fontWeight: 600,
+                              }}>
+                                Выбрать →
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                  <div style={{ marginTop: 16 }}>
+                    <button
+                      onClick={loadShippingNewTasks}
+                      disabled={loadingTasksNew}
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        background: "#fff",
+                        border: "2px solid #e0e0e0",
+                        borderRadius: 8,
+                        fontSize: "16px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {loadingTasksNew ? "Загрузка..." : "🔄 Обновить список"}
+                    </button>
+                  </div>
+                </div>
+              )
+            ) : (
+              // Работа с выбранной объединенной задачей
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Информация о задаче */}
+                <div style={{ padding: 16, background: "#e3f2fd", borderRadius: 8, border: "2px solid #2196f3" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: 4 }}>
+                        📦 TO: {currentTaskNew.targetCell.code}
+                      </div>
+                      <div style={{ fontSize: "14px", color: "#666" }}>
+                        {currentTaskNew.tasks.length} {currentTaskNew.tasks.length === 1 ? "задача" : "задач"}, {currentTaskNew.totalUnitCount} {currentTaskNew.totalUnitCount === 1 ? "заказ" : "заказов"}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setCurrentTaskNew(null);
+                        setShippingNewFromCells([]);
+                        setShippingNewSelectedFromCell(null);
+                        setShippingNewScannedUnits([]);
+                        setShippingNewToCell(null);
+                        setShippingNewAllUnits([]);
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        background: "#fff",
+                        border: "1px solid #2196f3",
+                        borderRadius: 6,
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#2196f3",
+                      }}
+                    >
+                      ← Назад
+                    </button>
+                  </div>
+                </div>
+
+                {/* Если from-ячейка не выбрана - показываем список from-ячеек */}
+                {!shippingNewSelectedFromCell && (
+                  <div style={{ padding: 16, background: "#fff", borderRadius: 8, border: "2px solid #e0e0e0" }}>
+                    <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: 12 }}>
+                      📍 Выберите from-ячейку для сбора:
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {shippingNewFromCells.map((fromCell) => {
+                        const scannedCount = shippingNewScannedUnits.filter(
+                          (u) => u.from_cell_id === fromCell.id || (u.cell_id === fromCell.id && !u.from_cell_id)
+                        ).length;
+                        const isCompleted = scannedCount >= fromCell.units.length;
+                        
+                        return (
+                          <div
+                            key={fromCell.id}
+                            onClick={() => handleSelectFromCellNew(fromCell)}
+                            style={{
+                              padding: 16,
+                              background: isCompleted ? "#e8f5e9" : "#fff",
+                              borderRadius: 8,
+                              border: isCompleted ? "2px solid #4caf50" : "2px solid #e0e0e0",
+                              cursor: "pointer",
+                              transition: "all 0.2s",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isCompleted) {
+                                e.currentTarget.style.borderColor = "#2196f3";
+                                e.currentTarget.style.background = "#f5f5f5";
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isCompleted) {
+                                e.currentTarget.style.borderColor = "#e0e0e0";
+                                e.currentTarget.style.background = "#fff";
+                              }
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div>
+                                <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: 4 }}>
+                                  {isCompleted ? "✅" : "📍"} {fromCell.code}
+                                </div>
+                                <div style={{ fontSize: "14px", color: "#666" }}>
+                                  {scannedCount} / {fromCell.units.length} заказов
+                                </div>
+                              </div>
+                              {isCompleted && (
+                                <div style={{
+                                  padding: "4px 8px",
+                                  background: "#4caf50",
+                                  color: "#fff",
+                                  borderRadius: 4,
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                }}>
+                                  Завершено
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Если from-ячейка выбрана - показываем список заказов */}
+                {shippingNewSelectedFromCell && (
+                  <div style={{ padding: 16, background: "#fff", borderRadius: 8, border: "2px solid #2196f3" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{shippingNewSelectedFromCell.code}</div>
+                        <div style={{ fontSize: "14px", color: "#666" }}>
+                          {shippingNewScannedUnits.filter(
+                            (u) => u.from_cell_id === shippingNewSelectedFromCell.id || (u.cell_id === shippingNewSelectedFromCell.id && !u.from_cell_id)
+                          ).length} / {shippingNewSelectedFromCell.units.length} заказов
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShippingNewSelectedFromCell(null);
+                          setSuccess(null);
+                          setError(null);
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          background: "#fff",
+                          border: "1px solid #2196f3",
+                          borderRadius: 6,
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          color: "#2196f3",
+                        }}
+                      >
+                        ← Сменить ячейку
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 300, overflowY: "auto" }}>
+                      {shippingNewSelectedFromCell.units.map((unit: any, idx: number) => {
+                        const isScanned = shippingNewScannedUnits.some((u) => u.barcode === unit.barcode);
+                        
+                        return (
+                          <div 
+                            key={unit.id} 
+                            style={{ 
+                              fontSize: "16px", 
+                              fontWeight: 600, 
+                              padding: "10px 12px",
+                              background: isScanned ? "#e8f5e9" : "#fff",
+                              borderRadius: 6,
+                              border: isScanned ? "2px solid #4caf50" : "2px solid #e0e0e0",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              opacity: isScanned ? 0.7 : 1,
+                            }}
+                          >
+                            <span style={{ 
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minWidth: 28,
+                              height: 28,
+                              borderRadius: "50%",
+                              background: isScanned ? "#4caf50" : "#e0e0e0",
+                              color: isScanned ? "#fff" : "#666",
+                              fontSize: 13,
+                              fontWeight: 700,
+                              flexShrink: 0
+                            }}>
+                              {isScanned ? '✓' : (idx + 1)}
+                            </span>
+                            <span style={{ flex: 1, color: isScanned ? "#666" : "#111" }}>
+                              {unit.barcode}
+                            </span>
+                            {isScanned && (
+                              <span style={{ fontSize: 12, color: "#4caf50", fontWeight: 600 }}>
+                                Отсканирован
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Если все from-ячейки завершены - показываем инструкцию для TO */}
+                {!shippingNewSelectedFromCell && shippingNewFromCells.every((fc) => {
+                  const scannedCount = shippingNewScannedUnits.filter(
+                    (u) => u.from_cell_id === fc.id || (u.cell_id === fc.id && !u.from_cell_id)
+                  ).length;
+                  return scannedCount >= fc.units.length;
+                }) && shippingNewFromCells.length > 0 && (
+                  <div style={{ padding: 16, background: "#e8f5e9", borderRadius: 8, border: "2px solid #4caf50" }}>
+                    <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: 8, color: "#2e7d32" }}>
+                      ✅ Все заказы собраны!
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>
+                      Отсканируйте picking-ячейку: <strong>{currentTaskNew.targetCell.code}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* Прогресс сбора */}
+                {shippingNewFromCells.length > 0 && (
+                  <div style={{ padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e0e0e0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontSize: "14px", color: "#666" }}>
+                        Прогресс сбора:
+                      </div>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#333" }}>
+                        {shippingNewFromCells.filter((fc) => {
+                          const scannedCount = shippingNewScannedUnits.filter(
+                            (u) => u.from_cell_id === fc.id || (u.cell_id === fc.id && !u.from_cell_id)
+                          ).length;
+                          return scannedCount >= fc.units.length;
+                        }).length} / {shippingNewFromCells.length} ячеек
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#666", textAlign: "center" }}>
+                      Собрано заказов: <strong>{shippingNewScannedUnits.length} / {currentTaskNew.totalUnitCount}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Кнопки */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {mode === "shipping" && (
@@ -2477,6 +3209,19 @@ export default function TsdPage() {
                 size="sm"
                 onClick={loadShippingTasks}
                 disabled={loadingTasks || busy}
+                fullWidth
+              >
+                Обновить список задач
+              </Button>
+            </>
+          )}
+          {mode === "shipping_new" && (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={loadShippingNewTasks}
+                disabled={loadingTasksNew || busy}
                 fullWidth
               >
                 Обновить список задач
