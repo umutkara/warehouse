@@ -323,13 +323,6 @@ export default function TsdPage() {
       return;
     }
     
-    // Если from-ячейка не выбрана, нельзя сканировать заказы
-    if (!shippingNewSelectedFromCell) {
-      setError("Сначала выберите from-ячейку для сбора");
-      setScanValue("");
-      return;
-    }
-    
     setError(null);
     setSuccess(null);
     setBusy(true);
@@ -345,15 +338,15 @@ export default function TsdPage() {
       // Если сканируется ячейка - это TO ячейка (только если все from-ячейки завершены)
       if (parsed.type === "cell") {
         const cellCode = parsed.code;
+        // Проверяем, что все from-ячейки завершены
+        const allFromCellsCompleted = shippingNewFromCells.every((fc) => {
+          const scannedCount = shippingNewScannedUnits.filter(
+            (u) => u.from_cell_id === fc.id || (u.cell_id === fc.id && !u.from_cell_id)
+          ).length;
+          return scannedCount >= fc.units.length;
+        });
+        
         if (cellCode.toUpperCase() === currentTaskNew.targetCell.code.toUpperCase()) {
-          // Проверяем, что все from-ячейки завершены
-          const allFromCellsCompleted = shippingNewFromCells.every((fc) => {
-            const scannedCount = shippingNewScannedUnits.filter(
-              (u) => u.from_cell_id === fc.id || (u.cell_id === fc.id && !u.from_cell_id)
-            ).length;
-            return scannedCount >= fc.units.length;
-          });
-          
           if (!allFromCellsCompleted) {
             setError("Сначала завершите сбор из всех from-ячеек");
             setScanValue("");
@@ -371,7 +364,13 @@ export default function TsdPage() {
         }
       }
       
-      // Сканирование заказа
+      // Сканирование заказа - проверяем, что from-ячейка выбрана
+      if (!shippingNewSelectedFromCell) {
+        setError("Сначала выберите from-ячейку для сбора");
+        setScanValue("");
+        return;
+      }
+      
       const barcode = parsed.code;
       
       // Проверяем, что заказ из выбранной from-ячейки
