@@ -29,6 +29,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // First, get all picking cells for this warehouse
+  const { data: pickingCells, error: cellsError } = await supabaseAdmin
+    .from("warehouse_cells")
+    .select("id, code, cell_type")
+    .eq("warehouse_id", profile.warehouse_id)
+    .eq("cell_type", "picking")
+    .eq("is_active", true);
+
+  if (cellsError) {
+    return NextResponse.json({ error: cellsError.message }, { status: 400 });
+  }
+
+  const pickingCellIds = pickingCells?.map(c => c.id) || [];
+  
+  if (pickingCellIds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      units: [],
+    });
+  }
+
   // Get all units in picking cells (use admin to bypass RLS)
   const { data: units, error: unitsError } = await supabaseAdmin
     .from("units")
@@ -40,34 +61,28 @@ export async function GET(req: Request) {
       created_at
     `)
     .eq("warehouse_id", profile.warehouse_id)
-    .eq("status", "picking")
+    .in("cell_id", pickingCellIds)
     .order("created_at", { ascending: false });
 
   if (unitsError) {
     return NextResponse.json({ error: unitsError.message }, { status: 400 });
   }
 
-  // Get cell info for each unit
-  const cellIds = [...new Set(units?.map(u => u.cell_id).filter(Boolean))];
-  const { data: cells } = await supabaseAdmin
-    .from("warehouse_cells_map")
-    .select("id, code, cell_type")
-    .in("id", cellIds);
-
-  const cellsMap = new Map(cells?.map(c => [c.id, c]) || []);
+  // Create cells map for quick lookup
+  const cellsMap = new Map(pickingCells?.map(c => [c.id, c]) || []);
 
   // Get picking_tasks info to show scenario (read-only for logistics)
   // After migration, units are linked via picking_task_units junction table
   const unitIds = units?.map(u => u.id) || [];
   
   // First, get picking_task_units to find which tasks contain these units
-  const { data: taskUnits } = await supabaseAdmin
+  const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
     .from("picking_task_units")
     .select("unit_id, picking_task_id")
     .in("unit_id", unitIds);
   
   // Also check legacy unit_id field for old tasks (any status - unit is already in picking)
-  const { data: legacyTasks } = await supabaseAdmin
+  const { data: legacyTasks, error: legacyTasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select("unit_id, scenario, status")
     .in("unit_id", unitIds)
@@ -77,7 +92,7 @@ export async function GET(req: Request) {
   const taskIds = [...new Set(taskUnits?.map(tu => tu.picking_task_id) || [])];
   
   // Get tasks with scenario (any status - unit is already in picking, so task exists)
-  const { data: tasks } = await supabaseAdmin
+  const { data: tasks, error: tasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select("id, scenario, status")
     .in("id", taskIds)
