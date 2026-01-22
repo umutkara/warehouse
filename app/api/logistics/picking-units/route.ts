@@ -66,22 +66,22 @@ export async function GET(req: Request) {
     .select("unit_id, picking_task_id")
     .in("unit_id", unitIds);
   
-  // Also check legacy unit_id field for old tasks
+  // Also check legacy unit_id field for old tasks (any status - unit is already in picking)
   const { data: legacyTasks } = await supabaseAdmin
     .from("picking_tasks")
     .select("unit_id, scenario, status")
     .in("unit_id", unitIds)
-    .eq("status", "done");
+    .eq("warehouse_id", profile.warehouse_id);
   
   // Get task IDs from picking_task_units
   const taskIds = [...new Set(taskUnits?.map(tu => tu.picking_task_id) || [])];
   
-  // Get tasks with scenario
+  // Get tasks with scenario (any status - unit is already in picking, so task exists)
   const { data: tasks } = await supabaseAdmin
     .from("picking_tasks")
     .select("id, scenario, status")
     .in("id", taskIds)
-    .eq("status", "done"); // Only show completed tasks (unit already in picking)
+    .eq("warehouse_id", profile.warehouse_id);
   
   // Create maps: unit_id -> scenario
   const tasksMap = new Map(tasks?.map(t => [t.id, t]) || []);
