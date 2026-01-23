@@ -48,10 +48,19 @@ export async function GET(req: Request) {
       );
     }
 
-    // Filter units with merchant rejections in app code
+    // Filter units with OPS status "partner_rejected_return" that are ON warehouse
+    // (cell_id is not null AND status is in warehouse statuses)
+    const warehouseStatuses = ["stored", "bin", "picking", "shipping"];
     const units = (allUnits || []).filter((unit: any) => {
       const meta = unit.meta as any;
-      return meta?.merchant_rejection_count && meta.merchant_rejection_count > 0;
+      const opsStatus = meta?.ops_status;
+      
+      // Must have OPS status "partner_rejected_return"
+      if (opsStatus !== "partner_rejected_return") return false;
+      
+      // Must be on warehouse: cell_id is not null AND status is in warehouse statuses
+      const isOnWarehouse = unit.cell_id && warehouseStatuses.includes(unit.status);
+      return isOnWarehouse;
     });
 
     // Get cell info separately if needed
