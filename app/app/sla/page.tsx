@@ -83,6 +83,21 @@ type MerchantRejectionMetrics = {
   units_resolved: number;
 };
 
+type PartnerRejectedUnit = {
+  id: string;
+  barcode: string;
+  status: string;
+  product_name?: string;
+  partner_name?: string;
+  price?: number;
+  cell_id: string | null;
+  created_at: string;
+  age_hours: number;
+  age_days: number;
+  ops_status: string | null;
+  ops_status_comment?: string | null;
+};
+
 // ⚡ OPTIMIZATION: Memoized MetricCard component
 const MetricCard = memo(function MetricCard({
   title,
@@ -337,15 +352,19 @@ export default function SLAPage() {
     hourly_distribution: null,
   });
   const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
+  const [partnerRejectedUnits, setPartnerRejectedUnits] = useState<PartnerRejectedUnit[]>([]);
+  const [loadingPartnerRejected, setLoadingPartnerRejected] = useState(false);
 
   useEffect(() => {
     loadMetrics();
     loadShippingSLAMetrics();
     loadRejectionMetrics();
+    loadPartnerRejectedUnits();
     const interval = setInterval(() => {
       loadMetrics();
       loadShippingSLAMetrics();
       loadRejectionMetrics();
+      loadPartnerRejectedUnits();
     }, 60000); // Refresh every minute
     return () => clearInterval(interval);
   }, []);
@@ -497,6 +516,23 @@ export default function SLAPage() {
       }
     } catch (e) {
       console.error("Failed to load rejection metrics:", e);
+    }
+  }
+
+  async function loadPartnerRejectedUnits() {
+    setLoadingPartnerRejected(true);
+    try {
+      const res = await fetch("/api/units/partner-rejected-missing", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) {
+          setPartnerRejectedUnits(json.units || []);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load partner rejected units:", e);
+    } finally {
+      setLoadingPartnerRejected(false);
     }
   }
 
@@ -1326,6 +1362,201 @@ export default function SLAPage() {
           </div>
         </div>
       )}
+
+      {/* Partner Rejected - Missing from Warehouse */}
+      <div
+        style={{
+          background: "#fff",
+          border: "2px solid #dc2626",
+          borderRadius: "var(--radius-lg)",
+          padding: "var(--spacing-lg)",
+          boxShadow: "var(--shadow-sm)",
+          marginTop: "var(--spacing-lg)",
+        }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
+          ⚠️ Партнер не принял — заказы отсутствуют на складе
+        </h2>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
+          📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units</code> с OPS статусом 
+          <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>"partner_rejected_return"</code>, 
+          которые <strong style={{ color: "#dc2626" }}>не находятся на складе</strong> (cell_id IS NULL или status не в warehouse статусах). 
+          Эти заказы требуют особого внимания — они были отклонены партнером, но физически отсутствуют на складе. 
+          Возможно, они были отправлены, потеряны или находятся в процессе обработки.
+        </div>
+
+        {loadingPartnerRejected ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+            Загрузка...
+          </div>
+        ) : partnerRejectedUnits.length === 0 ? (
+          <div style={{ 
+            textAlign: "center", 
+            padding: "var(--spacing-xl)", 
+            background: "#f0fdf4",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid #86efac"
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#16a34a", marginBottom: 4 }}>
+              Нет проблемных заказов
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Все заказы с OPS статусом "Партнер не принял" находятся на складе или обработаны
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ 
+              display: "flex", 
+              justifyContent: "space-between", 
+              alignItems: "center",
+              marginBottom: 16,
+              padding: 12,
+              background: "#fef2f2",
+              borderRadius: 8,
+              border: "1px solid #fecaca"
+            }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
+                  Всего проблемных заказов
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  Требуют немедленного внимания
+                </div>
+              </div>
+              <div style={{ fontSize: 36, fontWeight: 800, color: "#dc2626" }}>
+                {partnerRejectedUnits.length}
+              </div>
+            </div>
+
+            <div style={{ maxHeight: 500, overflow: "auto" }}>
+              <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e5e7eb", textAlign: "left", position: "sticky", top: 0, background: "#fff" }}>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Штрихкод</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Товар</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Партнер</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Статус</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280", textAlign: "right" }}>Возраст</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Комментарий OPS</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Создан</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {partnerRejectedUnits.map((unit) => {
+                    const isOld = unit.age_days > 7;
+                    const isVeryOld = unit.age_days > 30;
+
+                    return (
+                      <tr 
+                        key={unit.id} 
+                        style={{ 
+                          borderBottom: "1px solid #f3f4f6",
+                          background: isVeryOld ? "#fef2f2" : isOld ? "#fffbeb" : "transparent"
+                        }}
+                      >
+                        <td style={{ padding: "10px 12px", fontWeight: 700 }}>
+                          <a 
+                            href={`/app/units/${unit.id}`}
+                            style={{ color: "#2563eb", textDecoration: "none" }}
+                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
+                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
+                          >
+                            {unit.barcode}
+                          </a>
+                        </td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{unit.product_name || "—"}</div>
+                          {unit.price && (
+                            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                              {unit.price.toFixed(2)} ₽
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 12px", fontSize: 12, color: "#6b7280" }}>
+                          {unit.partner_name || "—"}
+                        </td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "4px 8px",
+                              background: unit.cell_id ? "#fef3c7" : "#fef2f2",
+                              color: unit.cell_id ? "#d97706" : "#dc2626",
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              border: `1px solid ${unit.cell_id ? "#fcd34d" : "#fecaca"}`,
+                            }}
+                          >
+                            {unit.cell_id ? `В ячейке (${unit.status})` : "Нет на складе"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                          <div style={{ 
+                            fontWeight: 700, 
+                            color: isVeryOld ? "#dc2626" : isOld ? "#f59e0b" : "#6b7280",
+                            fontSize: 13
+                          }}>
+                            {unit.age_days > 0 ? `${unit.age_days} дн.` : `${unit.age_hours} ч.`}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                            {unit.age_hours} часов
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 12px", maxWidth: 200 }}>
+                          {unit.ops_status_comment ? (
+                            <div style={{ 
+                              fontSize: 11, 
+                              color: "#374151",
+                              padding: 6,
+                              background: "#f3f4f6",
+                              borderRadius: 4,
+                              maxHeight: 60,
+                              overflow: "auto"
+                            }}>
+                              {unit.ops_status_comment}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 11, color: "#9ca3af" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 12px", fontSize: 11, color: "#6b7280" }}>
+                          {new Date(unit.created_at).toLocaleDateString("ru-RU", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "2-digit",
+                          })}
+                          <div style={{ marginTop: 2, fontSize: 10 }}>
+                            {new Date(unit.created_at).toLocaleTimeString("ru-RU", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ 
+              marginTop: 16, 
+              padding: 12, 
+              background: "#fef3c7", 
+              borderRadius: 8,
+              border: "1px solid #fcd34d",
+              fontSize: 12,
+              color: "#92400e"
+            }}>
+              <strong>💡 Важно:</strong> Заказы, выделенные красным фоном, старше 30 дней и требуют немедленного внимания. 
+              Заказы с желтым фоном старше 7 дней. Рекомендуется проверить их статус и местоположение.
+            </div>
+          </>
+        )}
+      </div>
 
     </div>
   );
