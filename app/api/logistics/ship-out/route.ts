@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
  * POST /api/logistics/ship-out
@@ -58,16 +59,50 @@ export async function POST(req: Request) {
     );
   }
 
+  // Fetch picking task scenario for this unit (if exists)
+  // Check both new format (picking_task_units) and legacy (unit_id)
+  const { data: taskUnits } = await supabaseAdmin
+    .from("picking_task_units")
+    .select("picking_task_id")
+    .eq("unit_id", unitId)
+    .order("picking_task_id", { ascending: false })
+    .limit(1);
+
+  let scenario: string | null = null;
+  if (taskUnits && taskUnits.length > 0) {
+    const taskId = taskUnits[0].picking_task_id;
+    const { data: task } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("scenario")
+      .eq("id", taskId)
+      .single();
+
+    scenario = task?.scenario || null;
+  } else {
+    // Check legacy format (unit_id directly in picking_tasks)
+    const { data: legacyTask } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("scenario")
+      .eq("unit_id", unitId)
+      .not("unit_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    scenario = legacyTask?.scenario || null;
+  }
+
   // Audit log
   await supabase.rpc("audit_log_event", {
     p_action: "logistics.ship_out",
     p_entity_type: "unit",
     p_entity_id: unitId,
-    p_summary: `Отправлен заказ ${parsedResult.unit_barcode} курьером ${courierName}`,
+    p_summary: `Отправлен заказ ${parsedResult.unit_barcode} курьером ${courierName}${scenario ? ` (${scenario})` : ""}`,
     p_meta: {
       shipment_id: parsedResult.shipment_id,
       unit_barcode: parsedResult.unit_barcode,
       courier_name: courierName,
+      ...(scenario ? { scenario } : {}),
     },
   });
 

@@ -15,12 +15,14 @@
     "next": "^16.1.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "xlsx": "^0.18.5",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
     "@types/node": "^20.19.28",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
+    "@types/xlsx": "^0.0.35",
     "typescript": "^5.9.3"
   }
 }

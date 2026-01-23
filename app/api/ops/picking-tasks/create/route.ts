@@ -191,18 +191,10 @@ export async function POST(req: Request) {
   };
 
   // Use supabaseAdmin to bypass RLS (avoid recursive policies)
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:194',message:'Before inserting picking_task',data:{taskToInsert:{warehouse_id:taskToInsert.warehouse_id,unit_count:allUnits.length,targetPickingCellId:taskToInsert.target_picking_cell_id,scenario:taskToInsert.scenario}},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-
   const { data: insertedTasks, error: insertError } = await supabaseAdmin
     .from("picking_tasks")
     .insert([taskToInsert])
     .select();
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:200',message:'After inserting picking_task',data:{hasError:!!insertError,error:insertError?.message,insertedTaskId:insertedTasks?.[0]?.id,insertedWarehouseId:insertedTasks?.[0]?.warehouse_id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
 
   if (insertError) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
@@ -220,17 +212,9 @@ export async function POST(req: Request) {
     from_cell_id: unit.cell_id, // Snapshot current cell
   }));
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:209',message:'Before inserting picking_task_units',data:{taskId,unitCount:allUnits.length,unitIds:allUnits.map(u=>u.id),taskUnitsToInsert},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-
   const { error: unitsInsertError } = await supabaseAdmin
     .from("picking_task_units")
     .insert(taskUnitsToInsert);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/ops/picking-tasks/create/route.ts:217',message:'After inserting picking_task_units',data:{hasError:!!unitsInsertError,error:unitsInsertError?.message,insertedCount:taskUnitsToInsert.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
 
   if (unitsInsertError) {
     // Rollback: delete the task
@@ -281,6 +265,7 @@ export async function POST(req: Request) {
 
   // Execute all audit logs in parallel (don't fail if some fail)
   const auditResults = await Promise.allSettled(auditPromises);
+
   auditResults.forEach((result, idx) => {
     if (result.status === "rejected") {
       console.error(`Audit log error for unit ${allUnits[idx].barcode}:`, result.reason);

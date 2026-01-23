@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 
 type Unit = {
   id: string;
@@ -103,6 +104,91 @@ export default function LogisticsPage() {
     });
   }
 
+  async function handleExportToExcel(format: "xlsx" | "csv" = "xlsx") {
+    if (units.length === 0) {
+      alert("Нет заказов для экспорта");
+      return;
+    }
+
+    try {
+      // Prepare data
+      const data = units.map((unit) => ({
+        "Штрихкод": unit.barcode || "",
+        "Статус": unit.status || "",
+        "Ячейка": unit.cell?.code || "—",
+        "Тип ячейки": unit.cell?.cell_type || "—",
+        "Сценарий": unit.scenario || "—",
+        "Дата создания": unit.created_at 
+          ? new Date(unit.created_at).toLocaleString("ru-RU", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—",
+      }));
+
+      if (format === "xlsx") {
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        
+        // Create worksheet from data
+        const ws = XLSX.utils.json_to_sheet(data);
+
+        // Set column widths for better readability
+        ws["!cols"] = [
+          { wch: 15 }, // Штрихкод
+          { wch: 12 }, // Статус
+          { wch: 12 }, // Ячейка
+          { wch: 15 }, // Тип ячейки
+          { wch: 40 }, // Сценарий
+          { wch: 20 }, // Дата создания
+        ];
+
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, "Заказы в Picking");
+
+        // Generate filename
+        const filename = `logistics_picking_orders_${new Date().toISOString().split("T")[0]}.xlsx`;
+
+        // Write file
+        XLSX.writeFile(wb, filename);
+      } else {
+        // CSV export
+        const headers = Object.keys(data[0]);
+        const csvRows = [
+          headers.join(","),
+          ...data.map((row) =>
+            headers
+              .map((header) => {
+                const value = row[header as keyof typeof row];
+                return `"${String(value).replace(/"/g, '""')}"`;
+              })
+              .join(",")
+          ),
+        ];
+
+        const csvContent = csvRows.join("\n");
+        const bom = "\uFEFF";
+        const csvWithBom = bom + csvContent;
+
+        const blob = new Blob([csvWithBom], { type: "text/csv;charset=utf-8;" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `logistics_picking_orders_${new Date().toISOString().split("T")[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+    } catch (e: any) {
+      console.error("Export error:", e);
+      alert("Ошибка при экспорте: " + (e.message || "Неизвестная ошибка"));
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)" }}>
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: "var(--spacing-md)" }}>
@@ -130,9 +216,65 @@ export default function LogisticsPage() {
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--spacing-xl)" }}>
         {/* Left: Units in picking */}
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: "var(--spacing-md)" }}>
-            Заказы в Picking ({units.length})
-          </h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-md)" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
+              Заказы в Picking ({units.length})
+            </h2>
+            {units.length > 0 && (
+              <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
+                <button
+                  onClick={() => handleExportToExcel("xlsx")}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#10b981",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "var(--radius-md)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#059669";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#10b981";
+                  }}
+                >
+                  📊 Excel (XLSX)
+                </button>
+                <button
+                  onClick={() => handleExportToExcel("csv")}
+                  style={{
+                    padding: "8px 16px",
+                    background: "#3b82f6",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "var(--radius-md)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#2563eb";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#3b82f6";
+                  }}
+                >
+                  📄 CSV
+                </button>
+              </div>
+            )}
+          </div>
 
           {loading ? (
             <div style={{ fontSize: 14, color: "#666" }}>Загрузка...</div>
