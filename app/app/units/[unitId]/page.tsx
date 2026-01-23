@@ -111,7 +111,15 @@ export default function UnitDetailPage() {
         return;
       }
 
-      setUnit(json.unit);
+      // Convert null to undefined for TypeScript compatibility
+      const unitData = {
+        ...json.unit,
+        meta: json.unit.meta ? {
+          ...json.unit.meta,
+          ops_status_comment: json.unit.meta.ops_status_comment ?? undefined,
+        } : undefined,
+      };
+      setUnit(unitData);
       setProductName(json.unit.product_name || "");
       setPartnerName(json.unit.partner_name || "");
       setPrice(json.unit.price ? String(json.unit.price) : "");
@@ -271,7 +279,10 @@ export default function UnitDetailPage() {
         return;
       }
 
-      // Update local unit state
+      // Update local unit state - convert null to undefined for TypeScript
+      if (json.unit?.meta) {
+        json.unit.meta.ops_status_comment = json.unit.meta.ops_status_comment ?? undefined;
+      }
       setUnit((prev) => {
         if (!prev) return prev;
         return {
@@ -279,7 +290,7 @@ export default function UnitDetailPage() {
           meta: {
             ...prev.meta,
             ops_status: opsStatus,
-            ops_status_comment: opsStatusComment.trim() || null,
+            ops_status_comment: opsStatusComment.trim() || undefined,
           },
         };
       });
