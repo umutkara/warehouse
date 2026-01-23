@@ -658,7 +658,7 @@ export default function LogisticsPage() {
                 Отмена
               </button>
             </div>
-          ) : (
+          ) : selectedUnit ? (
             /* Single mode (existing behavior) */
             <div
               style={{
@@ -670,15 +670,15 @@ export default function LogisticsPage() {
             >
               <div style={{ marginBottom: "var(--spacing-lg)" }}>
                 <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Заказ</div>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>{selectedUnit.barcode}</div>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>{selectedUnit?.barcode || "—"}</div>
               </div>
 
               <div style={{ marginBottom: "var(--spacing-lg)" }}>
                 <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Ячейка</div>
-                <div style={{ fontSize: 14 }}>{selectedUnit.cell?.code || "—"}</div>
+                <div style={{ fontSize: 14 }}>{selectedUnit?.cell?.code || "—"}</div>
               </div>
 
-              {selectedUnit.scenario && (
+              {selectedUnit?.scenario && (
                 <div style={{ marginBottom: "var(--spacing-lg)" }}>
                   <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Сценарий (OPS)</div>
                   <div
@@ -690,7 +690,7 @@ export default function LogisticsPage() {
                       color: "#333",
                     }}
                   >
-                    {selectedUnit.scenario}
+                    {selectedUnit?.scenario}
                   </div>
                 </div>
               )}
@@ -727,17 +727,17 @@ export default function LogisticsPage() {
 
               <button
                 onClick={handleShipOut}
-                disabled={shipping || !courierName.trim()}
+                disabled={shipping || !courierName.trim() || !selectedUnit}
                 style={{
                   width: "100%",
                   padding: "var(--spacing-md)",
-                  background: shipping || !courierName.trim() ? "#ccc" : "#16a34a",
+                  background: shipping || !courierName.trim() || !selectedUnit ? "#ccc" : "#16a34a",
                   color: "#fff",
                   border: "none",
                   borderRadius: "var(--radius-md)",
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: shipping || !courierName.trim() ? "not-allowed" : "pointer",
+                  cursor: shipping || !courierName.trim() || !selectedUnit ? "not-allowed" : "pointer",
                 }}
               >
                 {shipping ? "Отправка..." : "✓ Готово / Отправить"}
@@ -764,7 +764,7 @@ export default function LogisticsPage() {
                 Отмена
               </button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
