@@ -29,10 +29,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // First, get all picking cells for this warehouse
+  // First, get all picking cells for this warehouse (with meta for descriptions)
   const { data: pickingCells, error: cellsError } = await supabaseAdmin
     .from("warehouse_cells")
-    .select("id, code, cell_type")
+    .select("id, code, cell_type, meta")
     .eq("warehouse_id", profile.warehouse_id)
     .eq("cell_type", "picking")
     .eq("is_active", true);

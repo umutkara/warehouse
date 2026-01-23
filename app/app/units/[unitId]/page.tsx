@@ -38,6 +38,7 @@ type Unit = {
       return_number: number;
     }>;
     service_center_return_count?: number;
+    ops_status?: string;
   };
 };
 
@@ -56,6 +57,7 @@ export default function UnitDetailPage() {
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -68,10 +70,27 @@ export default function UnitDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // OPS status state
+  const [opsStatus, setOpsStatus] = useState<string>("");
+  const [savingOpsStatus, setSavingOpsStatus] = useState(false);
+
   useEffect(() => {
     loadUnit();
     loadHistory();
+    loadUserRole();
   }, [unitId]);
+
+  async function loadUserRole() {
+    try {
+      const res = await fetch("/api/me", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok && json.role) {
+        setUserRole(json.role);
+      }
+    } catch (e) {
+      console.error("Failed to load user role:", e);
+    }
+  }
 
   async function loadUnit() {
     setLoading(true);
@@ -94,6 +113,7 @@ export default function UnitDetailPage() {
       setProductName(json.unit.product_name || "");
       setPartnerName(json.unit.partner_name || "");
       setPrice(json.unit.price ? String(json.unit.price) : "");
+      setOpsStatus(json.unit.meta?.ops_status || "");
     } catch (e: any) {
       setError("Ошибка загрузки");
     } finally {
@@ -223,6 +243,95 @@ export default function UnitDetailPage() {
       console.error("Failed to delete photo:", e);
     }
   }
+
+  async function handleUpdateOpsStatus() {
+    if (!unit || !opsStatus) return;
+
+    setSavingOpsStatus(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/units/ops-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitId: unit.id,
+          status: opsStatus,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        setError(json.error || "Ошибка обновления OPS статуса");
+        return;
+      }
+
+      // Update local unit state
+      setUnit((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          meta: {
+            ...prev.meta,
+            ops_status: opsStatus,
+          },
+        };
+      });
+
+      // Reload history to show the status change event
+      await loadHistory();
+    } catch (e: any) {
+      setError(e.message || "Ошибка обновления OPS статуса");
+    } finally {
+      setSavingOpsStatus(false);
+    }
+  }
+
+  function getOpsStatusText(status: string | null | undefined): string {
+    if (!status) return "OPS статус не назначен";
+
+    const statusMap: Record<string, string> = {
+      partner_accepted_return: "Партнер принял на возврат",
+      partner_rejected_return: "Партнер не принял на возврат",
+      sent_to_sc: "Передан в СЦ",
+      delivered_to_rc: "Товар доставлен на РЦ",
+      client_accepted: "Клиент принял",
+      client_rejected: "Клиент не принял",
+      sent_to_client: "Товар отправлен клиенту",
+      delivered_to_pudo: "Товар доставлен на ПУДО",
+      case_cancelled_cc: "Кейс отменен (Направлен КК)",
+      postponed_1: "Перенос",
+      postponed_2: "Перенос 2",
+      warehouse_did_not_issue: "Склад не выдал",
+      in_progress: "В работе",
+    };
+
+    return statusMap[status] || status;
+  }
+
+  function getOpsStatusColor(status: string | null | undefined): string {
+    if (!status) return "#6b7280";
+
+    // Problematic statuses - red/orange
+    if (["partner_rejected_return", "client_rejected", "warehouse_did_not_issue", "case_cancelled_cc"].includes(status)) {
+      return "#dc2626";
+    }
+
+    // Good statuses - green/blue
+    if (["partner_accepted_return", "client_accepted", "delivered_to_rc", "delivered_to_pudo"].includes(status)) {
+      return "#16a34a";
+    }
+
+    // Process statuses - yellow/blue
+    if (["in_progress", "sent_to_client", "sent_to_sc", "postponed_1", "postponed_2"].includes(status)) {
+      return "#0284c7";
+    }
+
+    return "#6b7280";
+  }
+
+  const canEditOpsStatus = userRole && ["ops", "logistics", "admin", "head"].includes(userRole);
 
   function renderHistoryEvent(event: HistoryEvent, idx: number) {
     const date = new Date(event.created_at).toLocaleString("ru-RU");
@@ -388,6 +497,35 @@ export default function UnitDetailPage() {
                 )}
                 <div style={styles.historyMeta}>
                   {meta?.created_by_name || auditActor || "Система"} {auditRole ? `(${auditRole})` : ""} • {date}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // Special handling for OPS status update
+        if (action === "ops.unit_status_update") {
+          icon = "📋";
+          bgColor = "#f0f9ff";
+          borderColor = "#bae6fd";
+          const { old_status_text, new_status_text } = meta || {};
+          return (
+            <div
+              key={uniqueKey}
+              style={{
+                ...styles.historyItem,
+                background: bgColor,
+                borderColor: borderColor,
+              }}
+            >
+              <div style={styles.historyIcon}>{icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={styles.historyTitle}>OPS статус изменён</div>
+                <div style={styles.historyText}>
+                  {old_status_text || "не назначен"} → {new_status_text || "не назначен"}
+                </div>
+                <div style={styles.historyMeta}>
+                  {auditActor} ({auditRole}) • {date}
                 </div>
               </div>
             </div>
@@ -604,6 +742,99 @@ export default function UnitDetailPage() {
           </div>
         </div>
       )}
+
+      {/* OPS Status Block */}
+      <div style={styles.opsStatusCard}>
+        <div style={styles.opsStatusHeader}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>📋</span>
+            OPS Статус заказа
+          </h3>
+        </div>
+        <div style={styles.opsStatusBody}>
+          {/* Current Status Display */}
+          <div style={{ marginBottom: canEditOpsStatus ? 16 : 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 8 }}>
+              Текущий статус:
+            </div>
+            <div
+              style={{
+                display: "inline-block",
+                padding: "8px 16px",
+                background: unit.meta?.ops_status ? `${getOpsStatusColor(unit.meta.ops_status)}15` : "#f3f4f6",
+                color: unit.meta?.ops_status ? getOpsStatusColor(unit.meta.ops_status) : "#6b7280",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                border: `2px solid ${unit.meta?.ops_status ? getOpsStatusColor(unit.meta.ops_status) : "#d1d5db"}`,
+              }}
+            >
+              {getOpsStatusText(unit.meta?.ops_status)}
+            </div>
+          </div>
+
+          {/* Edit Form (only for ops, logistics, admin, head) */}
+          {canEditOpsStatus && (
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 8 }}>
+                Изменить статус:
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <select
+                  value={opsStatus}
+                  onChange={(e) => setOpsStatus(e.target.value)}
+                  disabled={savingOpsStatus}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    fontSize: 14,
+                    background: "#fff",
+                  }}
+                >
+                  <option value="">— Выберите статус —</option>
+                  <option value="partner_accepted_return">Партнер принял на возврат</option>
+                  <option value="partner_rejected_return">Партнер не принял на возврат</option>
+                  <option value="sent_to_sc">Передан в СЦ</option>
+                  <option value="delivered_to_rc">Товар доставлен на РЦ</option>
+                  <option value="client_accepted">Клиент принял</option>
+                  <option value="client_rejected">Клиент не принял</option>
+                  <option value="sent_to_client">Товар отправлен клиенту</option>
+                  <option value="delivered_to_pudo">Товар доставлен на ПУДО</option>
+                  <option value="case_cancelled_cc">Кейс отменен (Направлен КК)</option>
+                  <option value="postponed_1">Перенос</option>
+                  <option value="postponed_2">Перенос 2</option>
+                  <option value="warehouse_did_not_issue">Склад не выдал</option>
+                  <option value="in_progress">В работе</option>
+                </select>
+                <button
+                  onClick={handleUpdateOpsStatus}
+                  disabled={savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status}
+                  style={{
+                    padding: "8px 16px",
+                    background: savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status ? "#d1d5db" : "#2563eb",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 6,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status ? "not-allowed" : "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {savingOpsStatus ? "Сохранение..." : "Сохранить"}
+                </button>
+              </div>
+              {opsStatus && opsStatus === unit.meta?.ops_status && (
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                  Статус уже установлен
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div style={styles.grid}>
         {/* Left Column - Info */}
@@ -1079,5 +1310,25 @@ const styles = {
   serviceCenterValue: {
     fontSize: 14,
     color: "#1f2937",
+  } as React.CSSProperties,
+  opsStatusCard: {
+    background: "#fff",
+    border: "2px solid #e5e7eb",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 24,
+    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+  } as React.CSSProperties,
+  opsStatusHeader: {
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "#e5e7eb",
+  } as React.CSSProperties,
+  opsStatusBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
   } as React.CSSProperties,
 };
