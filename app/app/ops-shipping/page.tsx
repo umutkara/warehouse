@@ -575,27 +575,66 @@ export default function OpsShippingPage() {
 
       const sheet = workbook.Sheets[sheetName];
       const rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" });
+      const rawArrayRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
 
-      if (rawRows.length === 0) {
+      if (rawRows.length === 0 && rawArrayRows.length === 0) {
         setImportErrors(["Файл Excel пустой или не содержит данных"]);
         return;
       }
 
-      const rows = rawRows.map((row, index) => {
-        const order = getRowValue(row, ["заказ", "штрихкод", "barcode", "order"]);
-        const destination = getRowValue(row, ["куда"]);
-        const scenario = getRowValue(row, ["сценарий", "scenario"]);
-        const pickingCode = getRowValue(row, ["код ячейки picking", "picking", "picking cell", "ячейка picking"]);
+      const headerRow = Array.isArray(rawArrayRows[0]) ? rawArrayRows[0] : [];
+      const headerText = headerRow.map((cell) => String(cell || "").trim().toLowerCase());
+      const headerNames = new Set([
+        "заказ",
+        "штрихкод",
+        "barcode",
+        "order",
+        "мерчант",
+        "куда",
+        "сценарий",
+        "scenario",
+        "код ячейки picking",
+        "пикинг",
+        "пиккинг",
+        "picking",
+        "picking cell",
+        "ячейка picking",
+      ]);
+      const headerScore = headerText.filter((cell) => headerNames.has(cell)).length;
+      const firstCell = String(headerRow?.[0] ?? "").trim();
+      const firstCellIsOrder = /^\d+$/.test(firstCell);
+      const hasHeaders = !firstCellIsOrder && headerScore >= 2;
+
+      const dataRows = hasHeaders ? rawArrayRows.slice(1) : rawArrayRows;
+      const rows = (hasHeaders ? rawRows : dataRows).map((row: any, index: number) => {
+        if (hasHeaders) {
+          const order = getRowValue(row, ["заказ", "штрихкод", "barcode", "order"]);
+          const destination = getRowValue(row, ["мерчант", "куда"]);
+          const scenario = getRowValue(row, ["сценарий", "scenario"]);
+          const pickingCode = getRowValue(row, ["код ячейки picking", "picking", "picking cell", "ячейка picking"]);
+
+          return {
+            rowIndex: index + 2,
+            order,
+            destination,
+            scenario,
+            picking_code: pickingCode,
+          };
+        }
+
+        const order = String(row?.[0] ?? "").trim();
+        const destination = String(row?.[1] ?? "").trim();
+        const scenario = String(row?.[2] ?? "").trim();
+        const pickingCode = String(row?.[3] ?? "").trim();
 
         return {
-          rowIndex: index + 2,
+          rowIndex: index + 1,
           order,
           destination,
           scenario,
           picking_code: pickingCode,
         };
-      });
-
+      }).filter((row: any) => row.order || row.destination || row.scenario || row.picking_code);
       const res = await fetch("/api/ops/picking-tasks/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

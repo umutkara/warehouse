@@ -173,6 +173,8 @@ export async function POST(req: Request) {
     const errors: Array<{ rowIndex: number; message: string }> = [];
     let created = 0;
     const usedUnitIds = new Set<string>();
+    let matched = 0;
+    let notFound = 0;
 
     for (const row of rows) {
       const rowIndex = row.rowIndex ?? 0;
@@ -207,9 +209,11 @@ export async function POST(req: Request) {
 
       const matchedUnit = normalizedMap.get(normalizedOrder);
       if (!matchedUnit) {
+        notFound += 1;
         errors.push({ rowIndex, message: "Заказ не найден среди доступных" });
         continue;
       }
+      matched += 1;
 
       if (usedUnitIds.has(matchedUnit.id)) {
         errors.push({ rowIndex, message: "Заказ повторяется в файле" });
@@ -303,7 +307,6 @@ export async function POST(req: Request) {
       usedUnitIds.add(matchedUnit.id);
       created += 1;
     }
-
     return NextResponse.json({
       ok: true,
       created,
