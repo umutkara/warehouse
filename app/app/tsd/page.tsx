@@ -32,7 +32,7 @@ type UnitInfo = {
   };
 };
 
-type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "surplus";
+type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "shipping_fcutc" | "surplus";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -80,6 +80,15 @@ export default function TsdPage() {
   const [shippingNewScannedUnits, setShippingNewScannedUnits] = useState<UnitInfo[]>([]); // Отсканированные заказы из текущей from-ячейки
   const [shippingNewToCell, setShippingNewToCell] = useState<CellInfo | null>(null); // TO ячейка (picking)
   const [shippingNewAllUnits, setShippingNewAllUnits] = useState<UnitInfo[]>([]); // Все заказы из всех задач
+  
+  // Для режима Отгрузка (FCUTC) - последовательное сканирование
+  const [fcutcFromCell, setFcutcFromCell] = useState<CellInfo | null>(null);
+  const [fcutcUnit, setFcutcUnit] = useState<UnitInfo | null>(null);
+  const [fcutcTaskInfo, setFcutcTaskInfo] = useState<{
+    taskId: string;
+    toCell: { id: string; code: string; cell_type: string; description?: string };
+  } | null>(null);
+  const [fcutcToCell, setFcutcToCell] = useState<CellInfo | null>(null);
   
   // Для режима Излишки (Surplus)
   const [surplusCell, setSurplusCell] = useState<CellInfo | null>(null);
@@ -130,7 +139,7 @@ export default function TsdPage() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell, selectedFromCellStep, busy]);
+  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell, selectedFromCellStep, busy, fcutcFromCell, fcutcUnit, fcutcTaskInfo, fcutcToCell]);
   
   // Load shipping tasks when mode is shipping
   useEffect(() => {
@@ -689,6 +698,8 @@ export default function TsdPage() {
         handleShippingScan();
       } else if (mode === "shipping_new") {
         handleShippingNewScan(scanValue);
+      } else if (mode === "shipping_fcutc") {
+        handleFcutcScan();
       } else if (mode === "surplus") {
         handleSurplusScan();
       }
@@ -1728,6 +1739,212 @@ export default function TsdPage() {
     }
   }
 
+  // ============================================
+  // РЕЖИМ ОТГРУЗКА (FCUTC) - последовательное сканирование
+  // ============================================
+  async function handleFcutcScan() {
+    const parsed = parseScan(scanValue);
+    if (!parsed) {
+      setError("Некорректный скан");
+      setScanValue("");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+
+    try {
+      // Шаг 1: Сканирование FROM cell
+      if (!fcutcFromCell) {
+        if (parsed.type !== "cell") {
+          setError("Сначала отсканируйте FROM ячейку");
+          setScanValue("");
+          return;
+        }
+
+        const cellInfo = await loadCellInfo(parsed.code);
+        if (!cellInfo) {
+          setError(`Ячейка "${parsed.code}" не найдена`);
+          setScanValue("");
+          return;
+        }
+
+        setFcutcFromCell(cellInfo);
+        setSuccess(`✓ FROM: ${cellInfo.code}`);
+        setScanValue("");
+        return;
+      }
+
+      // Шаг 2: Сканирование UNIT (если FROM уже есть, но UNIT еще нет)
+      if (!fcutcUnit) {
+        if (parsed.type !== "unit") {
+          setError("Отсканируйте заказ (штрихкод)");
+          setScanValue("");
+          return;
+        }
+
+        const barcode = parsed.code;
+        const unitInfo = await loadUnitInfo(barcode);
+        if (!unitInfo) {
+          setError(`Заказ "${barcode}" не найден в системе`);
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем, что заказ находится в FROM ячейке
+        if (!unitInfo.cell || unitInfo.cell.id !== fcutcFromCell.id) {
+          setError(`Заказ ${barcode} не находится в ячейке ${fcutcFromCell.code}`);
+          setScanValue("");
+          return;
+        }
+
+        // Проверяем, есть ли заказ в задачах для этой FROM ячейки
+        const checkRes = await fetch(
+          `/api/tsd/shipping-tasks/check-unit?unitBarcode=${encodeURIComponent(barcode)}&fromCellId=${encodeURIComponent(fcutcFromCell.id)}`,
+          { cache: "no-store" }
+        );
+
+        const checkJson = await checkRes.json();
+
+        if (!checkRes.ok || !checkJson.found) {
+          setError(checkJson.error || `Заказ ${barcode} не найден в задачах для ячейки ${fcutcFromCell.code}`);
+          setScanValue("");
+          return;
+        }
+
+        // Заказ найден в задаче - сохраняем информацию
+        setFcutcUnit(unitInfo);
+        setFcutcTaskInfo({
+          taskId: checkJson.task.id,
+          toCell: checkJson.toCell,
+        });
+        setSuccess(`✓ Заказ ${barcode} найден в задаче. TO ячейка: ${checkJson.toCell.code}${checkJson.toCell.description ? ` (${checkJson.toCell.description})` : ""}`);
+        setScanValue("");
+        return;
+      }
+
+      // Шаг 3: Сканирование TO cell (если FROM и UNIT уже есть)
+      if (!fcutcTaskInfo) {
+        setError("Ошибка: информация о задаче не найдена. Начните заново.");
+        setScanValue("");
+        return;
+      }
+
+      if (parsed.type !== "cell") {
+        setError("Отсканируйте TO ячейку");
+        setScanValue("");
+        return;
+      }
+
+      const toCellInfo = await loadCellInfo(parsed.code);
+      if (!toCellInfo) {
+        setError(`Ячейка "${parsed.code}" не найдена`);
+        setScanValue("");
+        return;
+      }
+
+      // Валидация: TO ячейка должна совпадать с ожидаемой из задачи
+      if (toCellInfo.id !== fcutcTaskInfo.toCell.id) {
+        setError(`Ожидается ячейка ${fcutcTaskInfo.toCell.code}, отсканирована ${parsed.code}`);
+        setScanValue("");
+        return;
+      }
+
+      if (toCellInfo.cell_type !== "picking") {
+        setError(`TO ячейка должна быть picking, а не ${toCellInfo.cell_type}`);
+        setScanValue("");
+        return;
+      }
+
+      setFcutcToCell(toCellInfo);
+
+      // Выполняем перемещение
+      await handleFcutcMove();
+    } catch (e: any) {
+      setError(e.message || "Ошибка обработки скана");
+      setScanValue("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Перемещение заказа и обновление задачи
+  async function handleFcutcMove() {
+    if (!fcutcFromCell || !fcutcUnit || !fcutcToCell || !fcutcTaskInfo) {
+      setError("Не все данные заполнены");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Перемещаем заказ
+      const moveRes = await fetch("/api/units/move-by-scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fromCellCode: fcutcFromCell.code,
+          toCellCode: fcutcToCell.code,
+          unitBarcode: fcutcUnit.barcode,
+        }),
+      });
+
+      const rawText = await moveRes.text().catch(() => "");
+      let moveJson: any = null;
+      try {
+        moveJson = rawText ? JSON.parse(rawText) : null;
+      } catch {}
+
+      if (moveRes.status === 423) {
+        setInventoryError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+        throw new Error("Инвентаризация активна");
+      }
+
+      if (!moveRes.ok) {
+        throw new Error(moveJson?.error || rawText || "Ошибка перемещения");
+      }
+
+      // Обновляем задачу - завершаем заказ в задаче
+      const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: fcutcTaskInfo.taskId,
+          movedUnitIds: [fcutcUnit.id],
+        }),
+      });
+
+      const completeJson = await completeRes.json().catch(() => ({}));
+
+      if (completeRes.ok && completeJson.taskCompleted) {
+        setSuccess(`✅ Заказ ${fcutcUnit.barcode} перемещен в ${fcutcToCell.code}. Задача завершена!`);
+      } else {
+        setSuccess(`✓ Заказ ${fcutcUnit.barcode} перемещен в ${fcutcToCell.code}`);
+      }
+
+      // Сброс состояния после успеха
+      setTimeout(() => {
+        setFcutcFromCell(null);
+        setFcutcUnit(null);
+        setFcutcTaskInfo(null);
+        setFcutcToCell(null);
+        if (!completeJson.taskCompleted) {
+          setSuccess(null);
+        }
+      }, 3000);
+    } catch (e: any) {
+      setError(e.message || "Ошибка перемещения");
+      if (inventoryError) {
+        setTimeout(() => setInventoryError(null), 5000);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleReset() {
     if (mode === "receiving") {
       setBinCell(null);
@@ -1754,6 +1971,11 @@ export default function TsdPage() {
       setShippingNewTasks([]);
       setShippingNewGrouped(new Map());
       // Не сбрасываем shippingNewCells - они загружаются один раз
+    } else if (mode === "shipping_fcutc") {
+      setFcutcFromCell(null);
+      setFcutcUnit(null);
+      setFcutcTaskInfo(null);
+      setFcutcToCell(null);
     } else if (mode === "surplus") {
       setSurplusCell(null);
       setSurplusUnits([]);
@@ -1931,6 +2153,15 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Отгрузка (НОВАЯ)
+          </Button>
+          <Button
+            variant={mode === "shipping_fcutc" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("shipping_fcutc")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Отгрузка (FCUTC)
           </Button>
           <Button
             variant={mode === "surplus" ? "primary" : "secondary"}
@@ -2862,6 +3093,134 @@ export default function TsdPage() {
           </div>
         )}
 
+        {/* Режим ОТГРУЗКА (FCUTC) - последовательное сканирование */}
+        {mode === "shipping_fcutc" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* FROM */}
+            <div
+              style={{
+                padding: 16,
+                background: fcutcFromCell ? "#e3f2fd" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: fcutcFromCell ? "#2196f3" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
+              {fcutcFromCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(fcutcFromCell.cell_type, fcutcFromCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{fcutcFromCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{fcutcFromCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* UNIT */}
+            <div
+              style={{
+                padding: 16,
+                background: fcutcUnit ? "#fff8e1" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: fcutcUnit ? "#ffc107" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>ЗАКАЗ</div>
+              {fcutcUnit ? (
+                <div style={{ fontSize: "20px", fontWeight: 700 }}>{fcutcUnit.barcode}</div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+
+            {/* TO (ожидаемая ячейка) */}
+            {fcutcTaskInfo && (
+              <div
+                style={{
+                  padding: 16,
+                  background: "#e8f5e9",
+                  borderRadius: 8,
+                  border: "2px solid #4caf50",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#2e7d32", fontWeight: 700, marginBottom: 8 }}>
+                  📍 Отсканируйте TO ячейку:
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor("picking", {}),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700, color: "#2e7d32" }}>
+                      {fcutcTaskInfo.toCell.code}
+                    </div>
+                    {fcutcTaskInfo.toCell.description && (
+                      <div style={{ fontSize: "14px", color: "#666", marginTop: 4 }}>
+                        {fcutcTaskInfo.toCell.description}
+                      </div>
+                    )}
+                    <div style={{ fontSize: "12px", color: "#666", marginTop: 4 }}>picking</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TO (отсканированная ячейка) */}
+            <div
+              style={{
+                padding: 16,
+                background: fcutcToCell ? "#e8f5e9" : "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid",
+                borderColor: fcutcToCell ? "#4caf50" : "#ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>TO (куда)</div>
+              {fcutcToCell ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      backgroundColor: getCellColor(fcutcToCell.cell_type, fcutcToCell.meta),
+                      border: "1px solid #ccc",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "20px", fontWeight: 700 }}>{fcutcToCell.code}</div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>{fcutcToCell.cell_type}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Режим ОТГРУЗКА (НОВАЯ) - с группировкой по picking ячейкам */}
         {mode === "shipping_new" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
@@ -3305,6 +3664,18 @@ export default function TsdPage() {
               <li>Нажмите <strong>"Сохранить ячейку"</strong> - результаты отправятся на сервер</li>
               <li>Проверьте результат: ОК или расхождение (недостача/излишки)</li>
               <li>Нажмите <strong>"Сбросить"</strong> и выберите следующую ячейку</li>
+            </ol>
+          ) : mode === "shipping_fcutc" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li><strong>Отсканируйте FROM ячейку</strong> (откуда берете заказ)</li>
+              <li><strong>Отсканируйте заказ</strong> (штрихкод unit)</li>
+              <li>Система проверит: есть ли заказ в задачах для этой ячейки</li>
+              <li>Если заказ найден → появится <strong>ожидаемая TO ячейка</strong> (picking)</li>
+              <li><strong>Отсканируйте TO ячейку</strong> (должна совпадать с ожидаемой)</li>
+              <li>Заказ переместится автоматически, задача обновится</li>
+              <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+                💡 Можно обрабатывать заказы из разных задач последовательно
+              </li>
             </ol>
           ) : mode === "surplus" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
