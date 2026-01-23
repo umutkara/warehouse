@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Alert, Button } from "@/lib/ui/components";
+import * as XLSX from "xlsx";
 
 type Cell = {
   id: string;
@@ -375,8 +376,65 @@ export default function OpsShippingPage() {
     setModalUnitDetails(null);
   }
 
-  // Export available units to Excel
-  async function handleExportToExcel() {
+  // Export available units to XLSX (Excel)
+  async function handleExportToXLSX() {
+    if (availableUnits.length === 0) {
+      setError("Нет заказов для экспорта");
+      return;
+    }
+
+    try {
+      // Prepare data
+      const headers = [
+        "Штрихкод",
+        "Статус",
+        "Ячейка",
+        "Тип ячейки",
+        "Создан",
+      ];
+
+      const rows = availableUnits.map((unit) => {
+        const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
+        
+        return {
+          "Штрихкод": unit.barcode || "",
+          "Статус": unit.status || "",
+          "Ячейка": unit.cell?.code || "",
+          "Тип ячейки": unit.cell?.cell_type || "",
+          "Создан": createdAt,
+        };
+      });
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Set column widths
+      ws["!cols"] = [
+        { wch: 20 }, // Штрихкод
+        { wch: 15 }, // Статус
+        { wch: 15 }, // Ячейка
+        { wch: 15 }, // Тип ячейки
+        { wch: 20 }, // Создан
+      ];
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "Доступные заказы");
+
+      // Generate file and download
+      const fileName = `units_storage_shipping_${new Date().toISOString().split("T")[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      
+      setSuccess(`Экспортировано ${availableUnits.length} заказов в XLSX`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e: any) {
+      console.error("Export to XLSX error:", e);
+      setError("Ошибка экспорта в XLSX");
+    }
+  }
+
+  // Export available units to CSV
+  async function handleExportToCSV() {
     if (availableUnits.length === 0) {
       setError("Нет заказов для экспорта");
       return;
@@ -428,11 +486,11 @@ export default function OpsShippingPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
-      setSuccess(`Экспортировано ${availableUnits.length} заказов`);
+      setSuccess(`Экспортировано ${availableUnits.length} заказов в CSV`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (e: any) {
-      console.error("Export error:", e);
-      setError("Ошибка экспорта в Excel");
+      console.error("Export to CSV error:", e);
+      setError("Ошибка экспорта в CSV");
     }
   }
 
@@ -521,7 +579,7 @@ export default function OpsShippingPage() {
             <Button 
               variant="secondary" 
               size="sm" 
-              onClick={handleExportToExcel} 
+              onClick={handleExportToXLSX} 
               disabled={loadingUnits || availableUnits.length === 0}
               style={{ 
                 background: availableUnits.length > 0 ? "#10b981" : undefined,
@@ -529,7 +587,20 @@ export default function OpsShippingPage() {
                 borderColor: availableUnits.length > 0 ? "#10b981" : undefined
               }}
             >
-              📊 Экспорт в Excel
+              📊 Экспорт в XLSX
+            </Button>
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              onClick={handleExportToCSV} 
+              disabled={loadingUnits || availableUnits.length === 0}
+              style={{ 
+                background: availableUnits.length > 0 ? "#0284c7" : undefined,
+                color: availableUnits.length > 0 ? "#fff" : undefined,
+                borderColor: availableUnits.length > 0 ? "#0284c7" : undefined
+              }}
+            >
+              📄 Экспорт в CSV
             </Button>
             <Button variant="secondary" size="sm" onClick={loadAvailableUnits} disabled={loadingUnits}>
               {loadingUnits ? "Загрузка..." : "Обновить"}
