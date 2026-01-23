@@ -34,7 +34,7 @@ export async function GET(req: Request) {
   // Get all units for the warehouse (use supabaseAdmin to bypass RLS)
   const { data: units, error: unitsError } = await supabaseAdmin
     .from("units")
-    .select("id, barcode, status, cell_id, created_at")
+    .select("id, barcode, status, cell_id, created_at, meta")
     .eq("warehouse_id", profile.warehouse_id)
     .not("cell_id", "is", null)
     .order("created_at", { ascending: false });
@@ -67,9 +67,11 @@ export async function GET(req: Request) {
   }
 
   // Create a map of cell_id -> cell
-  const cellsMap = new Map();
-  cells?.forEach((cell) => {
-    cellsMap.set(cell.id, cell);
+  const cellsMap = new Map<string, (typeof cells)[number]>();
+  (cells || []).forEach((cell) => {
+    if (cell?.id) {
+      cellsMap.set(cell.id, cell);
+    }
   });
 
   // Get all picking tasks that are open or in_progress (use supabaseAdmin to bypass RLS)
@@ -115,6 +117,7 @@ export async function GET(req: Request) {
         status: unit.status,
         cell_id: unit.cell_id,
         created_at: unit.created_at,
+        ops_status: unit.meta?.ops_status ?? null,
         cell: cell
           ? {
               id: cell.id,

@@ -33,8 +33,33 @@ type Unit = {
       return_number: number;
     }>;
     service_center_return_count?: number;
+    ops_status?: string;
   };
 };
+
+// OPS statuses (must match backend and unit detail page)
+const OPS_STATUS_LABELS: Record<string, string> = {
+  partner_accepted_return: "Партнер принял на возврат",
+  partner_rejected_return: "Партнер не принял на возврат",
+  sent_to_sc: "Передан в СЦ",
+  delivered_to_rc: "Товар доставлен на РЦ",
+  client_accepted: "Клиент принял",
+  client_rejected: "Клиент не принял",
+  sent_to_client: "Товар отправлен клиенту",
+  delivered_to_pudo: "Товар доставлен на ПУДО",
+  case_cancelled_cc: "Кейс отменен (Направлен КК)",
+  postponed_1: "Перенос",
+  postponed_2: "Перенос 2",
+  warehouse_did_not_issue: "Склад не выдал",
+  in_progress: "В работе",
+};
+
+type OpsStatusCode = keyof typeof OPS_STATUS_LABELS;
+
+function getOpsStatusText(status: string | null | undefined): string {
+  if (!status) return "OPS статус не назначен";
+  return OPS_STATUS_LABELS[status as OpsStatusCode] || status;
+}
 
 // ⚡ Force dynamic for real-time data
 export const dynamic = 'force-dynamic';
@@ -48,6 +73,7 @@ export default function UnitsListPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
+  const [opsStatusFilter, setOpsStatusFilter] = useState<string>("all");
 
   // ⚡ OPTIMIZATION: Memoized load function
   const loadUnits = useCallback(async () => {
@@ -85,6 +111,24 @@ export default function UnitsListPage() {
       setLoading(false);
     }
   }, [ageFilter, statusFilter, searchQuery, router]);
+
+  // Client-side filter by OPS статус
+  const filteredUnits = useMemo(() => {
+    return units.filter((unit) => {
+      const currentOps = unit.meta?.ops_status || null;
+
+      if (opsStatusFilter === "no_status") {
+        return !currentOps;
+      }
+
+      if (opsStatusFilter !== "all" && opsStatusFilter) {
+        return currentOps === opsStatusFilter;
+      }
+
+      // "all" – no OPS filter
+      return true;
+    });
+  }, [units, opsStatusFilter]);
 
   useEffect(() => {
     loadUnits();
@@ -173,7 +217,15 @@ export default function UnitsListPage() {
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Список заказов</h1>
-          <p style={styles.subtitle}>Всего заказов на складе: {units.length}</p>
+          <p style={styles.subtitle}>
+            Всего заказов на складе: {units.length}
+            {opsStatusFilter !== "all" && (
+              <>
+                {" "}
+                • По текущему OPS фильтру: {filteredUnits.length}
+              </>
+            )}
+          </p>
         </div>
 
         <button onClick={loadUnits} style={styles.refreshButton}>
@@ -321,6 +373,33 @@ export default function UnitsListPage() {
         </div>
       </div>
 
+      {/* OPS Status Filter */}
+      <div style={styles.filters}>
+        <div style={styles.filterLabel}>OPS статус:</div>
+        <div>
+          <select
+            value={opsStatusFilter}
+            onChange={(e) => setOpsStatusFilter(e.target.value)}
+            style={{
+              padding: "6px 16px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 13,
+              minWidth: 260,
+            }}
+          >
+            <option value="all">Все OPS статусы</option>
+            <option value="no_status">Без OPS статуса</option>
+            <option disabled>──────────</option>
+            {Object.entries(OPS_STATUS_LABELS).map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {error && (
         <div style={styles.error}>
           {error}
@@ -344,16 +423,16 @@ export default function UnitsListPage() {
             </tr>
           </thead>
           <tbody>
-            {units.length === 0 && !loading && (
+            {filteredUnits.length === 0 && !loading && (
               <tr>
                 <td colSpan={9} style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
-                  {searchQuery
-                    ? `Не найдено заказов с номером "${searchQuery}"`
+                  {searchQuery || opsStatusFilter !== "all"
+                    ? "По выбранным фильтрам заказы не найдены"
                     : "Нет заказов"}
                 </td>
               </tr>
             )}
-            {units.map((unit) => (
+            {filteredUnits.map((unit) => (
               <tr
                 key={unit.id}
                 style={styles.tableRow}

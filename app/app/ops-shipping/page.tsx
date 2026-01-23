@@ -17,6 +17,7 @@ type Unit = {
   barcode: string;
   cell_id?: string;
   status?: string;
+  ops_status?: string | null;
   created_at?: string;
 };
 
@@ -27,6 +28,30 @@ type UnitWithCell = Unit & {
     cell_type: string;
   } | null;
 };
+
+// OPS statuses (must match backend)
+const OPS_STATUS_LABELS: Record<string, string> = {
+  in_progress: "В работе",
+  partner_accepted_return: "Партнер принял на возврат",
+  partner_rejected_return: "Партнер не принял на возврат",
+  sent_to_sc: "Передан в СЦ",
+  delivered_to_rc: "Товар доставлен на РЦ",
+  client_accepted: "Клиент принял",
+  client_rejected: "Клиент не принял",
+  sent_to_client: "Товар отправлен клиенту",
+  delivered_to_pudo: "Товар доставлен на ПУДО",
+  case_cancelled_cc: "Кейс отменен (Направлен КК)",
+  postponed_1: "Перенос",
+  postponed_2: "Перенос 2",
+  warehouse_did_not_issue: "Склад не выдал",
+};
+
+type OpsStatusCode = keyof typeof OPS_STATUS_LABELS;
+
+function getOpsStatusText(status: string | null | undefined): string {
+  if (!status) return "Не назначен";
+  return OPS_STATUS_LABELS[status as OpsStatusCode] || status;
+}
 
 type Task = {
   id: string;
@@ -132,6 +157,7 @@ export default function OpsShippingPage() {
   const [pickingCells, setPickingCells] = useState<Cell[]>([]);
   const [selectedPickingCellId, setSelectedPickingCellId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [opsStatusFilter, setOpsStatusFilter] = useState<string>("");
   
   // Scenario state
   const [scenarioCategory, setScenarioCategory] = useState<ScenarioCategory | "">("");
@@ -289,8 +315,16 @@ export default function OpsShippingPage() {
     });
   }
 
-  // Filter units by search query
+  // Filter units by OPS статус и поиску
   const filteredAvailableUnits = availableUnits.filter((unit) => {
+    // OPS status filter
+    if (opsStatusFilter === "no_status") {
+      if (unit.ops_status) return false;
+    } else if (opsStatusFilter) {
+      if (unit.ops_status !== opsStatusFilter) return false;
+    }
+
+    // Text search
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase().trim();
     return (
@@ -611,29 +645,55 @@ export default function OpsShippingPage() {
           Заказы из ячеек storage/shipping, которые еще не добавлены в задачи
         </div>
         
-        {/* Поиск */}
-        <div style={{ marginBottom: 12 }}>
-          <input
-            type="text"
-            placeholder="🔍 Поиск по штрихкоду, ячейке, статусу..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              fontSize: 14,
-              border: "1px solid #ddd",
-              borderRadius: 6,
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-            onFocus={(e) => {
-              e.target.style.borderColor = "#2196f3";
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = "#ddd";
-            }}
-          />
+        {/* Фильтры: OPS статус + поиск */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 220, flex: "0 0 auto" }}>
+            <select
+              value={opsStatusFilter}
+              onChange={(e) => setOpsStatusFilter(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                fontSize: 14,
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                background: "#fff",
+              }}
+            >
+              <option value="">Все OPS статусы</option>
+              <option value="in_progress">В работе</option>
+              <option value="no_status">Без OPS статуса</option>
+              <option disabled>──────────</option>
+              {Object.entries(OPS_STATUS_LABELS).map(([code, label]) => (
+                <option key={code} value={code}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: "1 1 200px" }}>
+            <input
+              type="text"
+              placeholder="🔍 Поиск по штрихкоду, ячейке, статусу..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                fontSize: 14,
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = "#2196f3";
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = "#ddd";
+              }}
+            />
+          </div>
         </div>
 
         {loadingUnits ? (
@@ -670,6 +730,7 @@ export default function OpsShippingPage() {
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Текущая ячейка</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Тип</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Статус</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>OPS статус</th>
                 </tr>
               </thead>
               <tbody>
@@ -722,6 +783,20 @@ export default function OpsShippingPage() {
                       )}
                     </td>
                     <td style={{ padding: "12px", fontSize: 13, color: "#666" }}>{unit.status}</td>
+                    <td style={{ padding: "12px", fontSize: 12 }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "4px 8px",
+                          borderRadius: 4,
+                          background: unit.ops_status ? "#eef2ff" : "#f3f4f6",
+                          color: unit.ops_status ? "#4f46e5" : "#6b7280",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {getOpsStatusText(unit.ops_status)}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
