@@ -6,7 +6,7 @@ yarn-error.log*
 
 # Next.js build output
 .next
-out
+/out
 build
 
 # Vercel
