@@ -32,7 +32,7 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { unitId, status } = body ?? {};
+  const { unitId, status, comment } = body ?? {};
 
   if (!unitId || !status) {
     return NextResponse.json(
@@ -56,6 +56,7 @@ export async function POST(req: Request) {
     "postponed_2",
     "warehouse_did_not_issue",
     "in_progress",
+    "no_report",
   ];
 
   if (!validStatuses.includes(status)) {
@@ -81,12 +82,14 @@ export async function POST(req: Request) {
     const oldStatus = currentUnit.meta?.ops_status || null;
     const oldStatusText = getStatusText(oldStatus);
     const newStatusText = getStatusText(status);
+    const oldComment = currentUnit.meta?.ops_status_comment || null;
 
-    // Update unit meta with new OPS status
+    // Update unit meta with new OPS status and comment
     const currentMeta = currentUnit.meta || {};
     const updatedMeta = {
       ...currentMeta,
       ops_status: status,
+      ops_status_comment: comment && comment.trim() ? comment.trim() : null,
     };
 
     const { data: updatedUnit, error: updateError } = await supabaseAdmin
@@ -103,16 +106,26 @@ export async function POST(req: Request) {
     }
 
     // Log the status change
+    const summaryParts = [`OPS статус изменён: ${oldStatusText || "не назначен"} → ${newStatusText}`];
+    if (comment && comment.trim()) {
+      summaryParts.push(`Комментарий: ${comment.trim()}`);
+    }
+    if (oldComment && oldComment !== (comment && comment.trim() ? comment.trim() : null)) {
+      summaryParts.push(`Предыдущий комментарий: ${oldComment}`);
+    }
+
     const { error: auditError } = await supabase.rpc("audit_log_event", {
       p_action: "ops.unit_status_update",
       p_entity_type: "unit",
       p_entity_id: unitId,
-      p_summary: `OPS статус изменён: ${oldStatusText || "не назначен"} → ${newStatusText}`,
+      p_summary: summaryParts.join(" | "),
       p_meta: {
         old_status: oldStatus,
         new_status: status,
         old_status_text: oldStatusText,
         new_status_text: newStatusText,
+        comment: comment && comment.trim() ? comment.trim() : null,
+        old_comment: oldComment,
         actor_role: profile.role,
         unit_barcode: currentUnit.barcode,
       },
@@ -199,6 +212,7 @@ function getStatusText(status: string | null): string {
     postponed_2: "Перенос 2",
     warehouse_did_not_issue: "Склад не выдал",
     in_progress: "В работе",
+    no_report: "Отчета нет",
   };
 
   return statusMap[status] || status;

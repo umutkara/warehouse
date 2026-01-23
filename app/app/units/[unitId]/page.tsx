@@ -39,6 +39,7 @@ type Unit = {
     }>;
     service_center_return_count?: number;
     ops_status?: string;
+    ops_status_comment?: string;
   };
 };
 
@@ -72,6 +73,7 @@ export default function UnitDetailPage() {
 
   // OPS status state
   const [opsStatus, setOpsStatus] = useState<string>("");
+  const [opsStatusComment, setOpsStatusComment] = useState<string>("");
   const [savingOpsStatus, setSavingOpsStatus] = useState(false);
 
   useEffect(() => {
@@ -114,6 +116,7 @@ export default function UnitDetailPage() {
       setPartnerName(json.unit.partner_name || "");
       setPrice(json.unit.price ? String(json.unit.price) : "");
       setOpsStatus(json.unit.meta?.ops_status || "");
+      setOpsStatusComment(json.unit.meta?.ops_status_comment || "");
     } catch (e: any) {
       setError("Ошибка загрузки");
     } finally {
@@ -257,6 +260,7 @@ export default function UnitDetailPage() {
         body: JSON.stringify({
           unitId: unit.id,
           status: opsStatus,
+          comment: opsStatusComment.trim() || null,
         }),
       });
 
@@ -275,6 +279,7 @@ export default function UnitDetailPage() {
           meta: {
             ...prev.meta,
             ops_status: opsStatus,
+            ops_status_comment: opsStatusComment.trim() || null,
           },
         };
       });
@@ -305,6 +310,7 @@ export default function UnitDetailPage() {
       postponed_2: "Перенос 2",
       warehouse_did_not_issue: "Склад не выдал",
       in_progress: "В работе",
+      no_report: "Отчета нет",
     };
 
     return statusMap[status] || status;
@@ -314,7 +320,7 @@ export default function UnitDetailPage() {
     if (!status) return "#6b7280";
 
     // Problematic statuses - red/orange
-    if (["partner_rejected_return", "client_rejected", "warehouse_did_not_issue", "case_cancelled_cc"].includes(status)) {
+    if (["partner_rejected_return", "client_rejected", "warehouse_did_not_issue", "case_cancelled_cc", "no_report"].includes(status)) {
       return "#dc2626";
     }
 
@@ -508,7 +514,7 @@ export default function UnitDetailPage() {
           icon = "📋";
           bgColor = "#f0f9ff";
           borderColor = "#bae6fd";
-          const { old_status_text, new_status_text } = meta || {};
+          const { old_status_text, new_status_text, comment } = meta || {};
           return (
             <div
               key={uniqueKey}
@@ -524,6 +530,11 @@ export default function UnitDetailPage() {
                 <div style={styles.historyText}>
                   {old_status_text || "не назначен"} → {new_status_text || "не назначен"}
                 </div>
+                {comment && (
+                  <div style={{ fontSize: 12, color: "#374151", marginTop: 4, padding: 6, background: "#fff", borderRadius: 4 }}>
+                    <strong>Комментарий:</strong> {comment}
+                  </div>
+                )}
                 <div style={styles.historyMeta}>
                   {auditActor} ({auditRole}) • {date}
                 </div>
@@ -771,6 +782,12 @@ export default function UnitDetailPage() {
             >
               {getOpsStatusText(unit.meta?.ops_status)}
             </div>
+            {unit.meta?.ops_status_comment && (
+              <div style={{ marginTop: 8, padding: 8, background: "#f3f4f6", borderRadius: 6, fontSize: 13 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Комментарий:</div>
+                <div style={{ color: "#374151" }}>{unit.meta.ops_status_comment}</div>
+              </div>
+            )}
           </div>
 
           {/* Edit Form (only for ops, logistics, admin, head) */}
@@ -779,13 +796,13 @@ export default function UnitDetailPage() {
               <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 8 }}>
                 Изменить статус:
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <select
                   value={opsStatus}
                   onChange={(e) => setOpsStatus(e.target.value)}
                   disabled={savingOpsStatus}
                   style={{
-                    flex: 1,
+                    width: "100%",
                     padding: "8px 12px",
                     border: "1px solid #d1d5db",
                     borderRadius: 6,
@@ -807,28 +824,58 @@ export default function UnitDetailPage() {
                   <option value="postponed_2">Перенос 2</option>
                   <option value="warehouse_did_not_issue">Склад не выдал</option>
                   <option value="in_progress">В работе</option>
+                  <option value="no_report">Отчета нет</option>
                 </select>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>
+                    Комментарий (опционально):
+                  </label>
+                  <textarea
+                    value={opsStatusComment}
+                    onChange={(e) => setOpsStatusComment(e.target.value)}
+                    disabled={savingOpsStatus}
+                    placeholder="Введите комментарий к статусу..."
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 6,
+                      fontSize: 14,
+                      background: "#fff",
+                      minHeight: 80,
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                </div>
                 <button
                   onClick={handleUpdateOpsStatus}
-                  disabled={savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status}
+                  disabled={savingOpsStatus || !opsStatus || (opsStatus === unit.meta?.ops_status && opsStatusComment.trim() === (unit.meta?.ops_status_comment || ""))}
                   style={{
                     padding: "8px 16px",
-                    background: savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status ? "#d1d5db" : "#2563eb",
+                    background: savingOpsStatus || !opsStatus || (opsStatus === unit.meta?.ops_status && opsStatusComment.trim() === (unit.meta?.ops_status_comment || "")) ? "#d1d5db" : "#2563eb",
                     color: "#fff",
                     border: "none",
                     borderRadius: 6,
                     fontSize: 14,
                     fontWeight: 600,
-                    cursor: savingOpsStatus || !opsStatus || opsStatus === unit.meta?.ops_status ? "not-allowed" : "pointer",
+                    cursor: savingOpsStatus || !opsStatus || (opsStatus === unit.meta?.ops_status && opsStatusComment.trim() === (unit.meta?.ops_status_comment || "")) ? "not-allowed" : "pointer",
                     whiteSpace: "nowrap",
+                    alignSelf: "flex-start",
                   }}
                 >
                   {savingOpsStatus ? "Сохранение..." : "Сохранить"}
                 </button>
               </div>
-              {opsStatus && opsStatus === unit.meta?.ops_status && (
+              {opsStatus && opsStatus === unit.meta?.ops_status && opsStatusComment.trim() === (unit.meta?.ops_status_comment || "") && (
                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
-                  Статус уже установлен
+                  Статус и комментарий уже установлены
+                </div>
+              )}
+              {unit.meta?.ops_status_comment && (
+                <div style={{ marginTop: 8, padding: 8, background: "#f3f4f6", borderRadius: 6, fontSize: 13 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>Текущий комментарий:</div>
+                  <div style={{ color: "#374151" }}>{unit.meta.ops_status_comment}</div>
                 </div>
               )}
             </div>

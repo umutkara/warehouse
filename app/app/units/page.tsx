@@ -52,6 +52,7 @@ const OPS_STATUS_LABELS: Record<string, string> = {
   postponed_2: "Перенос 2",
   warehouse_did_not_issue: "Склад не выдал",
   in_progress: "В работе",
+  no_report: "Отчета нет",
 };
 
 type OpsStatusCode = keyof typeof OPS_STATUS_LABELS;
