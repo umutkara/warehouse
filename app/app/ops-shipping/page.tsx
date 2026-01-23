@@ -54,6 +54,12 @@ function getOpsStatusText(status: string | null | undefined): string {
   return OPS_STATUS_LABELS[status as OpsStatusCode] || status;
 }
 
+function formatOrderNumberForExport(barcode?: string | null): string {
+  if (!barcode) return "";
+  if (!barcode.startsWith("00") || barcode.length < 4) return barcode;
+  return barcode.slice(2, -2);
+}
+
 type Task = {
   id: string;
   status: string;
@@ -172,6 +178,9 @@ export default function OpsShippingPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [lastCreatedCount, setLastCreatedCount] = useState<number | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
   
   // Modal state
   const [modalUnitId, setModalUnitId] = useState<string | null>(null);
@@ -432,7 +441,7 @@ export default function OpsShippingPage() {
         const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
         
         return {
-          "Штрихкод": unit.barcode || "",
+          "Штрихкод": formatOrderNumberForExport(unit.barcode),
           "Статус": unit.status || "",
           "Ячейка": unit.cell?.code || "",
           "Тип ячейки": unit.cell?.cell_type || "",
@@ -490,7 +499,7 @@ export default function OpsShippingPage() {
         const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
         
         return [
-          unit.barcode || "",
+          formatOrderNumberForExport(unit.barcode),
           unit.status || "",
           unit.cell?.code || "",
           unit.cell?.cell_type || "",
@@ -526,6 +535,91 @@ export default function OpsShippingPage() {
     } catch (e: any) {
       console.error("Export to CSV error:", e);
       setError("Ошибка экспорта в CSV");
+    }
+  }
+
+  function normalizeHeader(value: string) {
+    return value.trim().toLowerCase();
+  }
+
+  function getRowValue(row: Record<string, any>, keys: string[]) {
+    for (const key of keys) {
+      const normalizedKey = normalizeHeader(key);
+      const actualKey = Object.keys(row).find((k) => normalizeHeader(k) === normalizedKey);
+      if (actualKey) {
+        const value = row[actualKey];
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      }
+    }
+    return "";
+  }
+
+  async function handleImportExcel(file: File | null) {
+    if (!file) return;
+
+    setImporting(true);
+    setImportErrors([]);
+    setImportSuccess(null);
+    setError(null);
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        setImportErrors(["Файл Excel не содержит листов"]);
+        return;
+      }
+
+      const sheet = workbook.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" });
+
+      if (rawRows.length === 0) {
+        setImportErrors(["Файл Excel пустой или не содержит данных"]);
+        return;
+      }
+
+      const rows = rawRows.map((row, index) => {
+        const order = getRowValue(row, ["заказ", "штрихкод", "barcode", "order"]);
+        const destination = getRowValue(row, ["куда"]);
+        const scenario = getRowValue(row, ["сценарий", "scenario"]);
+        const pickingCode = getRowValue(row, ["код ячейки picking", "picking", "picking cell", "ячейка picking"]);
+
+        return {
+          rowIndex: index + 2,
+          order,
+          destination,
+          scenario,
+          picking_code: pickingCode,
+        };
+      });
+
+      const res = await fetch("/api/ops/picking-tasks/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        setImportErrors([json.error || "Ошибка импорта"]);
+        return;
+      }
+
+      if (Array.isArray(json.errors) && json.errors.length > 0) {
+        setImportErrors(json.errors.map((e: any) => `Строка ${e.rowIndex}: ${e.message}`));
+      }
+
+      setImportSuccess(`Создано заданий: ${json.created || 0}`);
+      await Promise.all([loadTasks(), loadAvailableUnits()]);
+    } catch (e: any) {
+      console.error("Import Excel error:", e);
+      setImportErrors([e.message || "Ошибка импорта"]);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -604,6 +698,23 @@ export default function OpsShippingPage() {
         </Alert>
       )}
 
+      {importSuccess && (
+        <Alert variant="success" style={{ marginBottom: 16 }}>
+          {importSuccess}
+        </Alert>
+      )}
+
+      {importErrors.length > 0 && (
+        <Alert variant="error" style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Ошибки импорта:</div>
+          <ul style={{ margin: 0, paddingLeft: 16 }}>
+            {importErrors.map((err, idx) => (
+              <li key={idx}>{err}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
       {/* Available units list */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -644,6 +755,24 @@ export default function OpsShippingPage() {
         </div>
         <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
           Заказы из ячеек storage/shipping, которые еще не добавлены в задачи
+        </div>
+
+        <div style={{ padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px dashed #d1d5db", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>📥 Импорт заданий из Excel</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+            Формат колонок: <strong>заказ</strong> / <strong>куда</strong> / <strong>сценарий</strong> / <strong>код ячейки picking</strong>.
+            Поле <strong>сценарий</strong> может отличаться от <strong>куда</strong> (обычно ручной ввод).
+          </div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+            Для матчинга заказа применяется правило: если номер начинается с <strong>00</strong>, удаляются первые <strong>00</strong> и последние 2 цифры.
+          </div>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            disabled={importing}
+            onChange={(e) => handleImportExcel(e.target.files?.[0] || null)}
+            style={{ fontSize: 12 }}
+          />
         </div>
         
         {/* Фильтры: OPS статус + поиск */}

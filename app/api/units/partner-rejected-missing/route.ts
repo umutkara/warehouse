@@ -63,6 +63,22 @@ export async function GET(req: Request) {
       const notOnWarehouse = !unit.cell_id || !warehouseStatuses.includes(unit.status);
       return notOnWarehouse;
     });
+    let shipmentCourierByUnit = new Map<string, string>();
+    if (units.length > 0) {
+      const unitIds = units.map((u: any) => u.id);
+      const { data: shipments, error: shipmentsError } = await supabaseAdmin
+        .from("outbound_shipments")
+        .select("unit_id, courier_name, status, out_at, returned_at")
+        .in("unit_id", unitIds);
+      shipmentCourierByUnit = new Map(
+        (shipments || [])
+          .filter((s: any) => !!s.courier_name)
+          .map((s: any) => [s.unit_id, s.courier_name])
+      );
+      if (shipmentsError) {
+        console.warn("Outbound shipments lookup error:", shipmentsError.message);
+      }
+    }
 
     // Calculate age for each unit
     const now = new Date();
@@ -70,6 +86,15 @@ export async function GET(req: Request) {
       const createdAt = new Date(unit.created_at);
       const ageHours = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
       const ageDays = Math.floor(ageHours / 24);
+      const rejections = Array.isArray(unit.meta?.merchant_rejections)
+        ? unit.meta.merchant_rejections
+        : [];
+      const lastRejection = rejections.length > 0 ? rejections[rejections.length - 1] : null;
+      const courierName =
+        lastRejection?.courier_name ||
+        unit.meta?.courier_name ||
+        shipmentCourierByUnit.get(unit.id) ||
+        null;
       
       return {
         id: unit.id,
@@ -84,10 +109,10 @@ export async function GET(req: Request) {
         age_days: ageDays,
         ops_status: unit.meta?.ops_status || null,
         ops_status_comment: unit.meta?.ops_status_comment || null,
+        courier_name: courierName,
         meta: unit.meta,
       };
     });
-
     return NextResponse.json({
       ok: true,
       units: unitsWithInfo,

@@ -96,6 +96,7 @@ type PartnerRejectedUnit = {
   age_days: number;
   ops_status: string | null;
   ops_status_comment?: string | null;
+  courier_name?: string | null;
 };
 
 // ⚡ OPTIMIZATION: Memoized MetricCard component
@@ -1437,6 +1438,7 @@ export default function SLAPage() {
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Штрихкод</th>
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Товар</th>
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Партнер</th>
+                    <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Курьер</th>
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Статус</th>
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280", textAlign: "right" }}>Возраст</th>
                     <th style={{ padding: "10px 12px", fontWeight: 600, color: "#6b7280" }}>Комментарий OPS</th>
@@ -1476,6 +1478,9 @@ export default function SLAPage() {
                         </td>
                         <td style={{ padding: "10px 12px", fontSize: 12, color: "#6b7280" }}>
                           {unit.partner_name || "—"}
+                        </td>
+                        <td style={{ padding: "10px 12px", fontSize: 12, color: "#6b7280" }}>
+                          {unit.courier_name || "—"}
                         </td>
                         <td style={{ padding: "10px 12px" }}>
                           <span
