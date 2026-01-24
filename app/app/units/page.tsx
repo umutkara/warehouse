@@ -34,6 +34,7 @@ type Unit = {
     }>;
     service_center_return_count?: number;
     ops_status?: string;
+    ops_status_comment?: string;
   };
 };
 
