@@ -1755,28 +1755,7 @@ export default function TsdPage() {
     setBusy(true);
 
     try {
-      // Шаг 1: Сканирование FROM cell
-      if (!fcutcFromCell) {
-        if (parsed.type !== "cell") {
-          setError("Сначала отсканируйте FROM ячейку");
-          setScanValue("");
-          return;
-        }
-
-        const cellInfo = await loadCellInfo(parsed.code);
-        if (!cellInfo) {
-          setError(`Ячейка "${parsed.code}" не найдена`);
-          setScanValue("");
-          return;
-        }
-
-        setFcutcFromCell(cellInfo);
-        setSuccess(`✓ FROM: ${cellInfo.code}`);
-        setScanValue("");
-        return;
-      }
-
-      // Шаг 2: Сканирование UNIT (если FROM уже есть, но UNIT еще нет)
+      // Шаг 1: Сканирование UNIT
       if (!fcutcUnit) {
         if (parsed.type !== "unit") {
           setError("Отсканируйте заказ (штрихкод)");
@@ -1792,28 +1771,27 @@ export default function TsdPage() {
           return;
         }
 
-        // Проверяем, что заказ находится в FROM ячейке
-        if (!unitInfo.cell || unitInfo.cell.id !== fcutcFromCell.id) {
-          setError(`Заказ ${barcode} не находится в ячейке ${fcutcFromCell.code}`);
+        if (!unitInfo.cell) {
+          setError(`Заказ ${barcode} не размещен в ячейке`);
           setScanValue("");
           return;
         }
 
-        // Проверяем, есть ли заказ в задачах для этой FROM ячейки
-        const checkRes = await fetch(
-          `/api/tsd/shipping-tasks/check-unit?unitBarcode=${encodeURIComponent(barcode)}&fromCellId=${encodeURIComponent(fcutcFromCell.id)}`,
-          { cache: "no-store" }
-        );
+        // Проверяем, есть ли заказ в активных задачах
+        const checkRes = await fetch(`/api/tsd/shipping-tasks/check-unit?unitBarcode=${encodeURIComponent(barcode)}`, {
+          cache: "no-store",
+        });
 
         const checkJson = await checkRes.json();
 
         if (!checkRes.ok || !checkJson.found) {
-          setError(checkJson.error || `Заказ ${barcode} не найден в задачах для ячейки ${fcutcFromCell.code}`);
+          setError(checkJson.error || `Заказ ${barcode} не найден в активных задачах`);
           setScanValue("");
           return;
         }
 
         // Заказ найден в задаче - сохраняем информацию
+        setFcutcFromCell(unitInfo.cell as CellInfo);
         setFcutcUnit(unitInfo);
         setFcutcTaskInfo({
           taskId: checkJson.task.id,
@@ -1824,7 +1802,7 @@ export default function TsdPage() {
         return;
       }
 
-      // Шаг 3: Сканирование TO cell (если FROM и UNIT уже есть)
+      // Шаг 2: Сканирование TO cell (если UNIT уже есть)
       if (!fcutcTaskInfo) {
         setError("Ошибка: информация о задаче не найдена. Начните заново.");
         setScanValue("");
@@ -1871,7 +1849,7 @@ export default function TsdPage() {
 
   // Перемещение заказа и обновление задачи
   async function handleFcutcMove() {
-    if (!fcutcFromCell || !fcutcUnit || !fcutcToCell || !fcutcTaskInfo) {
+    if (!fcutcUnit || !fcutcToCell || !fcutcTaskInfo) {
       setError("Не все данные заполнены");
       return;
     }
@@ -1882,13 +1860,13 @@ export default function TsdPage() {
 
     try {
       // Перемещаем заказ
-      const moveRes = await fetch("/api/units/move-by-scan", {
+      const moveRes = await fetch("/api/units/move", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          fromCellCode: fcutcFromCell.code,
-          toCellCode: fcutcToCell.code,
-          unitBarcode: fcutcUnit.barcode,
+          unitId: fcutcUnit.id,
+          toCellId: fcutcToCell.id,
+          toStatus: "picking",
         }),
       });
 
@@ -3096,7 +3074,7 @@ export default function TsdPage() {
         {/* Режим ОТГРУЗКА (FCUTC) - последовательное сканирование */}
         {mode === "shipping_fcutc" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-            {/* FROM */}
+            {/* Текущая ячейка */}
             <div
               style={{
                 padding: 16,
@@ -3106,7 +3084,7 @@ export default function TsdPage() {
                 borderColor: fcutcFromCell ? "#2196f3" : "#ddd",
               }}
             >
-              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>FROM (откуда)</div>
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>ТЕКУЩАЯ ЯЧЕЙКА</div>
               {fcutcFromCell ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
@@ -3667,15 +3645,11 @@ export default function TsdPage() {
             </ol>
           ) : mode === "shipping_fcutc" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li><strong>Отсканируйте FROM ячейку</strong> (откуда берете заказ)</li>
               <li><strong>Отсканируйте заказ</strong> (штрихкод unit)</li>
-              <li>Система проверит: есть ли заказ в задачах для этой ячейки</li>
+              <li>Система проверит: есть ли заказ в активных OPS задачах</li>
               <li>Если заказ найден → появится <strong>ожидаемая TO ячейка</strong> (picking)</li>
               <li><strong>Отсканируйте TO ячейку</strong> (должна совпадать с ожидаемой)</li>
               <li>Заказ переместится автоматически, задача обновится</li>
-              <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                💡 Можно обрабатывать заказы из разных задач последовательно
-              </li>
             </ol>
           ) : mode === "surplus" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>

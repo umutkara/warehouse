@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
  * GET /api/tsd/shipping-tasks/check-unit?unitBarcode=xxx&fromCellId=xxx
- * Проверяет, есть ли заказ в задачах для указанной from ячейки
+ * Проверяет, есть ли заказ в активных задачах (опционально для указанной from ячейки)
  * Возвращает информацию о задаче и ожидаемой TO ячейке
  */
 export async function GET(req: Request) {
@@ -34,9 +34,9 @@ export async function GET(req: Request) {
   const unitBarcode = url.searchParams.get("unitBarcode");
   const fromCellId = url.searchParams.get("fromCellId");
 
-  if (!unitBarcode || !fromCellId) {
+  if (!unitBarcode) {
     return NextResponse.json(
-      { error: "unitBarcode and fromCellId are required" },
+      { error: "unitBarcode is required" },
       { status: 400 }
     );
   }
@@ -57,8 +57,8 @@ export async function GET(req: Request) {
       );
     }
 
-    // Проверяем, что unit находится в указанной from ячейке
-    if (unit.cell_id !== fromCellId) {
+    // Если задан fromCellId, проверяем что unit находится в этой ячейке
+    if (fromCellId && unit.cell_id !== fromCellId) {
       return NextResponse.json({
         found: false,
         error: `Заказ находится в другой ячейке (не в ${fromCellId})`,
@@ -70,15 +70,20 @@ export async function GET(req: Request) {
       });
     }
 
-    // Ищем задачи, где этот unit есть и from_cell_id совпадает
-    const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
+    // Ищем задачи, где этот unit есть (и from_cell_id совпадает, если задан)
+    let taskUnitsQuery = supabaseAdmin
       .from("picking_task_units")
       .select(`
         picking_task_id,
         from_cell_id
       `)
-      .eq("unit_id", unit.id)
-      .eq("from_cell_id", fromCellId);
+      .eq("unit_id", unit.id);
+
+    if (fromCellId) {
+      taskUnitsQuery = taskUnitsQuery.eq("from_cell_id", fromCellId);
+    }
+
+    const { data: taskUnits, error: taskUnitsError } = await taskUnitsQuery;
 
     if (taskUnitsError) {
       console.error("Error loading picking_task_units:", taskUnitsError);
@@ -91,7 +96,7 @@ export async function GET(req: Request) {
     if (!taskUnits || taskUnits.length === 0) {
       return NextResponse.json({
         found: false,
-        error: `Заказ ${unitBarcode} не найден в задачах для ячейки`,
+        error: `Заказ ${unitBarcode} не найден в активных задачах`,
         unit: {
           id: unit.id,
           barcode: unit.barcode,
