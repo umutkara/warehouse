@@ -14,6 +14,7 @@ export function getCellColor(cell_type: string, meta?: any): string {
     case "shipping": return "#f3e5f5"; // фиолетовый
     case "picking": return "#e3f2fd"; // голубой
     case "surplus": return "#efebe9"; // коричневый (излишки)
+    case "rejected": return "#fee2e2"; // красный (отклонённые)
     default: return "#ffffff"; // белый
   }
 }

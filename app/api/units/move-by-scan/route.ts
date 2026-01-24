@@ -22,6 +22,8 @@ function statusByCellType(cellType: string) {
       return "shipping";
     case "picking":
       return "picking";
+    case "rejected":
+      return "rejected";
     default:
       return null;
   }

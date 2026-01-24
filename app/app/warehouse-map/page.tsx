@@ -119,7 +119,7 @@ export default function WarehouseMapPage() {
   const [moveMsg, setMoveMsg] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [zoneStats, setZoneStats] = useState<any>(null);
-  const ZONES: Zone[] = ["receiving", "bin", "storage", "shipping", "transfer"];
+  const ZONES: Zone[] = ["receiving", "bin", "storage", "shipping", "transfer", "rejected"];
 
   const ZONE_LABEL: Record<string, string> = {
     receiving: "Приёмка",
@@ -127,6 +127,7 @@ export default function WarehouseMapPage() {
     storage: "Хранение",
     shipping: "Отгрузка",
     transfer: "Передача",
+    rejected: "Отклонённые",
   };
 
   const zoneFilters = useUIStore((state) => state.zoneFilters);
@@ -390,6 +391,7 @@ export default function WarehouseMapPage() {
           <StatPill label="Хранение" value={zoneStats?.counts?.storage} onClick={() => setOnlyZone("storage")} />
           <StatPill label="Отгрузка" value={zoneStats?.counts?.shipping} onClick={() => setOnlyZone("shipping")} />
           <StatPill label="Передача" value={zoneStats?.counts?.transfer} onClick={() => setOnlyZone("transfer")} />
+          <StatPill label="Отклонённые" value={zoneStats?.counts?.rejected} onClick={() => setOnlyZone("rejected")} />
 
           <StatPill label="Не размещено" value={zoneStats?.unplaced} />
           <StatPill label="Всего" value={zoneStats?.total} />

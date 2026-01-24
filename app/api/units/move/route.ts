@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
-const ALLOWED_STATUSES = ["bin", "stored", "picking", "shipping", "out"] as const;
+const ALLOWED_STATUSES = ["bin", "stored", "picking", "shipping", "out", "rejected"] as const;
 type UnitStatus = typeof ALLOWED_STATUSES[number];
 
 export async function POST(req: Request) {

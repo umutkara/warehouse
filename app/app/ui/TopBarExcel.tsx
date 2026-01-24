@@ -1,10 +1,27 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function TopBarExcel() {
   const router = useRouter();
+  const [role, setRole] = useState<string>("guest");
+
+  useEffect(() => {
+    async function loadRole() {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        const json = await res.json();
+        if (res.ok && json.role) {
+          setRole(json.role);
+        }
+      } catch {
+        setRole("guest");
+      }
+    }
+    loadRole();
+  }, []);
 
   async function handleLogout() {
     const supabase = supabaseBrowser();
@@ -64,6 +81,39 @@ export default function TopBarExcel() {
       >
         📦 Список заказов
       </button>
+
+      {role === "admin" && (
+        <button
+          onClick={() => router.push("/app/outbound/admin")}
+          style={{
+            padding: "8px 16px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid #111827",
+            background: "#111827",
+            color: "#ffffff",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            transition: "all var(--transition-base)",
+            boxShadow: "var(--shadow-sm)",
+            marginLeft: "var(--spacing-sm)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#1f2937";
+            e.currentTarget.style.borderColor = "#1f2937";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#111827";
+            e.currentTarget.style.borderColor = "#111827";
+          }}
+        >
+          🛠️ Админ панель
+        </button>
+      )}
 
       {/* SLA Button */}
       <button

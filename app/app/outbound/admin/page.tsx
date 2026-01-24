@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 
 const OPS_STATUS_LABELS: Record<string, string> = {
   in_progress: "В работе",
@@ -29,6 +30,13 @@ export default function OutboundAdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ total: number; updated: number; skipped: number } | null>(null);
   const [role, setRole] = useState<string>("guest");
+  const [cellCodeToDelete, setCellCodeToDelete] = useState<string>("");
+  const [moveBarcode, setMoveBarcode] = useState<string>("");
+  const [moveCellCode, setMoveCellCode] = useState<string>("");
+  const [clearBarcode, setClearBarcode] = useState<string>("");
+  const [bulkCellCode, setBulkCellCode] = useState<string>("");
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ updated: number; errors: Array<{ barcode: string; message: string }> } | null>(null);
 
   useEffect(() => {
     async function loadRole() {
@@ -76,6 +84,115 @@ export default function OutboundAdminPage() {
     }
   }
 
+  async function handleDeleteCell() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/cells/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cellCode: cellCodeToDelete }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка удаления ячейки");
+        return;
+      }
+      setCellCodeToDelete("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка удаления ячейки");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleMoveUnit() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/units/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barcode: moveBarcode, toCellCode: moveCellCode }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка перемещения");
+        return;
+      }
+      setMoveBarcode("");
+      setMoveCellCode("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка перемещения");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleClearUnit() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/units/clear-cell", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barcode: clearBarcode }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка очистки ячейки");
+        return;
+      }
+      setClearBarcode("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка очистки ячейки");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBulkImport(file: File | null) {
+    if (!file || !bulkCellCode) return;
+    setBulkImporting(true);
+    setError(null);
+    setBulkResult(null);
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        setError("Файл Excel не содержит листов");
+        return;
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
+      const barcodes = rows
+        .map((row) => String(row?.[0] ?? "").trim())
+        .filter((value) => value.length > 0);
+
+      if (barcodes.length === 0) {
+        setError("В файле нет штрихкодов в колонке A");
+        return;
+      }
+
+      const res = await fetch("/api/admin/units/bulk-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cellCode: bulkCellCode, barcodes }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка массовой записи");
+        return;
+      }
+      setBulkResult({ updated: json.updated || 0, errors: json.errors || [] });
+    } catch (e: any) {
+      setError(e.message || "Ошибка массовой записи");
+    } finally {
+      setBulkImporting(false);
+    }
+  }
+
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "var(--spacing-xl)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
@@ -117,7 +234,7 @@ export default function OutboundAdminPage() {
         </div>
       )}
 
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <div style={{ display: "grid", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontSize: 13, color: "#6b7280" }}>Дата отправки (OUT)</span>
@@ -168,6 +285,126 @@ export default function OutboundAdminPage() {
           >
             {loading ? "Обновление..." : "Применить"}
           </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>🗑️ Удаление ячейки (полное)</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <input
+            value={cellCodeToDelete}
+            onChange={(e) => setCellCodeToDelete(e.target.value)}
+            placeholder="Код ячейки (например, A-01)"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <button
+            onClick={handleDeleteCell}
+            disabled={loading || role !== "admin" || !cellCodeToDelete}
+            style={{
+              padding: "10px 16px",
+              background: loading || !cellCodeToDelete ? "#e5e7eb" : "#dc2626",
+              color: loading || !cellCodeToDelete ? "#6b7280" : "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: loading || !cellCodeToDelete ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Удалить ячейку
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>📦 Перемещение заказа (admin)</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <input
+            value={moveBarcode}
+            onChange={(e) => setMoveBarcode(e.target.value)}
+            placeholder="Штрихкод заказа"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <input
+            value={moveCellCode}
+            onChange={(e) => setMoveCellCode(e.target.value)}
+            placeholder="Код ячейки назначения"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <button
+            onClick={handleMoveUnit}
+            disabled={loading || role !== "admin" || !moveBarcode || !moveCellCode}
+            style={{
+              padding: "10px 16px",
+              background: loading || !moveBarcode || !moveCellCode ? "#e5e7eb" : "#111827",
+              color: loading || !moveBarcode || !moveCellCode ? "#6b7280" : "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: loading || !moveBarcode || !moveCellCode ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Переместить
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>🧹 Удаление заказа из ячейки</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <input
+            value={clearBarcode}
+            onChange={(e) => setClearBarcode(e.target.value)}
+            placeholder="Штрихкод заказа"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <button
+            onClick={handleClearUnit}
+            disabled={loading || role !== "admin" || !clearBarcode}
+            style={{
+              padding: "10px 16px",
+              background: loading || !clearBarcode ? "#e5e7eb" : "#0f766e",
+              color: loading || !clearBarcode ? "#6b7280" : "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: loading || !clearBarcode ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Удалить из ячейки
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>📄 Массовая запись в ячейку (Excel)</h2>
+        <div style={{ display: "grid", gap: 12 }}>
+          <input
+            value={bulkCellCode}
+            onChange={(e) => setBulkCellCode(e.target.value)}
+            placeholder="Код ячейки для записи"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            disabled={bulkImporting || role !== "admin" || !bulkCellCode}
+            onChange={(e) => handleBulkImport(e.target.files?.[0] || null)}
+            style={{ fontSize: 12 }}
+          />
+          {bulkResult && (
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Обновлено: <strong>{bulkResult.updated}</strong>. Ошибки: <strong>{bulkResult.errors.length}</strong>.
+            </div>
+          )}
+          {bulkResult?.errors?.length ? (
+            <ul style={{ fontSize: 12, color: "#b91c1c", margin: 0, paddingLeft: 18 }}>
+              {bulkResult.errors.slice(0, 10).map((err, idx) => (
+                <li key={idx}>
+                  {err.barcode}: {err.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </div>

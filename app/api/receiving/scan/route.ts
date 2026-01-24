@@ -65,27 +65,27 @@ export async function POST(req: Request) {
     }
 
     // Load cell через view (обходит проблему "stack depth limit exceeded" при запросе к warehouse_cells)
-    const { data: binCell, error: cellError } = await supabase
+    const { data: targetCell, error: cellError } = await supabase
       .from("warehouse_cells_map")
       .select("id, code, cell_type, is_active, meta")
       .eq("warehouse_id", profile.warehouse_id)
       .eq("code", cellCode)
       .single();
 
-    if (cellError || !binCell) {
+    if (cellError || !targetCell) {
       return NextResponse.json({ error: "Ячейка не найдена", ok: false }, { status: 404 });
     }
 
-    // Check cell_type === 'bin'
-    if (binCell.cell_type !== "bin") {
+    // Check cell_type === 'bin' or 'rejected'
+    if (!["bin", "rejected"].includes(targetCell.cell_type)) {
       return NextResponse.json(
-        { error: "Приемка разрешена только в BIN-ячейки", ok: false },
+        { error: "Приемка разрешена только в BIN или REJECTED ячейки", ok: false },
         { status: 400 }
       );
     }
 
     // Check is_active === true
-    if (!binCell.is_active) {
+    if (!targetCell.is_active) {
       return NextResponse.json(
         { error: `Ячейка "${cellCode}" не активна`, ok: false },
         { status: 400 }
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     }
 
     // Check meta.blocked !== true
-    if (binCell.meta?.blocked === true) {
+    if (targetCell.meta?.blocked === true) {
       return NextResponse.json(
         { error: `Ячейка "${cellCode}" заблокирована`, ok: false },
         { status: 400 }
@@ -117,20 +117,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // SCENARIO B: unit найден и уже в этой BIN
-    if (existingUnit && existingUnit.cell_id === binCell.id) {
+    // SCENARIO B: unit найден и уже в этой ячейке
+    if (existingUnit && existingUnit.cell_id === targetCell.id) {
       return NextResponse.json({
         ok: true,
         unitId: existingUnit.id,
         barcode: digits,
-        cell: { id: binCell.id, code: binCell.code, cell_type: "bin" },
+        cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
         status: existingUnit.status,
-        message: "Уже в этой BIN",
+        message: `Уже в этой ячейке (${targetCell.code})`,
       });
     }
 
     // SCENARIO C: unit найден и уже размещён в другой ячейке
-    if (existingUnit && existingUnit.cell_id !== null && existingUnit.cell_id !== binCell.id) {
+    if (existingUnit && existingUnit.cell_id !== null && existingUnit.cell_id !== targetCell.id) {
       return NextResponse.json(
         {
           error:
@@ -144,6 +144,7 @@ export async function POST(req: Request) {
     let unitId: string;
 
     // SCENARIO A: unit НЕ найден - создаём новый
+    const targetStatus = targetCell.cell_type === "rejected" ? "rejected" : "receiving";
     if (!existingUnit) {
       // Создаём unit через admin client (обходит проблему "stack depth limit exceeded" при прямом insert из-за RLS)
       // Admin client использует service role key и обходит RLS политики
@@ -152,7 +153,7 @@ export async function POST(req: Request) {
         .insert({
           barcode: digits,
           warehouse_id: profile.warehouse_id,
-          status: "receiving", // Временно используем "receiving" вместо "bin" до применения миграции enum
+          status: targetStatus,
         })
         .select("id, barcode, created_at, warehouse_id")
         .single();
@@ -170,8 +171,8 @@ export async function POST(req: Request) {
         p_summary: `Создание unit ${createdUnit.barcode} при приемке`,
         p_meta: {
           barcode: createdUnit.barcode,
-          status: "receiving", // Временно используем "receiving" вместо "bin"
-          cell_code: binCell.code,
+          status: targetStatus,
+          cell_code: targetCell.code,
           source: "receiving_scan",
         },
       });
@@ -210,13 +211,16 @@ export async function POST(req: Request) {
     
     // If shipment is already "returned" but doesn't have merchant_rejections set,
     // we should still check for picking_task and create merchant_rejections if needed
-    const shouldProcessReturn = activeShipment && 
-      (activeShipment.status === "out" || 
-       (activeShipment.status === "returned" && 
-        activeShipment.return_reason === "Автоматический возврат при приемке в bin"));
+    const shouldProcessReturn =
+      activeShipment &&
+      (activeShipment.status === "out" ||
+        (activeShipment.status === "returned" &&
+          (activeShipment.return_reason === "Автоматический возврат при приемке в bin" ||
+            activeShipment.return_reason === "Автоматический возврат при приемке в rejected")));
 
     // Prepare move note and meta
-    let moveNote = "Принято в BIN";
+    const targetCellLabel = targetCell.cell_type === "rejected" ? "REJECTED" : "BIN";
+    let moveNote = `Принято в ${targetCellLabel}`;
     let moveMeta: any = { source: "tsd" };
     let returnReason = "";
     let returnAction = "";
@@ -312,7 +316,7 @@ export async function POST(req: Request) {
       fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:304',message:'Return type determined',data:{isServiceCenterReturn,isMerchantRejection,scenarioLower},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
 
-      returnReason = "Автоматический возврат при приемке в bin";
+      returnReason = `Автоматический возврат при приемке в ${targetCellLabel.toLowerCase()}`;
       returnAction = "logistics.auto_return_from_out";
       returnIcon = "↩️";
 
@@ -412,7 +416,7 @@ export async function POST(req: Request) {
       }
 
       // Prepare audit log summary
-      let summaryText = `Автовозврат из OUT: ${digits} принят в ${binCell.code}`;
+      let summaryText = `Автовозврат из OUT: ${digits} принят в ${targetCell.code}`;
       if (isServiceCenterReturn) {
         summaryText = `${returnIcon} Вернулся с сервисного центра (${returnCount}): ${digits} (${pickingTask.scenario})`;
         moveNote = `Возврат из OUT: Вернулся с сервисного центра (${returnCount})`;
@@ -444,7 +448,7 @@ export async function POST(req: Request) {
           unit_barcode: digits,
           courier_name: activeShipment.courier_name,
           out_at: activeShipment.out_at,
-          returned_to_cell: binCell.code,
+          returned_to_cell: targetCell.code,
           return_reason: returnReason,
           merchant_rejection: isMerchantRejection,
           service_center_return: isServiceCenterReturn,
@@ -460,11 +464,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // Move unit to BIN cell (with appropriate note based on return status)
+    // Move unit to target cell (with appropriate note based on return status)
     const { data: rpcResult, error: rpcError } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
-      p_to_cell_id: binCell.id,
-      p_to_status: "receiving", // Временно используем "receiving" вместо "bin" до применения миграции enum
+      p_to_cell_id: targetCell.id,
+      p_to_status: targetStatus,
       p_note: moveNote,
       p_source: "tsd",
       p_meta: moveMeta,
@@ -473,7 +477,7 @@ export async function POST(req: Request) {
     if (rpcError) {
       console.error("move_unit_to_cell RPC error:", rpcError);
       return NextResponse.json(
-        { error: rpcError.message || "Ошибка размещения в BIN", ok: false },
+        { error: rpcError.message || "Ошибка размещения", ok: false },
         { status: 500 }
       );
     }
@@ -481,7 +485,7 @@ export async function POST(req: Request) {
     const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
     if (!result?.ok) {
       return NextResponse.json(
-        { error: result?.error || "Ошибка размещения в BIN", ok: false },
+        { error: result?.error || "Ошибка размещения", ok: false },
         { status: 400 }
       );
     }
@@ -491,9 +495,9 @@ export async function POST(req: Request) {
       ok: true,
       unitId,
       barcode: digits,
-      cell: { id: binCell.id, code: binCell.code, cell_type: "bin" },
-      status: "receiving", // Временно используем "receiving" вместо "bin"
-      message: "Принято в BIN",
+      cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
+      status: targetStatus,
+      message: `Принято в ${targetCellLabel}`,
     });
   } catch (e: any) {
     console.error("Unexpected error in receiving/scan:", e);
