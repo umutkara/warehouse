@@ -158,10 +158,11 @@ export default function UnitsListPage() {
 
   useEffect(() => {
     if (!selectedUnit?.id) return;
+    const unitId = selectedUnit.id;
     async function loadUnitDetails() {
       setLoadingUnit(true);
       try {
-        const res = await fetch(`/api/units/${selectedUnit.id}`, { cache: "no-store" });
+        const res = await fetch(`/api/units/${unitId}`, { cache: "no-store" });
         const json = await res.json();
         if (res.ok && json.unit) {
           const unit = json.unit as Unit;
