@@ -23,10 +23,24 @@ export default function OutPage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string>("guest");
 
   useEffect(() => {
     loadShipments();
+    loadRole();
   }, []);
+
+  async function loadRole() {
+    try {
+      const res = await fetch("/api/me", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok && json.role) {
+        setRole(json.role);
+      }
+    } catch {
+      setRole("guest");
+    }
+  }
 
   async function loadShipments() {
     setLoading(true);
@@ -103,20 +117,38 @@ export default function OutPage() {
         <h2 style={{ fontSize: 20, fontWeight: 600 }}>
           Активные отправки ({shipments.length})
         </h2>
-        <button
-          onClick={loadShipments}
-          disabled={loading}
-          style={{
-            padding: "var(--spacing-sm) var(--spacing-md)",
-            background: "#fff",
-            border: "1px solid #ddd",
-            borderRadius: "var(--radius-md)",
-            fontSize: 14,
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "Загрузка..." : "🔄 Обновить"}
-        </button>
+        <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
+          {role === "admin" && (
+            <button
+              onClick={() => router.push("/app/outbound/admin")}
+              style={{
+                padding: "var(--spacing-sm) var(--spacing-md)",
+                background: "#111827",
+                color: "#fff",
+                border: "1px solid #111827",
+                borderRadius: "var(--radius-md)",
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              🛠️ Админ панель
+            </button>
+          )}
+          <button
+            onClick={loadShipments}
+            disabled={loading}
+            style={{
+              padding: "var(--spacing-sm) var(--spacing-md)",
+              background: "#fff",
+              border: "1px solid #ddd",
+              borderRadius: "var(--radius-md)",
+              fontSize: 14,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Загрузка..." : "🔄 Обновить"}
+          </button>
+        </div>
       </div>
 
       {loading && shipments.length === 0 ? (

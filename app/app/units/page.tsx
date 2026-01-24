@@ -75,6 +75,12 @@ export default function UnitsListPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
   const [opsStatusFilter, setOpsStatusFilter] = useState<string>("all");
+  const [userRole, setUserRole] = useState<string>("guest");
+  const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
+  const [loadingUnit, setLoadingUnit] = useState(false);
+  const [opsStatus, setOpsStatus] = useState<string>("");
+  const [opsStatusComment, setOpsStatusComment] = useState<string>("");
+  const [savingOpsStatus, setSavingOpsStatus] = useState(false);
 
   // ⚡ OPTIMIZATION: Memoized load function
   const loadUnits = useCallback(async () => {
@@ -135,6 +141,43 @@ export default function UnitsListPage() {
     loadUnits();
   }, [loadUnits]);
 
+  useEffect(() => {
+    async function loadRole() {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        const json = await res.json();
+        if (res.ok && json.role) {
+          setUserRole(json.role);
+        }
+      } catch {
+        setUserRole("guest");
+      }
+    }
+    loadRole();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedUnit?.id) return;
+    async function loadUnitDetails() {
+      setLoadingUnit(true);
+      try {
+        const res = await fetch(`/api/units/${selectedUnit.id}`, { cache: "no-store" });
+        const json = await res.json();
+        if (res.ok && json.unit) {
+          const unit = json.unit as Unit;
+          setSelectedUnit(unit);
+          setOpsStatus(unit.meta?.ops_status || "");
+          setOpsStatusComment(unit.meta?.ops_status_comment || "");
+        }
+      } catch {
+        // ignore
+      } finally {
+        setLoadingUnit(false);
+      }
+    }
+    loadUnitDetails();
+  }, [selectedUnit?.id]);
+
   // ⚡ OPTIMIZATION: Memoized handlers
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -178,6 +221,59 @@ export default function UnitsListPage() {
       setError("Ошибка экспорта");
     }
   }, [ageFilter, statusFilter, searchQuery]);
+
+  const canEditOpsStatus = ["ops", "logistics", "admin", "head"].includes(userRole);
+
+  async function handleUpdateOpsStatus() {
+    if (!selectedUnit || !opsStatus) return;
+    setSavingOpsStatus(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/units/ops-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitId: selectedUnit.id,
+          status: opsStatus,
+          comment: opsStatusComment.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Ошибка обновления OPS статуса");
+        return;
+      }
+      setSelectedUnit((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          meta: {
+            ...prev.meta,
+            ops_status: opsStatus,
+            ops_status_comment: opsStatusComment.trim() || undefined,
+          },
+        };
+      });
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === selectedUnit.id
+            ? {
+                ...u,
+                meta: {
+                  ...u.meta,
+                  ops_status: opsStatus,
+                  ops_status_comment: opsStatusComment.trim() || undefined,
+                },
+              }
+            : u
+        )
+      );
+    } catch (e: any) {
+      setError(e.message || "Ошибка обновления OPS статуса");
+    } finally {
+      setSavingOpsStatus(false);
+    }
+  }
 
   // ⚡ OPTIMIZATION: Memoized helper function
   const formatAge = useCallback((hours: number): string => {
@@ -437,7 +533,7 @@ export default function UnitsListPage() {
               <tr
                 key={unit.id}
                 style={styles.tableRow}
-                onClick={() => router.push(`/app/units/${unit.id}`)}
+                onClick={() => setSelectedUnit(unit)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = "#f9fafb";
                 }}
@@ -534,6 +630,84 @@ export default function UnitsListPage() {
           </tbody>
         </table>
       </div>
+
+      {selectedUnit && (
+        <div style={styles.modalOverlay} onClick={() => setSelectedUnit(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div>
+                <div style={styles.modalTitle}>Заказ {selectedUnit.barcode}</div>
+                <div style={styles.modalSubtitle}>OPS статус</div>
+              </div>
+              <button style={styles.modalClose} onClick={() => setSelectedUnit(null)}>
+                ×
+              </button>
+            </div>
+
+            {loadingUnit ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>Загрузка...</div>
+            ) : (
+              <div style={{ padding: 20, display: "grid", gap: 12 }}>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  Текущий статус: <strong>{getOpsStatusText(selectedUnit.meta?.ops_status)}</strong>
+                </div>
+
+                {selectedUnit.meta?.ops_status_comment && (
+                  <div style={{ fontSize: 12, color: "#374151", background: "#f3f4f6", padding: 8, borderRadius: 6 }}>
+                    <strong>Комментарий:</strong> {selectedUnit.meta.ops_status_comment}
+                  </div>
+                )}
+
+                {canEditOpsStatus ? (
+                  <>
+                    <select
+                      value={opsStatus}
+                      onChange={(e) => setOpsStatus(e.target.value)}
+                      disabled={savingOpsStatus}
+                      style={styles.modalSelect}
+                    >
+                      <option value="">— Выберите статус —</option>
+                      {Object.entries(OPS_STATUS_LABELS).map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={opsStatusComment}
+                      onChange={(e) => setOpsStatusComment(e.target.value)}
+                      placeholder="Комментарий (опционально)"
+                      style={styles.modalTextarea}
+                      disabled={savingOpsStatus}
+                    />
+                    <button
+                      onClick={handleUpdateOpsStatus}
+                      disabled={savingOpsStatus || !opsStatus}
+                      style={{
+                        ...styles.modalSave,
+                        background: savingOpsStatus || !opsStatus ? "#e5e7eb" : "#2563eb",
+                        color: savingOpsStatus || !opsStatus ? "#6b7280" : "#fff",
+                        cursor: savingOpsStatus || !opsStatus ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {savingOpsStatus ? "Сохранение..." : "Сохранить"}
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>Нет прав на изменение OPS статуса.</div>
+                )}
+
+                <button
+                  onClick={() => router.push(`/app/units/${selectedUnit.id}`)}
+                  style={styles.modalDetails}
+                >
+                  Подробнее →
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -782,6 +956,77 @@ const styles = {
     fontSize: 16,
     fontWeight: 700,
     color: "#374151",
+  } as React.CSSProperties,
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.4)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  } as React.CSSProperties,
+  modal: {
+    background: "#fff",
+    borderRadius: 12,
+    width: "100%",
+    maxWidth: 520,
+    boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+  } as React.CSSProperties,
+  modalHeader: {
+    padding: "16px 20px",
+    borderBottom: "1px solid #e5e7eb",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  } as React.CSSProperties,
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+  } as React.CSSProperties,
+  modalSubtitle: {
+    fontSize: 12,
+    color: "#6b7280",
+  } as React.CSSProperties,
+  modalClose: {
+    border: "none",
+    background: "transparent",
+    fontSize: 20,
+    cursor: "pointer",
+    color: "#6b7280",
+  } as React.CSSProperties,
+  modalSelect: {
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid #e5e7eb",
+    fontSize: 13,
+  } as React.CSSProperties,
+  modalTextarea: {
+    width: "100%",
+    minHeight: 80,
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid #e5e7eb",
+    fontSize: 13,
+    fontFamily: "inherit",
+  } as React.CSSProperties,
+  modalSave: {
+    padding: "8px 12px",
+    border: "none",
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  modalDetails: {
+    padding: "8px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 6,
+    background: "#fff",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    justifySelf: "start",
   } as React.CSSProperties,
   merchantRejectionBadge: {
     padding: "2px 8px",
