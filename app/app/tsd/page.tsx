@@ -613,12 +613,13 @@ export default function TsdPage() {
       setShippingNewTasks(tasks);
       
       // Загружаем ячейки с описаниями
+      let cellsMap = shippingNewCells;
       const cellsRes = await fetch("/api/cells/list", { cache: "no-store" });
       const cellsJson = await cellsRes.json();
       
       if (cellsRes.ok) {
         const cells = cellsJson.cells || [];
-        const cellsMap = new Map<string, { code: string; description?: string; meta?: any }>();
+        cellsMap = new Map<string, { code: string; description?: string; meta?: any }>();
         
         cells.forEach((cell: any) => {
           if (cell.cell_type === "picking") {
@@ -972,10 +973,10 @@ export default function TsdPage() {
         // Определяем, куда записать (FROM или TO)
         if (!fromCell) {
           // Первый скан - FROM
-          // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping
-          const allowedFromTypes = ['bin', 'storage', 'shipping'];
+          // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping, rejected
+          const allowedFromTypes = ['bin', 'storage', 'shipping', 'rejected'];
           if (!allowedFromTypes.includes(cellInfo.cell_type)) {
-            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING`);
+            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, REJECTED`);
             setScanValue("");
             return;
           }
@@ -1045,6 +1046,15 @@ export default function TsdPage() {
           }
         }
 
+        // ⭐ ПРОВЕРКИ для FROM = REJECTED
+        if (fromCell.cell_type === 'rejected') {
+          if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
+            setScanValue("");
+            return;
+          }
+        }
+
         // Добавляем в массив
         setUnits([...units, unitInfo]);
         setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
@@ -1063,19 +1073,21 @@ export default function TsdPage() {
     // Матрица разрешенных перемещений:
     // BIN → STORAGE ✅
     // BIN → SHIPPING ✅
+    // BIN → REJECTED ✅
     // STORAGE → SHIPPING ✅
     // STORAGE → STORAGE ✅ (обратная совместимость)
     // SHIPPING → STORAGE ✅
     // SHIPPING → SHIPPING ✅ (обратная совместимость)
+    // REJECTED → REJECTED ✅
     // Всё остальное ❌
 
     if (fromType === 'bin') {
-      if (toType === 'storage' || toType === 'shipping') {
+      if (toType === 'storage' || toType === 'shipping' || toType === 'rejected') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из BIN можно переместить только в STORAGE или SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из BIN можно переместить только в STORAGE, SHIPPING или REJECTED. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
@@ -1096,6 +1108,16 @@ export default function TsdPage() {
       return { 
         valid: false, 
         error: `Из SHIPPING можно переместить только в STORAGE или другую SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+      };
+    }
+
+    if (fromType === 'rejected') {
+      if (toType === 'rejected') {
+        return { valid: true };
+      }
+      return {
+        valid: false,
+        error: `Из REJECTED можно переместить только в REJECTED. Выбрано: ${toType.toUpperCase()}`
       };
     }
 
