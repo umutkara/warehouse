@@ -176,6 +176,8 @@ export async function POST(req: Request) {
     let matched = 0;
     let notFound = 0;
 
+    const SCENARIO_FROM = "Склад Возвратов";
+
     for (const row of rows) {
       const rowIndex = row.rowIndex ?? 0;
       const orderValue = String(row.order ?? "").trim();
@@ -231,7 +233,15 @@ export async function POST(req: Request) {
       }
 
       const creatorName = profile.full_name || userData.user.email || "Unknown";
-      const scenarioValue = scenario || destination;
+      let scenarioValue = scenario || destination;
+      if (destination) {
+        const hasArrow = scenarioValue.includes("→");
+        if (!hasArrow) {
+          scenarioValue = scenario
+            ? `${SCENARIO_FROM} → ${destination} → ${scenario}`
+            : `${SCENARIO_FROM} → ${destination}`;
+        }
+      }
 
       const taskToInsert = {
         warehouse_id: profile.warehouse_id,
