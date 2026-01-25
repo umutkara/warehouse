@@ -104,7 +104,7 @@ export default function WarehouseMapPage() {
   const [cells, setCells] = useState<Cell[]>([]);
   const [role, setRole] = useState<string>("guest");
   const [newCode, setNewCode] = useState("");
-  const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping">("storage");
+  const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping" | "surplus" | "rejected">("storage");
   const [selectedCell, setSelectedCell] = useState<any>(null);
   const [unassigned, setUnassigned] = useState<any[]>([]);
   const [cellUnits, setCellUnits] = useState<any[]>([]);
@@ -119,15 +119,14 @@ export default function WarehouseMapPage() {
   const [moveMsg, setMoveMsg] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [zoneStats, setZoneStats] = useState<any>(null);
-  const ZONES: Zone[] = ["receiving", "bin", "storage", "shipping", "transfer", "rejected"];
+  const ZONES: Zone[] = ["bin", "storage", "shipping", "rejected", "surplus"];
 
   const ZONE_LABEL: Record<string, string> = {
-    receiving: "Приёмка",
     bin: "Сортировка",
     storage: "Хранение",
     shipping: "Отгрузка",
-    transfer: "Передача",
     rejected: "Отклонённые",
+    surplus: "Излишки",
   };
 
   const zoneFilters = useUIStore((state) => state.zoneFilters);
@@ -386,17 +385,44 @@ export default function WarehouseMapPage() {
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ fontSize: 12, color: "#666" }}>Сводка:</div>
 
-          <StatPill label="Приёмка" value={zoneStats?.counts?.receiving} onClick={() => setOnlyZone("receiving")} />
           <StatPill label="Сортировка" value={zoneStats?.counts?.bin} onClick={() => setOnlyZone("bin")} />
           <StatPill label="Хранение" value={zoneStats?.counts?.storage} onClick={() => setOnlyZone("storage")} />
           <StatPill label="Отгрузка" value={zoneStats?.counts?.shipping} onClick={() => setOnlyZone("shipping")} />
-          <StatPill label="Передача" value={zoneStats?.counts?.transfer} onClick={() => setOnlyZone("transfer")} />
           <StatPill label="Отклонённые" value={zoneStats?.counts?.rejected} onClick={() => setOnlyZone("rejected")} />
+          <StatPill label="Излишки" value={zoneStats?.counts?.surplus} onClick={() => setOnlyZone("surplus")} />
 
           <StatPill label="Не размещено" value={zoneStats?.unplaced} />
           <StatPill label="Всего" value={zoneStats?.total} />
         </div>
 
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 16 }}>
+          {ZONES.map((zone) => (
+            <div
+              key={zone}
+              onClick={() => setOnlyZone(zone)}
+              style={{
+                padding: 16,
+                background: "#fff",
+                borderRadius: 12,
+                border: "2px solid #e5e7eb",
+                cursor: "pointer",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 14, color: "#6b7280" }}>{ZONE_LABEL[zone]}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#111827" }}>
+                  {zoneStats?.counts?.[zone] ?? "-"}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af" }}>Открыть →</div>
+            </div>
+          ))}
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           {ZONES.map((z) => (
             <label 
@@ -472,6 +498,7 @@ export default function WarehouseMapPage() {
             <option value="picking">Picking</option>
             <option value="shipping">Shipping</option>
             <option value="surplus">Surplus</option>
+            <option value="rejected">Rejected</option>
           </select>
           <button
             onClick={async () => {
@@ -669,19 +696,24 @@ export default function WarehouseMapPage() {
           </div>
         ))}
       </div>
+
       </div>
 
       {selectedCell && (
-        <div 
-          style={{ 
-            width: 420, 
-            borderLeft: "1px solid #e5e7eb", 
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            height: "100vh",
+            width: 420,
+            borderLeft: "1px solid #e5e7eb",
             background: "linear-gradient(to bottom, #f9fafb 0%, #ffffff 100%)",
             display: "flex",
             flexDirection: "column",
-            maxHeight: "100%",
             overflow: "hidden",
-            boxShadow: "-4px 0 12px rgba(0,0,0,0.05)",
+            boxShadow: "-8px 0 24px rgba(0,0,0,0.12)",
+            zIndex: 50,
           }}
         >
           {/* Header */}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
-type Zone = "receiving" | "bin" | "storage" | "shipping" | "transfer" | "rejected";
+type Zone = "bin" | "storage" | "shipping" | "rejected" | "surplus";
 
 export async function GET() {
   const supabase = await supabaseServer();
@@ -59,12 +59,11 @@ export async function GET() {
   }
 
   const counts: Record<Zone, number> = {
-    receiving: 0,
     bin: 0,
     storage: 0,
     shipping: 0,
-    transfer: 0,
     rejected: 0,
+    surplus: 0,
   };
 
   let unplaced = 0;

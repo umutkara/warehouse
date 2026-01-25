@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
 import { Alert, Button } from "@/lib/ui/components";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 // ⚡ Force dynamic for real-time TSD operations
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,7 @@ type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" |
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
   const [scanValue, setScanValue] = useState("");
+  const supabase = useMemo(() => supabaseBrowser(), []);
   
   // Для режима Приемка
   const [binCell, setBinCell] = useState<CellInfo | null>(null);
@@ -100,6 +102,7 @@ export default function TsdPage() {
   
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [opsHint, setOpsHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -218,6 +221,81 @@ export default function TsdPage() {
     setCurrentStepIndex(0); // Не используется в новой логике, но оставим для совместимости
   }
   
+  function buildMergedTaskForTarget(
+    targetCellId: string,
+    tasks: any[],
+    cellsMap: Map<string, { code: string; description?: string; meta?: any }>
+  ) {
+    const allUnits: UnitInfo[] = [];
+    const fromCellsMap = new Map<string, { id: string; code: string; cell_type: string; units: any[] }>();
+
+    tasks.forEach((task: any) => {
+      (task.units || []).forEach((unit: any) => {
+        const isAlreadyMoved = unit.status === "picking" || unit.cell_id === targetCellId;
+        if (isAlreadyMoved) return;
+
+        const fromCellId = unit.from_cell_id || unit.cell_id;
+        if (!fromCellId) return;
+
+        allUnits.push({
+          id: unit.id,
+          barcode: unit.barcode,
+          cell_id: unit.cell_id,
+          from_cell_id: unit.from_cell_id,
+          cell: unit.cell,
+          from_cell: unit.from_cell,
+        });
+
+        if (!fromCellsMap.has(fromCellId)) {
+          const fromCell = unit.from_cell || unit.cell;
+          fromCellsMap.set(fromCellId, {
+            id: fromCellId,
+            code: fromCell?.code || "?",
+            cell_type: fromCell?.cell_type || "?",
+            units: [],
+          });
+        }
+        fromCellsMap.get(fromCellId)!.units.push(unit);
+      });
+    });
+
+    const targetCellInfo = cellsMap.get(targetCellId);
+    if (!targetCellInfo) return null;
+
+    return {
+      mergedTask: {
+        targetCellId,
+        targetCell: {
+          id: targetCellId,
+          code: targetCellInfo.code,
+          cell_type: "picking",
+        },
+        tasks,
+        allUnits,
+        fromCells: Array.from(fromCellsMap.values()),
+        totalUnitCount: allUnits.length,
+      },
+      allUnits,
+      fromCells: Array.from(fromCellsMap.values()),
+    };
+  }
+
+  function applyMergedTaskState(
+    mergedTask: any,
+    allUnits: UnitInfo[],
+    fromCells: Array<{ id: string; code: string; cell_type: string; units: any[] }>,
+    preserveFromCellId?: string
+  ) {
+    setCurrentTaskNew(mergedTask);
+    setShippingNewAllUnits(allUnits);
+    setShippingNewFromCells(fromCells);
+    setShippingNewSelectedFromCell(
+      preserveFromCellId ? fromCells.find((c) => c.id === preserveFromCellId) || null : null
+    );
+    setShippingNewScannedUnits((prev) => prev.filter((u) => allUnits.some((au) => au.id === u.id)));
+    setShippingNewToCell(null);
+  }
+
   // Выбор объединенной задачи в новом режиме (по picking ячейке)
   async function handleSelectTaskNew(targetCellId: string, tasks: any[]) {
     setError(null);
@@ -225,75 +303,14 @@ export default function TsdPage() {
     setBusy(true);
     
     try {
-      // Объединяем все задачи для одной picking ячейки
-      // Собираем все заказы из всех задач
-      const allUnits: UnitInfo[] = [];
-      const fromCellsMap = new Map<string, { id: string; code: string; cell_type: string; units: any[] }>();
-      
-      tasks.forEach((task: any) => {
-        // Берем задачу в работу (если еще не взята)
-        if (task.status === "open") {
-          // Будем брать в работу при первом сканировании
-        }
-        
-        // Собираем все units из задачи
-        (task.units || []).forEach((unit: any) => {
-          const fromCellId = unit.from_cell_id || unit.cell_id;
-          if (!fromCellId) return;
-          
-          // Добавляем unit в общий список
-          allUnits.push({
-            id: unit.id,
-            barcode: unit.barcode,
-            cell_id: unit.cell_id,
-            from_cell_id: unit.from_cell_id,
-            cell: unit.cell,
-            from_cell: unit.from_cell,
-          });
-          
-          // Группируем по from-ячейкам
-          if (!fromCellsMap.has(fromCellId)) {
-            const fromCell = unit.from_cell || unit.cell;
-            fromCellsMap.set(fromCellId, {
-              id: fromCellId,
-              code: fromCell?.code || "?",
-              cell_type: fromCell?.cell_type || "?",
-              units: [],
-            });
-          }
-          fromCellsMap.get(fromCellId)!.units.push(unit);
-        });
-      });
-      
-      // Получаем информацию о TO ячейке (picking)
-      const targetCellInfo = shippingNewCells.get(targetCellId);
-      if (!targetCellInfo) {
+      const merged = buildMergedTaskForTarget(targetCellId, tasks, shippingNewCells);
+      if (!merged) {
         setError("Информация о picking ячейке не найдена");
         return;
       }
-      
-      // Создаем объединенную задачу
-      const mergedTask = {
-        targetCellId,
-        targetCell: {
-          id: targetCellId,
-          code: targetCellInfo.code,
-          cell_type: "picking",
-        },
-        tasks, // Все исходные задачи
-        allUnits,
-        fromCells: Array.from(fromCellsMap.values()),
-        totalUnitCount: allUnits.length,
-      };
-      
-      setCurrentTaskNew(mergedTask);
-      setShippingNewAllUnits(allUnits);
-      setShippingNewFromCells(Array.from(fromCellsMap.values()));
-      setShippingNewSelectedFromCell(null);
-      setShippingNewScannedUnits([]);
-      setShippingNewToCell(null);
-      
-      setSuccess(`✓ Выбрана задача: ${targetCellInfo.code}${targetCellInfo.description ? ` (${targetCellInfo.description})` : ""} - ${tasks.length} ${tasks.length === 1 ? "задача" : "задач"}, ${allUnits.length} ${allUnits.length === 1 ? "заказ" : "заказов"}`);
+
+      applyMergedTaskState(merged.mergedTask, merged.allUnits, merged.fromCells);
+      setSuccess(`✓ Выбрана задача: ${merged.mergedTask.targetCell.code}${shippingNewCells.get(targetCellId)?.description ? ` (${shippingNewCells.get(targetCellId)?.description})` : ""} - ${tasks.length} ${tasks.length === 1 ? "задача" : "задач"}, ${merged.allUnits.length} ${merged.allUnits.length === 1 ? "заказ" : "заказов"}`);
     } catch (e: any) {
       setError(e.message || "Ошибка выбора задачи");
     } finally {
@@ -397,6 +414,27 @@ export default function TsdPage() {
         return;
       }
       
+      // Перемещаем заказ сразу в picking (целевую TO ячейку)
+      const moveRes = await fetch("/api/units/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitId: unit.id,
+          toCellId: currentTaskNew.targetCell.id,
+          toStatus: "picking",
+        }),
+      });
+
+      if (moveRes.status === 423) {
+        setInventoryError("⚠️ ИНВЕНТАРИЗАЦИЯ АКТИВНА. ПЕРЕМЕЩЕНИЯ ЗАБЛОКИРОВАНЫ.");
+        throw new Error("Инвентаризация активна");
+      }
+
+      if (!moveRes.ok) {
+        const json = await moveRes.json().catch(() => ({}));
+        throw new Error(json.error || `Ошибка перемещения заказа ${barcode}`);
+      }
+
       // Добавляем в отсканированные
       const unitInfo: UnitInfo = {
         id: unit.id,
@@ -406,7 +444,7 @@ export default function TsdPage() {
         cell: unit.cell,
         from_cell: unit.from_cell,
       };
-      
+
       const updatedScanned = [...shippingNewScannedUnits, unitInfo];
       setShippingNewScannedUnits(updatedScanned);
       
@@ -422,8 +460,11 @@ export default function TsdPage() {
           setShippingNewSelectedFromCell(null);
         }, 2000);
       } else {
-        setSuccess(`✓ ${barcode} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
+        setSuccess(`✓ ${barcode} перемещен в ${currentTaskNew.targetCell.code} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
       }
+      showOpsHintForUnit(barcode);
+
+      loadShippingNewTasks();
       
       setScanValue("");
     } catch (e: any) {
@@ -459,8 +500,8 @@ export default function TsdPage() {
         return;
       }
       
-      // Перемещаем все отсканированные заказы в TO ячейку
-      const movedUnitIds = shippingNewScannedUnits.map((u) => u.id);
+    // Заказы уже перемещены в picking во время сканирования
+    const movedUnitIds = shippingNewScannedUnits.map((u) => u.id);
       
       // Завершаем каждую задачу отдельно
       const taskResults = [];
@@ -470,23 +511,6 @@ export default function TsdPage() {
         const movedInThisTask = movedUnitIds.filter((id) => taskUnitIds.includes(id));
         
         if (movedInThisTask.length === 0) continue;
-        
-        // Перемещаем заказы в TO ячейку
-        for (const unitId of movedInThisTask) {
-          const moveRes = await fetch("/api/units/move", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              unitId,
-              toCellId: toCellInfo.id,
-            }),
-          });
-          
-          if (!moveRes.ok) {
-            const json = await moveRes.json().catch(() => ({}));
-            throw new Error(json.error || `Ошибка перемещения заказа ${unitId}`);
-          }
-        }
         
         // Завершаем задачу
         const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
@@ -571,7 +595,7 @@ export default function TsdPage() {
       setLoadingTasks(false);
     }
   }
-  
+
   // Загрузка задач для нового режима с группировкой по picking ячейкам
   async function loadShippingNewTasks() {
     setLoadingTasksNew(true);
@@ -623,6 +647,24 @@ export default function TsdPage() {
       });
       
       setShippingNewGrouped(grouped);
+
+      if (currentTaskNew?.targetCellId) {
+        const tasksForTarget = grouped.get(currentTaskNew.targetCellId) || [];
+        if (tasksForTarget.length === 0) {
+          setCurrentTaskNew(null);
+          setShippingNewFromCells([]);
+          setShippingNewSelectedFromCell(null);
+          setShippingNewScannedUnits([]);
+          setShippingNewToCell(null);
+          setShippingNewAllUnits([]);
+          return;
+        }
+
+        const merged = buildMergedTaskForTarget(currentTaskNew.targetCellId, tasksForTarget, cellsMap);
+        if (merged) {
+          applyMergedTaskState(merged.mergedTask, merged.allUnits, merged.fromCells, shippingNewSelectedFromCell?.id);
+        }
+      }
     } catch (e) {
       console.error("Failed to load shipping tasks (new):", e);
       setError("Ошибка загрузки задач");
@@ -630,6 +672,38 @@ export default function TsdPage() {
       setLoadingTasksNew(false);
     }
   }
+
+  const loadShippingNewTasksRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    loadShippingNewTasksRef.current = loadShippingNewTasks;
+  }, [loadShippingNewTasks]);
+
+  useEffect(() => {
+    if (mode !== "shipping_new") return;
+
+    const channel = supabase
+      .channel("tsd-shipping-new")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "picking_tasks" },
+        () => loadShippingNewTasksRef.current()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "picking_task_units" },
+        () => loadShippingNewTasksRef.current()
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "units" },
+        () => loadShippingNewTasksRef.current()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [mode, supabase]);
 
   async function loadInventoryTasks() {
     setLoadingInventoryTasks(true);
@@ -780,6 +854,18 @@ export default function TsdPage() {
     }
   }
 
+  async function showOpsHintForUnit(barcode: string) {
+    try {
+      const res = await fetch(`/api/tsd/unit-ops-info?barcode=${encodeURIComponent(barcode)}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      const opsStatus = json?.ops_status_label || "нет";
+      const scenario = json?.scenario || "нет";
+      setOpsHint(`OPS статус: ${opsStatus}. Сценарий: ${scenario}.`);
+    } catch {
+      setOpsHint("OPS статус: нет. Сценарий: нет.");
+    }
+  }
+
   // ============================================
   // РЕЖИМ ПРИЕМКА
   // ============================================
@@ -845,6 +931,7 @@ export default function TsdPage() {
 
         // Успех
         setSuccess(`${parsed.code} -> ${binCell.code} OK`);
+        showOpsHintForUnit(parsed.code);
         setLastReceivedUnit({ barcode: parsed.code, binCode: binCell.code });
         setScanValue("");
         // BIN/REJECTED оставляем выбранным для приёма пачки
@@ -961,6 +1048,7 @@ export default function TsdPage() {
         // Добавляем в массив
         setUnits([...units, unitInfo]);
         setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
+        showOpsHintForUnit(unitInfo.barcode);
       }
     } catch (e: any) {
       setError(e.message || "Ошибка обработки скана");
@@ -1798,6 +1886,7 @@ export default function TsdPage() {
           toCell: checkJson.toCell,
         });
         setSuccess(`✓ Заказ ${barcode} найден в задаче. TO ячейка: ${checkJson.toCell.code}${checkJson.toCell.description ? ` (${checkJson.toCell.description})` : ""}`);
+        showOpsHintForUnit(barcode);
         setScanValue("");
         return;
       }
@@ -2187,6 +2276,41 @@ export default function TsdPage() {
           {success && (
             <div style={{ marginTop: "var(--spacing-sm)" }}>
               <Alert variant="success">{success}</Alert>
+            </div>
+          )}
+          {opsHint && (
+            <div
+              style={{
+                marginTop: "var(--spacing-sm)",
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid #93c5fd",
+                background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)",
+                color: "#1e3a8a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>ℹ️</span>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{opsHint}</div>
+              </div>
+              <button
+                onClick={() => setOpsHint(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#1d4ed8",
+                  fontSize: 18,
+                  cursor: "pointer",
+                  lineHeight: 1,
+                }}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
             </div>
           )}
         </div>
