@@ -154,7 +154,22 @@ export default function WarehouseMapPage() {
       setErr(j.error ?? "Ошибка загрузки");
       return;
     }
-    setCells(j.cells ?? []);
+    const cellsList = j.cells ?? [];
+    const overlapGroups = new Map<string, any[]>();
+    cellsList.forEach((c: any) => {
+      const key = `${c.x}|${c.y}`;
+      if (!overlapGroups.has(key)) overlapGroups.set(key, []);
+      overlapGroups.get(key)!.push(c);
+    });
+    const adjustedCells = cellsList.map((c: any) => {
+      const key = `${c.x}|${c.y}`;
+      const group = overlapGroups.get(key) || [];
+      if (group.length <= 1) return c;
+      const idx = group.findIndex((g: any) => g.id === c.id);
+      const offset = 8 * idx;
+      return { ...c, x: c.x + offset, y: c.y + offset };
+    });
+    setCells(adjustedCells);
   }, []);
 
   const loadUnassigned = useCallback(async () => {

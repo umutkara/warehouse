@@ -56,12 +56,40 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: shipmentsError.message }, { status: 400 });
   }
 
+
   // Get unit info
   const unitIds = shipments?.map(s => s.unit_id) || [];
   const { data: units } = await supabaseAdmin
     .from("units")
     .select("id, barcode")
     .in("id", unitIds);
+
+  const missingUnitIds = unitIds.filter((id) => !units?.some((u) => u.id === id));
+
+  let auditBarcodeMap = new Map<string, string>();
+  if (missingUnitIds.length > 0) {
+    const chunkSize = 200;
+
+    for (let i = 0; i < missingUnitIds.length; i += chunkSize) {
+      const chunk = missingUnitIds.slice(i, i + chunkSize);
+      const { data: auditEvents } = await supabaseAdmin
+        .from("audit_events")
+        .select("entity_id, meta, created_at, action")
+        .in("entity_id", chunk)
+        .eq("entity_type", "unit")
+        .eq("action", "logistics.ship_out")
+        .order("created_at", { ascending: false });
+
+      if (auditEvents) {
+        auditEvents.forEach((evt: any) => {
+          const barcode = evt?.meta?.unit_barcode;
+          if (evt?.entity_id && barcode && !auditBarcodeMap.has(evt.entity_id)) {
+            auditBarcodeMap.set(evt.entity_id, barcode);
+          }
+        });
+      }
+    }
+  }
 
   const unitsMap = new Map(units?.map(u => [u.id, u]) || []);
 
@@ -83,10 +111,13 @@ export async function GET(req: Request) {
   // Enrich shipments
   const enrichedShipments = (shipments || []).map(s => ({
     ...s,
-    unit: unitsMap.get(s.unit_id) || null,
+    unit: unitsMap.get(s.unit_id) || (auditBarcodeMap.has(s.unit_id)
+      ? { id: s.unit_id, barcode: auditBarcodeMap.get(s.unit_id) }
+      : null),
     out_by_profile: profilesMap.get(s.out_by) || null,
     returned_by_profile: s.returned_by ? profilesMap.get(s.returned_by) : null,
   }));
+
 
   return NextResponse.json({
     ok: true,

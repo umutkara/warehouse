@@ -33,7 +33,7 @@ type UnitInfo = {
   };
 };
 
-type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "shipping_fcutc" | "surplus";
+type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "shipping_fcutc" | "surplus" | "info";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
@@ -99,6 +99,12 @@ export default function TsdPage() {
   const [shippingUnits, setShippingUnits] = useState<UnitInfo[]>([]); // Массив отсканированных заказов
   const [shippingToCell, setShippingToCell] = useState<CellInfo | null>(null);
   const [loadingTasks, setLoadingTasks] = useState(false);
+
+  // Для режима Информация о заказе
+  const [infoUnit, setInfoUnit] = useState<{ unit: any; cell: any } | null>(null);
+  const [infoOps, setInfoOps] = useState<{ ops_status?: string; ops_status_label?: string; scenario?: string } | null>(null);
+  const [infoHistory, setInfoHistory] = useState<any[]>([]);
+  const [infoLoading, setInfoLoading] = useState(false);
   
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -777,6 +783,8 @@ export default function TsdPage() {
         handleFcutcScan();
       } else if (mode === "surplus") {
         handleSurplusScan();
+      } else if (mode === "info") {
+        handleInfoScan();
       }
     }
   }
@@ -1774,6 +1782,72 @@ export default function TsdPage() {
     }
   }
 
+  // ============================================
+  // РЕЖИМ ИНФОРМАЦИЯ О ЗАКАЗЕ
+  // ============================================
+  async function handleInfoScan() {
+    const parsed = parseScan(scanValue);
+    if (!parsed) {
+      setError("Некорректный скан");
+      setScanValue("");
+      return;
+    }
+
+    if (parsed.type !== "unit") {
+      setError("Сканируйте штрихкод заказа");
+      setScanValue("");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setInfoLoading(true);
+    setBusy(true);
+
+    try {
+      const unitRes = await fetch(`/api/units/find?barcode=${encodeURIComponent(parsed.code)}`, { cache: "no-store" });
+      const unitJson = await unitRes.json().catch(() => ({}));
+      if (!unitRes.ok) {
+        setError(unitJson.error || "Заказ не найден");
+        return;
+      }
+
+      setInfoUnit({ unit: unitJson.unit, cell: unitJson.cell });
+
+      const opsRes = await fetch(`/api/tsd/unit-ops-info?barcode=${encodeURIComponent(parsed.code)}`, { cache: "no-store" });
+      const opsJson = await opsRes.json().catch(() => ({}));
+      if (opsRes.ok) {
+        setInfoOps({
+          ops_status: opsJson?.ops_status,
+          ops_status_label: opsJson?.ops_status_label,
+          scenario: opsJson?.scenario,
+        });
+      } else {
+        setInfoOps(null);
+      }
+
+      if (unitJson.unit?.id) {
+        const historyRes = await fetch(`/api/units/${unitJson.unit.id}/history`, { cache: "no-store" });
+        const historyJson = await historyRes.json().catch(() => ({}));
+        if (historyRes.ok && historyJson.ok) {
+          setInfoHistory(historyJson.history || []);
+        } else {
+          setInfoHistory([]);
+        }
+      } else {
+        setInfoHistory([]);
+      }
+
+      setSuccess(`Информация по заказу ${unitJson.unit?.barcode || parsed.code}`);
+    } catch (e: any) {
+      setError(e.message || "Ошибка загрузки информации");
+    } finally {
+      setInfoLoading(false);
+      setBusy(false);
+      setScanValue("");
+    }
+  }
+
   // Подтверждение приемки излишков (массовое размещение в surplus ячейку)
   async function handleConfirmSurplus() {
     if (!surplusCell || surplusUnits.length === 0) {
@@ -2068,6 +2142,11 @@ export default function TsdPage() {
     } else if (mode === "surplus") {
       setSurplusCell(null);
       setSurplusUnits([]);
+    } else if (mode === "info") {
+      setInfoUnit(null);
+      setInfoOps(null);
+      setInfoHistory([]);
+      setInfoLoading(false);
     }
     setError(null);
     setSuccess(null);
@@ -2260,6 +2339,15 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Излишки
+          </Button>
+          <Button
+            variant={mode === "info" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("info")}
+            fullWidth
+            style={{ flex: 1, minWidth: 100 }}
+          >
+            Информация
           </Button>
         </div>
 
@@ -3078,6 +3166,115 @@ export default function TsdPage() {
                 </div>
               ) : (
                 <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Режим ИНФОРМАЦИЯ О ЗАКАЗЕ */}
+        {mode === "info" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            <div
+              style={{
+                padding: 16,
+                background: "#f5f5f5",
+                borderRadius: 8,
+                border: "2px solid #ddd",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                Информация о заказе
+              </div>
+              {infoLoading ? (
+                <div style={{ fontSize: 14, color: "#6b7280" }}>Загрузка...</div>
+              ) : infoUnit ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>
+                    📦 {infoUnit.unit?.barcode || "—"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>
+                    Ячейка: {infoUnit.cell ? `${infoUnit.cell.code} (${infoUnit.cell.cell_type})` : "не размещён"}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 14, color: "#6b7280" }}>
+                  Отсканируйте заказ, чтобы увидеть информацию
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: 16,
+                background: "#e8f5e9",
+                borderRadius: 8,
+                border: "2px solid #4caf50",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#2e7d32", marginBottom: 8 }}>
+                OPS статус
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {infoOps?.ops_status_label || "нет"}
+              </div>
+              <div style={{ fontSize: 12, color: "#2e7d32", marginTop: 4 }}>
+                Сценарий: {infoOps?.scenario || "нет"}
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: 16,
+                background: "#fff",
+                borderRadius: 8,
+                border: "2px solid #e5e7eb",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
+                История
+              </div>
+              {infoHistory.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9ca3af" }}>История пуста</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                  {infoHistory.slice(0, 10).map((evt: any, idx: number) => {
+                    const date = evt.created_at
+                      ? new Date(evt.created_at).toLocaleString("ru-RU")
+                      : "";
+                    const details =
+                      evt.summary ||
+                      evt.details?.note ||
+                      evt.details?.status ||
+                      evt.details?.target_cell ||
+                      evt.details?.scenario ||
+                      "";
+                    return (
+                      <div
+                        key={`${evt.event_type || "event"}-${idx}`}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #e5e7eb",
+                          background: "#fafafa",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>
+                          {evt.event_type || "Событие"}
+                        </div>
+                        {details && (
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                            {details}
+                          </div>
+                        )}
+                        {date && (
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+                            {date}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
