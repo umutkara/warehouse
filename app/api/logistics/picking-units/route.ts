@@ -68,24 +68,32 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: unitsError.message }, { status: 400 });
   }
 
+  const unitIds = units?.map(u => u.id) || [];
+  const { data: shipped, error: shippedError } = await supabaseAdmin
+    .from("outbound_shipments")
+    .select("unit_id, status")
+    .in("unit_id", unitIds)
+    .eq("status", "out");
+
+  const shippedSet = new Set((shipped || []).map(s => s.unit_id));
+  const filteredUnits = (units || []).filter(u => !shippedSet.has(u.id));
+
   // Create cells map for quick lookup
   const cellsMap = new Map(pickingCells?.map(c => [c.id, c]) || []);
 
   // Get picking_tasks info to show scenario (read-only for logistics)
   // After migration, units are linked via picking_task_units junction table
-  const unitIds = units?.map(u => u.id) || [];
-  
   // First, get picking_task_units to find which tasks contain these units
   const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
     .from("picking_task_units")
     .select("unit_id, picking_task_id")
-    .in("unit_id", unitIds);
+    .in("unit_id", filteredUnits.map(u => u.id));
   
   // Also check legacy unit_id field for old tasks (any status - unit is already in picking)
   const { data: legacyTasks, error: legacyTasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select("unit_id, scenario, status")
-    .in("unit_id", unitIds)
+    .in("unit_id", filteredUnits.map(u => u.id))
     .eq("warehouse_id", profile.warehouse_id);
   
   // Get task IDs from picking_task_units
@@ -104,7 +112,7 @@ export async function GET(req: Request) {
   const legacyTasksMap = new Map(legacyTasks?.map(t => [t.unit_id, t]) || []);
 
   // Enrich units with cell and scenario info
-  const enrichedUnits = (units || []).map(u => {
+  const enrichedUnits = (filteredUnits || []).map(u => {
     // Try new format first (via picking_task_units)
     const taskId = taskUnitsMap.get(u.id);
     const task = taskId ? tasksMap.get(taskId) : null;

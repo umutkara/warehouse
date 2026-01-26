@@ -34,6 +34,7 @@ export default function OutboundAdminPage() {
   const [moveBarcode, setMoveBarcode] = useState<string>("");
   const [moveCellCode, setMoveCellCode] = useState<string>("");
   const [clearBarcode, setClearBarcode] = useState<string>("");
+  const [clearPickingNote, setClearPickingNote] = useState<string>("");
   const [bulkCellCode, setBulkCellCode] = useState<string>("");
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ updated: number; errors: Array<{ barcode: string; message: string }> } | null>(null);
@@ -146,6 +147,31 @@ export default function OutboundAdminPage() {
       setClearBarcode("");
     } catch (e: any) {
       setError(e.message || "Ошибка очистки ячейки");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleClearPicking() {
+    if (!confirm("Очистить все picking ячейки? Все заказы будут сняты с ячеек.")) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/units/clear-picking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: clearPickingNote }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка очистки picking ячеек");
+        return;
+      }
+      setClearPickingNote("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка очистки picking ячеек");
     } finally {
       setLoading(false);
     }
@@ -284,6 +310,36 @@ export default function OutboundAdminPage() {
             }}
           >
             {loading ? "Обновление..." : "Применить"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Очистить все picking ячейки</div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+          Снимает все заказы с picking ячеек (cell_id = null, статус = receiving).
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <input
+            placeholder="Комментарий (опционально)"
+            value={clearPickingNote}
+            onChange={(e) => setClearPickingNote(e.target.value)}
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <button
+            onClick={handleClearPicking}
+            disabled={loading}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 6,
+              border: "1px solid #fca5a5",
+              background: "#fef2f2",
+              color: "#b91c1c",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Очистить picking
           </button>
         </div>
       </div>

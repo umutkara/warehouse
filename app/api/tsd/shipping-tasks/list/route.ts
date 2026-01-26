@@ -120,6 +120,13 @@ export async function GET(req: Request) {
     });
   });
 
+  const fullyPickedTasks = sortedTasks.filter((t: any) => {
+    const units = unitsMap.get(t.id) || [];
+    if (units.length === 0) return false;
+    const targetId = t.target_picking_cell_id;
+    return units.every((u: any) => u.status === "picking" || (targetId && u.cell_id === targetId));
+  });
+
   // Get all cell IDs we need
   const unitCellIds: string[] = [];
   const fromCellIds: string[] = [];
@@ -147,13 +154,18 @@ export async function GET(req: Request) {
     });
   }
 
-  // Format response
-  const formattedTasks = sortedTasks.map((task: any) => {
+  const fullyPickedIds = new Set(fullyPickedTasks.map((t: any) => t.id));
+
+  // Format response (hide fully picked tasks)
+  const formattedTasks = sortedTasks
+    .filter((task: any) => !fullyPickedIds.has(task.id))
+    .flatMap((task: any) => {
     const units = unitsMap.get(task.id) || [];
+    const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;
 
     // Get unique from cells for this task
-    const fromCells = [...new Set(units.map((u: any) => u.from_cell_id || u.cell_id).filter(Boolean))]
+    const fromCells = [...new Set(activeUnits.map((u: any) => u.from_cell_id || u.cell_id).filter(Boolean))]
       .map((cellId) => cellsMap.get(cellId))
       .filter(Boolean);
 
@@ -165,8 +177,8 @@ export async function GET(req: Request) {
       created_by_name: task.created_by_name,
       picked_at: task.picked_at,
       completed_at: task.completed_at,
-      unitCount: units.length,
-      units: units.map((u: any) => ({
+      unitCount: activeUnits.length,
+      units: activeUnits.map((u: any) => ({
         id: u.id,
         barcode: u.barcode,
         cell_id: u.cell_id,
