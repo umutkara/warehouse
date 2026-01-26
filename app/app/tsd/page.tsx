@@ -1805,7 +1805,7 @@ export default function TsdPage() {
     setBusy(true);
 
     try {
-      const unitRes = await fetch(`/api/units/find?barcode=${encodeURIComponent(parsed.code)}`, { cache: "no-store" });
+      const unitRes = await fetch(`/api/units/by-barcode?barcode=${encodeURIComponent(parsed.code)}`, { cache: "no-store" });
       const unitJson = await unitRes.json().catch(() => ({}));
       if (!unitRes.ok) {
         setError(unitJson.error || "Заказ не найден");
@@ -3195,6 +3195,9 @@ export default function TsdPage() {
                   <div style={{ fontSize: 13, color: "#6b7280" }}>
                     Ячейка: {infoUnit.cell ? `${infoUnit.cell.code} (${infoUnit.cell.cell_type})` : "не размещён"}
                   </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                    Статус: {infoUnit.unit?.status || "—"} • Создан: {infoUnit.unit?.created_at ? new Date(infoUnit.unit.created_at).toLocaleString("ru-RU") : "—"}
+                  </div>
                 </div>
               ) : (
                 <div style={{ fontSize: 14, color: "#6b7280" }}>
@@ -3215,7 +3218,7 @@ export default function TsdPage() {
                 OPS статус
               </div>
               <div style={{ fontSize: 14, fontWeight: 600 }}>
-                {infoOps?.ops_status_label || "нет"}
+                {infoOps?.ops_status_label || "нет"}{infoOps?.ops_status ? ` (${infoOps.ops_status})` : ""}
               </div>
               <div style={{ fontSize: 12, color: "#2e7d32", marginTop: 4 }}>
                 Сценарий: {infoOps?.scenario || "нет"}
@@ -3231,17 +3234,47 @@ export default function TsdPage() {
               }}
             >
               <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>
-                История
+                История ({infoHistory.length})
               </div>
               {infoHistory.length === 0 ? (
                 <div style={{ fontSize: 13, color: "#9ca3af" }}>История пуста</div>
               ) : (
-                <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
-                  {infoHistory.slice(0, 10).map((evt: any, idx: number) => {
+                <div style={{ display: "grid", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+                  {infoHistory.map((evt: any, idx: number) => {
                     const date = evt.created_at
                       ? new Date(evt.created_at).toLocaleString("ru-RU")
                       : "";
-                    const details =
+                    const eventType = evt.event_type || "event";
+                    let title = eventType;
+                    let icon = "🧾";
+                    let accent = "#111827";
+                    if (eventType === "move") {
+                      title = "Перемещение";
+                      icon = "📦";
+                      accent = "#2563eb";
+                    } else if (eventType === "shipment") {
+                      title = evt.details?.status === "out" ? "Отправка в OUT" : "Движение OUT";
+                      icon = evt.details?.status === "returned" ? "↩️" : "🚚";
+                      accent = "#16a34a";
+                    } else if (eventType?.startsWith("picking_task_")) {
+                      title = eventType === "picking_task_created"
+                        ? "Создана задача"
+                        : eventType === "picking_task_completed"
+                          ? "Задача завершена"
+                          : eventType === "picking_task_canceled"
+                            ? "Задача отменена"
+                            : "Задача отгрузки";
+                      icon = "📋";
+                      accent = "#0f766e";
+                    } else if (eventType?.startsWith("ops.")) {
+                      title = "OPS статус";
+                      icon = "📝";
+                      accent = "#0284c7";
+                    }
+
+                    const detailsObj = evt.details || evt.meta || null;
+                    const detailsEntries = detailsObj ? Object.entries(detailsObj) : [];
+                    const summary =
                       evt.summary ||
                       evt.details?.note ||
                       evt.details?.status ||
@@ -3252,22 +3285,51 @@ export default function TsdPage() {
                       <div
                         key={`${evt.event_type || "event"}-${idx}`}
                         style={{
-                          padding: "8px 10px",
-                          borderRadius: 6,
+                          padding: "10px 12px",
+                          borderRadius: 8,
                           border: "1px solid #e5e7eb",
-                          background: "#fafafa",
+                          background: "#ffffff",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                         }}
                       >
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>
-                          {evt.event_type || "Событие"}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ fontSize: 16 }}>{icon}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: accent }}>
+                            {title}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#9ca3af" }}>
+                            {eventType}
+                          </div>
                         </div>
-                        {details && (
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                            {details}
+                        {summary && (
+                          <div style={{ fontSize: 12, color: "#374151", marginTop: 4 }}>
+                            {summary}
                           </div>
                         )}
+                        {detailsEntries.length > 0 && (
+                          <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                            {detailsEntries.map(([key, value]) => (
+                              <div key={key} style={{ display: "flex", gap: 8, fontSize: 11 }}>
+                                <div style={{ color: "#6b7280", minWidth: 110 }}>{key}</div>
+                                <div style={{ color: "#111827", wordBreak: "break-word" }}>
+                                  {typeof value === "string" ? value : JSON.stringify(value)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {detailsObj && (
+                          <details style={{ marginTop: 6 }}>
+                            <summary style={{ fontSize: 11, color: "#6b7280", cursor: "pointer" }}>
+                              Полные данные (JSON)
+                            </summary>
+                            <pre style={{ whiteSpace: "pre-wrap", fontSize: 10, color: "#374151", marginTop: 6 }}>
+{JSON.stringify(detailsObj, null, 2)}
+                            </pre>
+                          </details>
+                        )}
                         {date && (
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 6 }}>
                             {date}
                           </div>
                         )}
