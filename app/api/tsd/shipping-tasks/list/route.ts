@@ -120,6 +120,14 @@ export async function GET(req: Request) {
     });
   });
 
+  const tasksWithNoUnits = sortedTasks.filter((t: any) => (unitsMap.get(t.id) || []).length === 0);
+  const tasksAllUnitsMissingCells = sortedTasks.filter((t: any) => {
+    const units = unitsMap.get(t.id) || [];
+    if (units.length === 0) return false;
+    return units.every((u: any) => !u.cell_id);
+  });
+
+
   const fullyPickedTasks = sortedTasks.filter((t: any) => {
     const units = unitsMap.get(t.id) || [];
     if (units.length === 0) return false;
@@ -155,10 +163,13 @@ export async function GET(req: Request) {
   }
 
   const fullyPickedIds = new Set(fullyPickedTasks.map((t: any) => t.id));
+  const allUnitsMissingCellsIds = new Set(
+    tasksAllUnitsMissingCells.map((t: any) => t.id)
+  );
 
   // Format response (hide fully picked tasks)
   const formattedTasks = sortedTasks
-    .filter((task: any) => !fullyPickedIds.has(task.id))
+    .filter((task: any) => !fullyPickedIds.has(task.id) && !allUnitsMissingCellsIds.has(task.id))
     .flatMap((task: any) => {
     const units = unitsMap.get(task.id) || [];
     const activeUnits = units;
