@@ -24,7 +24,7 @@ type Cell = {
 };
 
 // Константа для размера ячеек (все ячейки одинаковые квадратные)
-const CELL_SIZE = 70;
+const CELL_SIZE = 56;
 
 function cellBg(cell: any) {
   return getCellColor(cell.cell_type, cell.meta);
@@ -104,7 +104,7 @@ export default function WarehouseMapPage() {
   const [cells, setCells] = useState<Cell[]>([]);
   const [role, setRole] = useState<string>("guest");
   const [newCode, setNewCode] = useState("");
-  const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping" | "surplus" | "rejected">("storage");
+  const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping" | "surplus" | "rejected" | "ff">("storage");
   const [selectedCell, setSelectedCell] = useState<any>(null);
   const [unassigned, setUnassigned] = useState<any[]>([]);
   const [cellUnits, setCellUnits] = useState<any[]>([]);
@@ -119,7 +119,7 @@ export default function WarehouseMapPage() {
   const [moveMsg, setMoveMsg] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [zoneStats, setZoneStats] = useState<any>(null);
-  const ZONES: Zone[] = ["bin", "storage", "shipping", "rejected", "surplus"];
+  const ZONES: Zone[] = ["bin", "storage", "shipping", "rejected", "surplus", "ff"];
 
   const ZONE_LABEL: Record<string, string> = {
     bin: "Сортировка",
@@ -127,6 +127,7 @@ export default function WarehouseMapPage() {
     shipping: "Отгрузка",
     rejected: "Отклонённые",
     surplus: "Излишки",
+    ff: "FF",
   };
 
   const zoneFilters = useUIStore((state) => state.zoneFilters);
@@ -670,7 +671,7 @@ export default function WarehouseMapPage() {
             }}>
               <div style={{ 
                 fontWeight: 800, 
-                fontSize: highlightCellId === c.id ? 15 : 14,
+                fontSize: highlightCellId === c.id ? 13 : 12,
                 color: highlightCellId === c.id ? "#667eea" : "#111",
                 letterSpacing: "-0.01em",
                 transition: "all 0.2s",
@@ -678,7 +679,7 @@ export default function WarehouseMapPage() {
                 {c.code}
               </div>
               <div style={{ 
-                fontSize: 9, 
+                fontSize: 6, 
                 color: "#6b7280",
                 marginTop: 2,
                 fontWeight: 600,
@@ -687,6 +688,22 @@ export default function WarehouseMapPage() {
               }}>
                 {c.cell_type}
               </div>
+              {c.meta?.description && c.cell_type === "picking" && (
+                <div style={{
+                  fontSize: 7,
+                  color: "#9ca3af",
+                  marginTop: 2,
+                  fontWeight: 600,
+                  lineHeight: 1.1,
+                  textAlign: "center",
+                  maxWidth: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}>
+                  {c.meta.description}
+                </div>
+              )}
               {c.units_count > 0 && (
                 <div style={{
                   marginTop: 4,
@@ -696,7 +713,7 @@ export default function WarehouseMapPage() {
                       ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
                       : "linear-gradient(135deg, #374151 0%, #1f2937 100%)",
                   color: "#fff",
-                  fontSize: 10,
+                  fontSize: 9,
                   fontWeight: 700,
                   padding: "3px 7px",
                   borderRadius: 999,

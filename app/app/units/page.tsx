@@ -426,6 +426,15 @@ export default function UnitsListPage() {
           >
             OUT
           </button>
+          <button
+            onClick={() => setStatusFilter("ff")}
+            style={{
+              ...styles.filterButton,
+              ...(statusFilter === "ff" ? styles.filterButtonActive : {}),
+            }}
+          >
+            FF
+          </button>
         </div>
       </div>
 
@@ -515,6 +524,7 @@ export default function UnitsListPage() {
               <th style={styles.th}>Партнер</th>
               <th style={styles.th}>Цена</th>
               <th style={styles.th}>Статус</th>
+              <th style={styles.th}>OPS статус</th>
               <th style={styles.th}>Ячейка</th>
               <th style={styles.th}>На складе</th>
               <th style={styles.th}>Создан</th>
@@ -524,7 +534,7 @@ export default function UnitsListPage() {
           <tbody>
             {filteredUnits.length === 0 && !loading && (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+                <td colSpan={10} style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
                   {searchQuery || opsStatusFilter !== "all"
                     ? "По выбранным фильтрам заказы не найдены"
                     : "Нет заказов"}
@@ -546,12 +556,12 @@ export default function UnitsListPage() {
                 <td style={styles.td}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <div style={styles.barcode}>{unit.barcode}</div>
-                    {unit.meta?.merchant_rejection_count && unit.meta.merchant_rejection_count > 0 && (
+                    {unit.meta?.ops_status === "partner_rejected_return" && (
                       <span
                         style={styles.merchantRejectionBadge}
-                        title={`Мерчант не принял ${unit.meta.merchant_rejection_count} раз(а)`}
+                        title="Партнер не принял"
                       >
-                        🚫 Мерчант не принял ({unit.meta.merchant_rejection_count})
+                        🚫 Партнер не принял
                       </span>
                     )}
                     {unit.meta?.service_center_return_count && unit.meta.service_center_return_count > 0 && (
@@ -583,6 +593,11 @@ export default function UnitsListPage() {
                     }}
                   >
                     {unit.status}
+                  </span>
+                </td>
+                <td style={styles.td}>
+                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>
+                    {getOpsStatusText(unit.meta?.ops_status ?? null)}
                   </span>
                 </td>
                 <td style={styles.td}>

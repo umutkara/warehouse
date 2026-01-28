@@ -672,6 +672,7 @@ export default function SLAPage() {
     out: "#8b5cf6",
     bin: "#a855f7",
     transfer: "#06b6d4",
+    ff: "#facc15",
   };
 
   const statusBarData = Object.entries(metrics.units_by_status).map(([status, count]) => ({

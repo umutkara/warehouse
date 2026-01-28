@@ -24,6 +24,8 @@ function statusByCellType(cellType: string) {
       return "picking";
     case "rejected":
       return "rejected";
+    case "ff":
+      return "ff";
     default:
       return null;
   }
@@ -124,15 +126,19 @@ export async function POST(req: Request) {
     }
 
     // Разрешённые перемещения
-    // bin → storage/shipping (решение куда отправить)
+    // bin → storage/shipping/rejected/ff (решение куда отправить)
     // storage/shipping → picking (OPS создал задание)
     // storage ⇄ shipping (изменение решения)
+    // rejected → rejected (обратная совместимость)
+    // storage/shipping → rejected/ff (обратная совместимость)
     // picking → out (через ТСД отгрузка - но это отдельный API)
     const allowedMoves: Record<string, string[]> = {
-      bin: ["storage", "shipping"],
-      storage: ["storage", "shipping", "picking"],
-      shipping: ["shipping", "storage", "picking"],
+      bin: ["storage", "shipping", "rejected", "ff"],
+      storage: ["storage", "shipping", "picking", "rejected", "ff"],
+      shipping: ["shipping", "storage", "picking", "rejected", "ff"],
       picking: ["picking"], // Picking может перемещаться внутри picking зоны
+      rejected: ["rejected"],
+      ff: ["ff", "storage", "shipping"],
     };
 
     const fromType = String(fromCell.cell_type);

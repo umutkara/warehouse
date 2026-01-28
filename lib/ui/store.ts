@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type Zone = "bin" | "storage" | "shipping" | "rejected" | "surplus";
+export type Zone = "bin" | "storage" | "shipping" | "rejected" | "surplus" | "ff";
 
 export type ZoneFilters = Record<Zone, boolean>;
 
@@ -10,6 +10,7 @@ const defaultZones: ZoneFilters = {
   shipping: true,
   rejected: true,
   surplus: true,
+  ff: true,
 };
 
 type UIState = {
@@ -29,6 +30,7 @@ export const useUIStore = create<UIState>((set) => ({
         shipping: zone === "shipping",
         rejected: zone === "rejected",
         surplus: zone === "surplus",
+        ff: zone === "ff",
       },
     })),
   toggleZone: (zone) =>

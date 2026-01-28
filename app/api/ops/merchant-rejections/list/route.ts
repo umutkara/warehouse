@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -48,37 +49,29 @@ export async function GET(req: Request) {
       );
     }
 
-    // Filter units with OPS status "partner_rejected_return" that are ON warehouse
-    // (cell_id is not null AND status is in warehouse statuses)
-    const warehouseStatuses = ["stored", "bin", "picking", "shipping"];
-    const units = (allUnits || []).filter((unit: any) => {
+    // Filter units with OPS status "partner_rejected_return"
+    const baseUnits = (allUnits || []).filter((unit: any) => {
       const meta = unit.meta as any;
-      const opsStatus = meta?.ops_status;
-      
-      // Must have OPS status "partner_rejected_return"
-      if (opsStatus !== "partner_rejected_return") return false;
-      
-      // Must be on warehouse: cell_id is not null AND status is in warehouse statuses
-      const isOnWarehouse = unit.cell_id && warehouseStatuses.includes(unit.status);
-      return isOnWarehouse;
+      return meta?.ops_status === "partner_rejected_return";
     });
 
-    // Get cell info separately if needed
-    const cellIds = units.map((u: any) => u.cell_id).filter(Boolean);
+    const cellIds = baseUnits.map((u: any) => u.cell_id).filter(Boolean);
     const cellsMap: Record<string, any> = {};
-    
+
     if (cellIds.length > 0) {
-      const { data: cells } = await supabase
+      const { data: adminCells } = await supabaseAdmin
         .from("warehouse_cells")
         .select("id, code, cell_type")
         .in("id", cellIds);
-      
-      if (cells) {
-        cells.forEach((cell: any) => {
+
+      if (adminCells && adminCells.length > 0) {
+        adminCells.forEach((cell: any) => {
           cellsMap[cell.id] = cell;
         });
       }
     }
+
+    const units = baseUnits;
 
     // Process units to extract rejection info
     const processedUnits = (units || []).map((unit: any) => {

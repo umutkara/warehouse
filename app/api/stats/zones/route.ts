@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
-type Zone = "bin" | "storage" | "shipping" | "rejected" | "surplus";
+type Zone = "bin" | "storage" | "shipping" | "rejected" | "surplus" | "ff";
 
 export async function GET() {
   const supabase = await supabaseServer();
@@ -64,6 +64,7 @@ export async function GET() {
     shipping: 0,
     rejected: 0,
     surplus: 0,
+    ff: 0,
   };
 
   let unplaced = 0;

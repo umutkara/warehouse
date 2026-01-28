@@ -112,6 +112,34 @@ export default function TsdPage() {
   const [busy, setBusy] = useState(false);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const successSoundRef = useRef<HTMLAudioElement | null>(null);
+  const lastScanAtRef = useRef<number>(0);
+
+  const playSuccessSound = useCallback(() => {
+    if (typeof Audio === "undefined") return;
+    try {
+      if (!successSoundRef.current) {
+        successSoundRef.current = new Audio("/sounds/tsd-success.mp3");
+        successSoundRef.current.preload = "auto";
+      }
+      const audio = successSoundRef.current;
+      audio.currentTime = 0;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {});
+      }
+    } catch {
+      // ignore playback failures
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!success) return;
+    const elapsedMs = Date.now() - lastScanAtRef.current;
+    if (elapsedMs >= 0 && elapsedMs <= 10000) {
+      playSuccessSound();
+    }
+  }, [success, playSuccessSound]);
 
   // Проверка статуса инвентаризации и загрузка заданий
   useEffect(() => {
@@ -769,6 +797,9 @@ export default function TsdPage() {
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" || e.key === "Return") {
       e.preventDefault();
+      if (scanValue.trim()) {
+        lastScanAtRef.current = Date.now();
+      }
       if (mode === "receiving") {
         handleReceivingScan();
       } else if (mode === "moving") {
@@ -981,10 +1012,10 @@ export default function TsdPage() {
         // Определяем, куда записать (FROM или TO)
         if (!fromCell) {
           // Первый скан - FROM
-          // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping, rejected
-          const allowedFromTypes = ['bin', 'storage', 'shipping', 'rejected'];
+          // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping, rejected, ff
+          const allowedFromTypes = ['bin', 'storage', 'shipping', 'rejected', 'ff'];
           if (!allowedFromTypes.includes(cellInfo.cell_type)) {
-            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, REJECTED`);
+            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, REJECTED, FF`);
             setScanValue("");
             return;
           }
@@ -1063,6 +1094,15 @@ export default function TsdPage() {
           }
         }
 
+        // ⭐ ПРОВЕРКИ для FROM = FF
+        if (fromCell.cell_type === 'ff') {
+          if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
+            setScanValue("");
+            return;
+          }
+        }
+
         // Добавляем в массив
         setUnits([...units, unitInfo]);
         setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
@@ -1082,40 +1122,48 @@ export default function TsdPage() {
     // BIN → STORAGE ✅
     // BIN → SHIPPING ✅
     // BIN → REJECTED ✅
+    // BIN → FF ✅
     // STORAGE → SHIPPING ✅
     // STORAGE → STORAGE ✅ (обратная совместимость)
+    // STORAGE → REJECTED ✅ (обратная совместимость)
+    // STORAGE → FF ✅
     // SHIPPING → STORAGE ✅
     // SHIPPING → SHIPPING ✅ (обратная совместимость)
+    // SHIPPING → REJECTED ✅ (обратная совместимость)
+    // SHIPPING → FF ✅
     // REJECTED → REJECTED ✅
+    // FF → FF ✅
+    // FF → STORAGE ✅
+    // FF → SHIPPING ✅
     // Всё остальное ❌
 
     if (fromType === 'bin') {
-      if (toType === 'storage' || toType === 'shipping' || toType === 'rejected') {
+      if (toType === 'storage' || toType === 'shipping' || toType === 'rejected' || toType === 'ff') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из BIN можно переместить только в STORAGE, SHIPPING или REJECTED. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из BIN можно переместить только в STORAGE, SHIPPING, REJECTED или FF. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
     if (fromType === 'storage') {
-      if (toType === 'shipping' || toType === 'storage') {
+      if (toType === 'shipping' || toType === 'storage' || toType === 'rejected' || toType === 'ff') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из STORAGE можно переместить только в SHIPPING или другую STORAGE. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из STORAGE можно переместить только в SHIPPING, другую STORAGE, REJECTED или FF. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
     if (fromType === 'shipping') {
-      if (toType === 'storage' || toType === 'shipping') {
+      if (toType === 'storage' || toType === 'shipping' || toType === 'rejected' || toType === 'ff') {
         return { valid: true };
       }
       return { 
         valid: false, 
-        error: `Из SHIPPING можно переместить только в STORAGE или другую SHIPPING. Выбрано: ${toType.toUpperCase()}` 
+        error: `Из SHIPPING можно переместить только в STORAGE, другую SHIPPING, REJECTED или FF. Выбрано: ${toType.toUpperCase()}` 
       };
     }
 
@@ -1126,6 +1174,16 @@ export default function TsdPage() {
       return {
         valid: false,
         error: `Из REJECTED можно переместить только в REJECTED. Выбрано: ${toType.toUpperCase()}`
+      };
+    }
+
+    if (fromType === 'ff') {
+      if (toType === 'ff' || toType === 'storage' || toType === 'shipping') {
+        return { valid: true };
+      }
+      return {
+        valid: false,
+        error: `Из FF можно переместить только в FF, STORAGE или SHIPPING. Выбрано: ${toType.toUpperCase()}`
       };
     }
 
@@ -4033,11 +4091,11 @@ export default function TsdPage() {
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте FROM ячейку (откуда): BIN, STORAGE или SHIPPING</li>
+              <li>Отсканируйте FROM ячейку (откуда): BIN, STORAGE, SHIPPING, REJECTED или FF</li>
               <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
               <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
               <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                📌 Разрешено: BIN→STORAGE/SHIPPING, STORAGE↔SHIPPING/STORAGE, SHIPPING↔STORAGE/SHIPPING
+                📌 Разрешено: BIN→STORAGE/SHIPPING/REJECTED/FF, STORAGE→SHIPPING/STORAGE/REJECTED/FF, SHIPPING→STORAGE/SHIPPING/REJECTED/FF, REJECTED→REJECTED, FF→FF/STORAGE/SHIPPING
               </li>
             </ol>
           ) : mode === "inventory" ? (

@@ -15,6 +15,7 @@ export function getCellColor(cell_type: string, meta?: any): string {
     case "picking": return "#e3f2fd"; // голубой
     case "surplus": return "#efebe9"; // коричневый (излишки)
     case "rejected": return "#fee2e2"; // красный (отклонённые)
+    case "ff": return "#fef08a"; // жёлтый
     default: return "#ffffff"; // белый
   }
 }
