@@ -351,6 +351,9 @@ export default function LeftNav({ role }: { role: string }) {
 
         {/* Common section */}
         <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>
+        <NavButton href="/app/duplicates" icon={<Icons.Units />} isCollapsed={!shouldExpand}>
+          Дубли
+        </NavButton>
         <NavButton href="/app/warehouse-map" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
           Карта склада
         </NavButton>
@@ -367,15 +370,6 @@ export default function LeftNav({ role }: { role: string }) {
         </NavButton>
         <NavButton href="/app/archive" icon={<Icons.Archive />} isCollapsed={!shouldExpand}>
           Архив
-        </NavButton>
-        <NavButton href="/app/units" icon={<Icons.Units />} isCollapsed={!shouldExpand}>
-          Список заказов
-        </NavButton>
-        <NavButton href="/app/sla" icon={<Icons.SLA />} isCollapsed={!shouldExpand}>
-          SLA
-        </NavButton>
-        <NavButton href="/app/docs" icon={<Icons.Docs />} isCollapsed={!shouldExpand}>
-          Справочник
         </NavButton>
       </nav>
     </aside>
