@@ -83,7 +83,15 @@ export async function GET() {
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
 
-      const batch = (data || []) as UnitRow[];
+      const batch = (data || []).map((row: any) => {
+        const cell = Array.isArray(row.warehouse_cells)
+          ? row.warehouse_cells[0] ?? null
+          : row.warehouse_cells ?? null;
+        return {
+          ...row,
+          warehouse_cells: cell,
+        } as UnitRow;
+      });
       allUnits.push(...batch);
 
       if (batch.length < pageSize) break;
