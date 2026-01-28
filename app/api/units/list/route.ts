@@ -71,6 +71,10 @@ export async function GET(req: Request) {
       `)
       .eq("warehouse_id", profile.warehouse_id)
       .order("created_at", { ascending: false });
+    let countQuery = supabaseAdmin
+      .from("units")
+      .select("id, warehouse_cells!units_cell_id_fkey(cell_type)", { count: "exact", head: true })
+      .eq("warehouse_id", profile.warehouse_id);
 
     // Apply status filter
     if (statusFilter && statusFilter !== "all") {
@@ -78,28 +82,36 @@ export async function GET(req: Request) {
         // "На складе" - фильтруем по cell_type (более надежно, не зависит от enum)
         // Units на складе находятся в ячейках типов: bin, storage, shipping, picking, rejected, ff
         query = query.in("warehouse_cells.cell_type", ["bin", "storage", "shipping", "picking", "rejected", "ff"]);
+        countQuery = countQuery.in("warehouse_cells.cell_type", ["bin", "storage", "shipping", "picking", "rejected", "ff"]);
       } else if (statusFilter === "bin") {
         // "BIN" - заказы в BIN ячейках (обычно со статусом bin)
         // Фильтруем по cell_type через join
         query = query.eq("warehouse_cells.cell_type", "bin");
+        countQuery = countQuery.eq("warehouse_cells.cell_type", "bin");
       } else if (statusFilter === "shipping") {
         // "Shipping" - заказы в shipping ячейках
         // Фильтруем по cell_type через join
         query = query.eq("warehouse_cells.cell_type", "shipping");
+        countQuery = countQuery.eq("warehouse_cells.cell_type", "shipping");
       } else {
         query = query.eq("status", statusFilter);
+        countQuery = countQuery.eq("status", statusFilter);
       }
     }
 
     // Apply search filter
     if (searchQuery.trim()) {
       query = query.ilike("barcode", `%${searchQuery.trim()}%`);
+      countQuery = countQuery.ilike("barcode", `%${searchQuery.trim()}%`);
     }
 
     // Apply age filter
     if (dateThreshold) {
       query = query.lt("created_at", dateThreshold);
+      countQuery = countQuery.lt("created_at", dateThreshold);
     }
+
+    const { count: totalCount } = await countQuery;
 
     const { data: units, error: unitsError } = await query;
 
@@ -131,10 +143,11 @@ export async function GET(req: Request) {
       };
     });
 
+    const total = typeof totalCount === "number" ? totalCount : unitsWithAge.length;
     return NextResponse.json({
       ok: true,
       units: unitsWithAge,
-      total: unitsWithAge.length,
+      total,
     });
   } catch (e: any) {
     console.error("List units error:", e);

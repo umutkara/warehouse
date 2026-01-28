@@ -82,6 +82,7 @@ export default function UnitsListPage() {
   const [opsStatus, setOpsStatus] = useState<string>("");
   const [opsStatusComment, setOpsStatusComment] = useState<string>("");
   const [savingOpsStatus, setSavingOpsStatus] = useState(false);
+  const [totalUnits, setTotalUnits] = useState<number | null>(null);
 
   // ⚡ OPTIMIZATION: Memoized load function
   const loadUnits = useCallback(async () => {
@@ -113,6 +114,7 @@ export default function UnitsListPage() {
 
       const json = await res.json();
       setUnits(json.units || []);
+      setTotalUnits(typeof json.total === "number" ? json.total : null);
     } catch (e: any) {
       setError("Ошибка загрузки");
     } finally {
@@ -317,7 +319,13 @@ export default function UnitsListPage() {
         <div>
           <h1 style={styles.title}>Список заказов</h1>
           <p style={styles.subtitle}>
-            Всего заказов на складе: {units.length}
+            Всего units: {totalUnits ?? units.length}
+            {totalUnits !== null && totalUnits > units.length && (
+              <>
+                {" "}
+                • Показано: {units.length}
+              </>
+            )}
             {opsStatusFilter !== "all" && (
               <>
                 {" "}
