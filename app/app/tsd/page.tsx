@@ -262,14 +262,23 @@ export default function TsdPage() {
   ) {
     const allUnits: UnitInfo[] = [];
     const fromCellsMap = new Map<string, { id: string; code: string; cell_type: string; units: any[] }>();
+    const unitIdCounts = new Map<string, number>();
+    const seenUnitIds = new Set<string>();
 
     tasks.forEach((task: any) => {
       (task.units || []).forEach((unit: any) => {
         const isAlreadyMoved = unit.status === "picking" || unit.cell_id === targetCellId;
         if (isAlreadyMoved) return;
 
-        const fromCellId = unit.from_cell_id || unit.cell_id;
+        const fromCellId = unit.cell_id || unit.from_cell_id;
         if (!fromCellId) return;
+
+
+        if (seenUnitIds.has(unit.id)) {
+          unitIdCounts.set(unit.id, (unitIdCounts.get(unit.id) || 0) + 1);
+          return;
+        }
+        seenUnitIds.add(unit.id);
 
         allUnits.push({
           id: unit.id,
@@ -279,9 +288,10 @@ export default function TsdPage() {
           cell: unit.cell,
           from_cell: unit.from_cell,
         });
+        unitIdCounts.set(unit.id, (unitIdCounts.get(unit.id) || 0) + 1);
 
         if (!fromCellsMap.has(fromCellId)) {
-          const fromCell = unit.from_cell || unit.cell;
+          const fromCell = unit.cell || unit.from_cell;
           fromCellsMap.set(fromCellId, {
             id: fromCellId,
             code: fromCell?.code || "?",
@@ -292,6 +302,7 @@ export default function TsdPage() {
         fromCellsMap.get(fromCellId)!.units.push(unit);
       });
     });
+
 
     const targetCellInfo = cellsMap.get(targetCellId);
     if (!targetCellInfo) return null;
@@ -2986,8 +2997,8 @@ export default function TsdPage() {
                         const isScanned = selectedFromCellStep.scannedUnits.some((u: any) => u.id === unit.id);
                         
                         return (
-                          <div 
-                            key={unit.id} 
+                        <div 
+                          key={`${unit.id}-${unit.from_cell_id || unit.cell_id || idx}`} 
                             style={{ 
                               fontSize: "16px", 
                               fontWeight: 600, 

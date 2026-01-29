@@ -119,6 +119,7 @@ export async function GET(req: Request) {
 
   // Group units by task
   const unitsMap = new Map<string, any[]>();
+  const unitIdCounts = new Map<string, number>();
   (taskUnits || []).forEach((tu: any) => {
     if (!unitsMap.has(tu.picking_task_id)) {
       unitsMap.set(tu.picking_task_id, []);
@@ -127,6 +128,9 @@ export async function GET(req: Request) {
       ...tu.units,
       from_cell_id: tu.from_cell_id,
     });
+    if (tu.units?.id) {
+      unitIdCounts.set(tu.units.id, (unitIdCounts.get(tu.units.id) || 0) + 1);
+    }
   });
 
   const tasksWithNoUnits = sortedTasks.filter((t: any) => (unitsMap.get(t.id) || []).length === 0);
@@ -189,7 +193,7 @@ export async function GET(req: Request) {
       .map((cellId) => cellsMap.get(cellId))
       .filter(Boolean);
 
-    return {
+    const formatted = {
       id: task.id,
       status: task.status,
       scenario: task.scenario,
@@ -204,6 +208,7 @@ export async function GET(req: Request) {
         cell_id: u.cell_id,
         status: u.status,
         from_cell_id: u.from_cell_id,
+        cell: u.cell_id ? cellsMap.get(u.cell_id) : null,
         from_cell: u.from_cell_id ? cellsMap.get(u.from_cell_id) : null,
       })),
       fromCells: fromCells.map((cell: any) => ({
@@ -218,6 +223,7 @@ export async function GET(req: Request) {
           }
         : null,
     };
+    return formatted;
   });
 
   return NextResponse.json({
