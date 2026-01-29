@@ -88,24 +88,33 @@ export async function GET(req: Request) {
   // Get units for each task from picking_task_units
   const taskIds = sortedTasks.map((t: any) => t.id);
   
-  const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
-    .from("picking_task_units")
-    .select(`
-      picking_task_id,
-      unit_id,
-      from_cell_id,
-      units (
-        id,
-        barcode,
-        cell_id,
-        status
-      )
-    `)
-    .in("picking_task_id", taskIds);
+  const taskUnits: any[] = [];
+  const chunkSize = 100;
+  for (let i = 0; i < taskIds.length; i += chunkSize) {
+    const chunk = taskIds.slice(i, i + chunkSize);
+    const { data: chunkUnits, error: chunkError } = await supabaseAdmin
+      .from("picking_task_units")
+      .select(`
+        picking_task_id,
+        unit_id,
+        from_cell_id,
+        units (
+          id,
+          barcode,
+          cell_id,
+          status
+        )
+      `)
+      .in("picking_task_id", chunk);
 
-  if (taskUnitsError) {
-    console.error("Error loading picking_task_units:", taskUnitsError);
-    return NextResponse.json({ error: taskUnitsError.message }, { status: 400 });
+    if (chunkError) {
+      console.error("Error loading picking_task_units:", chunkError);
+      return NextResponse.json({ error: chunkError.message }, { status: 400 });
+    }
+
+    if (chunkUnits && chunkUnits.length > 0) {
+      taskUnits.push(...chunkUnits);
+    }
   }
 
   // Group units by task

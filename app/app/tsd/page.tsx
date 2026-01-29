@@ -618,7 +618,11 @@ export default function TsdPage() {
     setLoadingTasks(true);
     try {
       const res = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store" });
-      const json = await res.json();
+      const rawText = await res.text().catch(() => "");
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch {}
       if (res.ok) {
         setShippingTasks(json.tasks || []);
         // Пользователь сам выбирает задачу из списка (не автовыбор)
@@ -636,7 +640,11 @@ export default function TsdPage() {
     try {
       // Загружаем задачи
       const tasksRes = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store" });
-      const tasksJson = await tasksRes.json();
+      const tasksRaw = await tasksRes.text().catch(() => "");
+      let tasksJson: any = null;
+      try {
+        tasksJson = tasksRaw ? JSON.parse(tasksRaw) : null;
+      } catch {}
       
       if (!tasksRes.ok) {
         setError("Ошибка загрузки задач");
@@ -649,7 +657,11 @@ export default function TsdPage() {
       // Загружаем ячейки с описаниями
       let cellsMap = shippingNewCells;
       const cellsRes = await fetch("/api/cells/list", { cache: "no-store" });
-      const cellsJson = await cellsRes.json();
+      const cellsRaw = await cellsRes.text().catch(() => "");
+      let cellsJson: any = null;
+      try {
+        cellsJson = cellsRaw ? JSON.parse(cellsRaw) : null;
+      } catch {}
       
       if (cellsRes.ok) {
         const cells = cellsJson.cells || [];
