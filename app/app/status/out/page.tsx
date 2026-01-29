@@ -79,7 +79,7 @@ export default function OutStatusPage() {
   const [opsStatusComment, setOpsStatusComment] = useState<string>("");
   const [savingOpsStatus, setSavingOpsStatus] = useState(false);
 
-  const canEditOpsStatus = userRole && ["logistics", "admin", "head"].includes(userRole);
+  const canEditOpsStatus = userRole && ["ops", "logistics", "admin", "head"].includes(userRole);
 
   // Load user role
   useEffect(() => {
