@@ -802,7 +802,7 @@ export default function OpsShippingPage() {
             >
               📄 Экспорт в CSV
             </Button>
-            <Button variant="secondary" size="sm" onClick={loadAvailableUnits} disabled={loadingUnits}>
+            <Button variant="secondary" size="sm" onClick={() => loadAvailableUnits()} disabled={loadingUnits}>
               {loadingUnits ? "Загрузка..." : "Обновить"}
             </Button>
           </div>
@@ -1214,7 +1214,7 @@ export default function OpsShippingPage() {
       <div style={{ marginTop: 32 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ fontSize: 18, fontWeight: 700 }}>Созданные задачи ({tasks.length})</h2>
-          <Button variant="secondary" size="sm" onClick={loadTasks} disabled={loadingTasks}>
+          <Button variant="secondary" size="sm" onClick={() => loadTasks()} disabled={loadingTasks}>
             {loadingTasks ? "Загрузка..." : "Обновить"}
           </Button>
         </div>
