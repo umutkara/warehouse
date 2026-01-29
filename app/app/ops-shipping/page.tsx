@@ -192,12 +192,17 @@ export default function OpsShippingPage() {
     ? `${SCENARIO_FROM} → ${scenarioCategory} → ${scenarioDestination}`
     : "";
 
-  // Load picking cells, available units and tasks on mount
+  // Load picking cells, available units and tasks on mount.
+  // AbortController prevents duplicate API calls when effect runs twice (e.g. React Strict Mode).
   useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
     async function loadPickingCells() {
       try {
-        const res = await fetch("/api/cells/list", { cache: "no-store" });
+        const res = await fetch("/api/cells/list", { cache: "no-store", signal });
         const json = await res.json();
+        if (signal.aborted) return;
         if (res.ok) {
           const picking = (json.cells || []).filter((c: Cell) => c.cell_type === "picking");
           setPickingCells(picking);
@@ -205,23 +210,27 @@ export default function OpsShippingPage() {
             setError("Нет picking ячеек. Добавьте на карте склада ячейки с cell_type='picking'");
           }
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
         console.error("Failed to load picking cells:", e);
         setError("Ошибка загрузки ячеек");
       }
     }
     loadPickingCells();
-    loadAvailableUnits();
-    loadTasks();
+    loadAvailableUnits(signal);
+    loadTasks(signal);
+
+    return () => controller.abort();
   }, []);
 
-  // Load available units from storage/shipping
-  async function loadAvailableUnits() {
+  // Load available units from storage/shipping. Optional signal for mount-only load (avoids duplicate calls).
+  async function loadAvailableUnits(abortSignal?: AbortSignal) {
     setLoadingUnits(true);
     setError(null);
     try {
-      const res = await fetch("/api/units/storage-shipping", { cache: "no-store" });
-      
+      const res = await fetch("/api/units/storage-shipping", { cache: "no-store", signal: abortSignal });
+      if (abortSignal?.aborted) return;
+
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         const text = await res.text();
@@ -229,8 +238,10 @@ export default function OpsShippingPage() {
         setAvailableUnits([]);
         return;
       }
-      
+
       const json = await res.json();
+      if (abortSignal?.aborted) return;
+
       if (res.ok) {
         setAvailableUnits(json.units || []);
       } else {
@@ -239,21 +250,22 @@ export default function OpsShippingPage() {
         setAvailableUnits([]);
       }
     } catch (e: any) {
+      if (e?.name === "AbortError") return;
       console.error("Failed to load units:", e);
       setError("Ошибка загрузки заказов");
       setAvailableUnits([]);
     } finally {
-      setLoadingUnits(false);
+      if (!abortSignal?.aborted) setLoadingUnits(false);
     }
   }
 
-  // Load tasks
-  async function loadTasks() {
+  // Load tasks. Optional signal for mount-only load (avoids duplicate calls).
+  async function loadTasks(abortSignal?: AbortSignal) {
     setLoadingTasks(true);
     try {
-      const res = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store" });
-      
-      // Check if response is JSON
+      const res = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store", signal: abortSignal });
+      if (abortSignal?.aborted) return;
+
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         const text = await res.text();
@@ -261,8 +273,10 @@ export default function OpsShippingPage() {
         setTasks([]);
         return;
       }
-      
+
       const json = await res.json();
+      if (abortSignal?.aborted) return;
+
       if (res.ok) {
         setTasks(json.tasks || []);
       } else {
@@ -270,10 +284,11 @@ export default function OpsShippingPage() {
         setTasks([]);
       }
     } catch (e: any) {
+      if (e?.name === "AbortError") return;
       console.error("Failed to load tasks:", e);
       setTasks([]);
     } finally {
-      setLoadingTasks(false);
+      if (!abortSignal?.aborted) setLoadingTasks(false);
     }
   }
 

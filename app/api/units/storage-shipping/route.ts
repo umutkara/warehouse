@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Get all units for the warehouse (use supabaseAdmin to bypass RLS)
+  // Get all units for the warehouse (cell_id = where unit actually lies)
   const { data: units, error: unitsError } = await supabaseAdmin
     .from("units")
     .select("id, barcode, status, cell_id, created_at, meta")
@@ -48,31 +48,23 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, units: [] });
   }
 
-  // Get all cell IDs
-  const cellIds = units.map((u) => u.cell_id).filter((id) => id) as string[];
+  // Cell info from warehouse_cells_map WITH warehouse_id — same as by-barcode and cells/get:
+  // view is per-warehouse, so we must filter by warehouse_id to get the correct cell code for this warehouse.
+  const cellIds = [...new Set(units.map((u: any) => u.cell_id).filter(Boolean))] as string[];
+  const cellsMap = new Map<string, { id: string; code: string; cell_type: string }>();
+  if (cellIds.length > 0) {
+    const { data: cells, error: cellsError } = await supabaseAdmin
+      .from("warehouse_cells_map")
+      .select("id, code, cell_type")
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("id", cellIds);
 
-  if (cellIds.length === 0) {
-    return NextResponse.json({ ok: true, units: [] });
-  }
-
-  // Get cells info via warehouse_cells_map (use supabaseAdmin to bypass RLS)
-  const { data: cells, error: cellsError } = await supabaseAdmin
-    .from("warehouse_cells_map")
-    .select("id, code, cell_type")
-    .in("id", cellIds);
-
-  if (cellsError) {
-    console.error("Error loading cells:", cellsError);
-    return NextResponse.json({ error: cellsError.message }, { status: 400 });
-  }
-
-  // Create a map of cell_id -> cell
-  const cellsMap = new Map<string, (typeof cells)[number]>();
-  (cells || []).forEach((cell) => {
-    if (cell?.id) {
-      cellsMap.set(cell.id, cell);
+    if (!cellsError && cells) {
+      cells.forEach((c: any) => {
+        if (c?.id) cellsMap.set(c.id, { id: c.id, code: c.code, cell_type: c.cell_type });
+      });
     }
-  });
+  }
 
   // Get all picking tasks that are open or in_progress (use supabaseAdmin to bypass RLS)
   const { data: pickingTasks, error: tasksError } = await supabaseAdmin
@@ -86,18 +78,20 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: tasksError.message }, { status: 400 });
   }
 
-  // Get units from picking_task_units (new multi-unit schema)
+  // Get units from picking_task_units (new multi-unit schema).
+  // Chunk by 100: Supabase/Postgres limit on IN() size, so 835+ task IDs would return no rows.
   const taskIds = (pickingTasks || []).map((t) => t.id).filter(Boolean);
-  let unitsFromMultiUnitTasks: string[] = [];
-  
-  if (taskIds.length > 0) {
+  const unitsFromMultiUnitTasks: string[] = [];
+  const chunkSize = 100;
+  for (let i = 0; i < taskIds.length; i += chunkSize) {
+    const chunk = taskIds.slice(i, i + chunkSize);
     const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
       .from("picking_task_units")
       .select("unit_id")
-      .in("picking_task_id", taskIds);
+      .in("picking_task_id", chunk);
 
-    if (!taskUnitsError && taskUnits) {
-      unitsFromMultiUnitTasks = taskUnits.map((tu) => tu.unit_id).filter(Boolean);
+    if (!taskUnitsError && taskUnits?.length) {
+      unitsFromMultiUnitTasks.push(...taskUnits.map((tu: { unit_id: string }) => tu.unit_id).filter(Boolean));
     }
   }
 
@@ -107,7 +101,8 @@ export async function GET(req: Request) {
     ...unitsFromMultiUnitTasks,
   ]);
 
-  // Filter units that are in storage or shipping cells AND not in picking tasks
+  // Filter units that are in storage or shipping cells AND not in picking tasks.
+  // Cell from warehouse_cells_map (with warehouse_id) = actual cell for this warehouse.
   const unitsInStorageOrShipping = units
     .map((unit) => {
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
@@ -118,19 +113,11 @@ export async function GET(req: Request) {
         cell_id: unit.cell_id,
         created_at: unit.created_at,
         ops_status: unit.meta?.ops_status ?? null,
-        cell: cell
-          ? {
-              id: cell.id,
-              code: cell.code,
-              cell_type: cell.cell_type,
-            }
-          : null,
+        cell: cell ? { id: cell.id, code: cell.code, cell_type: cell.cell_type } : null,
       };
     })
     .filter((unit) => {
-      // Must be in storage or shipping cell
       const isInStorageOrShipping = unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping");
-      // Must NOT be in picking tasks
       const isNotInTasks = !unitIdsInTasks.has(unit.id);
       return isInStorageOrShipping && isNotInTasks;
     });

@@ -162,12 +162,13 @@ export async function GET(req: Request) {
   
   const allCellIds = [...new Set([...unitCellIds, ...fromCellIds, ...targetCellIds])];
 
-  // Fetch all cells via warehouse_cells_map
+  // Fetch all cells via warehouse_cells_map (with warehouse_id = correct cell codes for this warehouse)
   let cellsMap = new Map();
   if (allCellIds.length > 0) {
     const { data: cells } = await supabaseAdmin
       .from("warehouse_cells_map")
       .select("id, code, cell_type")
+      .eq("warehouse_id", profile.warehouse_id)
       .in("id", allCellIds);
 
     cells?.forEach((cell) => {
@@ -188,8 +189,8 @@ export async function GET(req: Request) {
     const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;
 
-    // Get unique from cells for this task
-    const fromCells = [...new Set(activeUnits.map((u: any) => u.from_cell_id || u.cell_id).filter(Boolean))]
+    // Unique cells for display: use current location (cell_id) first — "по факту" where the unit is now (same fix as TSD).
+    const fromCells = [...new Set(activeUnits.map((u: any) => u.cell_id || u.from_cell_id).filter(Boolean))]
       .map((cellId) => cellsMap.get(cellId))
       .filter(Boolean);
 
