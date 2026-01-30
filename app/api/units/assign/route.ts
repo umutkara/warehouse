@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
 
 export async function POST(req: Request) {
   try {
@@ -63,6 +65,29 @@ export async function POST(req: Request) {
         { error: data.error || "RPC returned error" },
         { status: 400 }
       );
+    }
+
+    // Автозадача «Перенос 1»: если заказ перемещён в shipping/storage и OPS = postponed_1 — создать задачу из последней задачи по unit
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("warehouse_id, full_name")
+        .eq("id", authData.user.id)
+        .single();
+      if (profile?.warehouse_id) {
+        const result = await tryCreatePostponedTask(
+          unitId,
+          profile.warehouse_id,
+          authData.user.id,
+          profile.full_name || authData.user.email || "Unknown",
+          supabaseAdmin
+        );
+        if (result.created) {
+          console.log("[assign] postponed auto-task created:", result.taskId, "for unit", unitId);
+        }
+      }
+    } catch (e: any) {
+      console.error("[assign] postponed auto-task error (non-blocking):", e?.message ?? e);
     }
 
     return NextResponse.json(data, { status: 200 });

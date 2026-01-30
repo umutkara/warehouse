@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
 
 function normalizeCellCode(v: any) {
   return String(v ?? "").trim().toUpperCase();
@@ -43,7 +45,7 @@ export async function POST(req: Request) {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("warehouse_id")
+    .select("warehouse_id, full_name")
     .eq("id", user.id)
     .single();
 
@@ -186,6 +188,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: result?.error || "Ошибка перемещения" }, { status: 400 });
     }
 
+    try {
+      if (profile?.warehouse_id) {
+        const autoResult = await tryCreatePostponedTask(
+          unit.id,
+          profile.warehouse_id,
+          user.id,
+          profile.full_name || user.email || "Unknown",
+          supabaseAdmin
+        );
+        if (autoResult.created) {
+          console.log("[move-by-scan] postponed auto-task created:", autoResult.taskId, "for unit", unit.id);
+        }
+      }
+    } catch (e: any) {
+      console.error("[move-by-scan] postponed auto-task error (non-blocking):", e?.message ?? e);
+    }
+
     return NextResponse.json({
       ok: true,
       unitId: unit.id,
@@ -261,6 +280,23 @@ export async function POST(req: Request) {
     const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
     if (!result?.ok) {
       return NextResponse.json({ error: result?.error || "Move failed" }, { status: 400 });
+    }
+
+    try {
+      if (profile?.warehouse_id) {
+        const autoResult = await tryCreatePostponedTask(
+          unit.id,
+          profile.warehouse_id,
+          user.id,
+          profile.full_name || user.email || "Unknown",
+          supabaseAdmin
+        );
+        if (autoResult.created) {
+          console.log("[move-by-scan] postponed auto-task created:", autoResult.taskId, "for unit", unit.id);
+        }
+      }
+    } catch (e: any) {
+      console.error("[move-by-scan] postponed auto-task error (non-blocking):", e?.message ?? e);
     }
 
     return NextResponse.json({

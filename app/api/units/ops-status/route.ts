@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
 
 /**
  * POST /api/units/ops-status
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
 
   const { data: profile, error: profError } = await supabase
     .from("profiles")
-    .select("warehouse_id, role")
+    .select("warehouse_id, role, full_name")
     .eq("id", userData.user.id)
     .single();
 
@@ -134,6 +135,24 @@ export async function POST(req: Request) {
     if (auditError) {
       console.error("Failed to log OPS status change:", auditError);
       // Don't fail the request if logging fails, but log the error
+    }
+
+    // Автозадача «Перенос 1»: если статус = postponed_1 и заказ уже в shipping/storage — создать задачу из последней задачи по unit
+    if (status === "postponed_1") {
+      try {
+        const result = await tryCreatePostponedTask(
+          unitId,
+          profile.warehouse_id,
+          userData.user.id,
+          profile.full_name || userData.user.email || "Unknown",
+          supabaseAdmin
+        );
+        if (result.created) {
+          console.log("[ops-status] postponed auto-task created:", result.taskId, "for unit", unitId);
+        }
+      } catch (e: any) {
+        console.error("[ops-status] postponed auto-task error (non-blocking):", e?.message ?? e);
+      }
     }
 
     return NextResponse.json({
