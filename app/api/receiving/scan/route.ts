@@ -200,10 +200,6 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle();
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:191',message:'Checking for shipment',data:{unitId,hasShipment:!!activeShipment,shipmentStatus:activeShipment?.status,shipmentReturnReason:activeShipment?.return_reason},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-
     if (shipmentCheckError) {
       console.error("Error checking outbound_shipments:", shipmentCheckError);
       // Don't fail the request, just log the error
@@ -231,10 +227,6 @@ export async function POST(req: Request) {
     // If active shipment exists, prepare return info
     // Also process returns that were already marked as returned but merchant_rejections weren't created
     if (shouldProcessReturn) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:213',message:'Checking for picking task with scenario',data:{unitId,activeShipmentId:activeShipment.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
       // Check if unit had a scenario from OPS (picking task)
       // After migration, units are linked via picking_task_units junction table
       // First, try new format (via picking_task_units)
@@ -244,11 +236,7 @@ export async function POST(req: Request) {
         .eq("unit_id", unitId)
         .limit(1)
         .maybeSingle();
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:225',message:'Fetched picking_task_units',data:{hasTaskUnit:!!taskUnit,taskId:taskUnit?.picking_task_id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
+
       let task: any = null;
       
       if (taskUnit?.picking_task_id) {
@@ -261,10 +249,6 @@ export async function POST(req: Request) {
           .maybeSingle();
         
         task = taskData;
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:238',message:'Fetched picking_task via junction table',data:{hasTask:!!task,taskScenario:task?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
       }
       
       // Also check legacy format (old tasks with direct unit_id)
@@ -279,25 +263,13 @@ export async function POST(req: Request) {
           .maybeSingle();
         
         task = legacyTask;
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:252',message:'Fetched legacy picking_task',data:{hasLegacyTask:!!legacyTask,legacyTaskScenario:legacyTask?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
       }
 
       pickingTask = task;
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:260',message:'Final picking task result',data:{hasPickingTask:!!pickingTask,scenario:pickingTask?.scenario},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       // Determine return type based on scenario keywords
       const scenarioLower = pickingTask?.scenario?.toLowerCase() || "";
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:290',message:'Determining return type',data:{scenario:pickingTask?.scenario,scenarioLower,hasPickingTask:!!pickingTask},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
+
       const isServiceCenterReturn =
         !!pickingTask?.scenario &&
         (scenarioLower.includes("сервис") ||
@@ -311,10 +283,6 @@ export async function POST(req: Request) {
         (scenarioLower.includes("мерчант") ||
           scenarioLower.includes("магазин") ||
           scenarioLower.includes("merchant"));
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/receiving/scan/route.ts:304',message:'Return type determined',data:{isServiceCenterReturn,isMerchantRejection,scenarioLower},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       returnReason = `Автоматический возврат при приемке в ${targetCellLabel.toLowerCase()}`;
       returnAction = "logistics.auto_return_from_out";

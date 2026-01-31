@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    if (!["admin", "head", "manager", "ops"].includes(profile.role)) {
+    if (!["admin", "head", "manager", "ops", "logistics"].includes(profile.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

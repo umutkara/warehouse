@@ -29,9 +29,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  // Check role: only admin/head/manager/ops can create tasks
-  if (!["admin", "head", "manager", "ops"].includes(profile.role)) {
-    return NextResponse.json({ error: "Forbidden: Only admin/head/manager/ops can create tasks" }, { status: 403 });
+  // Check role: admin/head/manager/ops/logistics can create tasks
+  if (!["admin", "head", "manager", "ops", "logistics"].includes(profile.role)) {
+    return NextResponse.json({ error: "Forbidden: Only admin/head/manager/ops/logistics can create tasks" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);

@@ -323,8 +323,8 @@ export default function LeftNav({ role }: { role: string }) {
           </NavButton>
         )}
 
-        {/* Ops section (hidden for logistics) */}
-        {canOps && !isLogisticsOnly && (
+        {/* Ops section (ops, logistics, manager, head, admin) */}
+        {(canOps || canLogistics) && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>OPS</SectionTitle>
             <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>

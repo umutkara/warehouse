@@ -27,8 +27,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    // Only ops, manager, head, admin can access
-    const allowedRoles = ["ops", "manager", "head", "admin"];
+    // Only ops, logistics, manager, head, admin can access
+    const allowedRoles = ["ops", "logistics", "manager", "head", "admin"];
     if (!profile.role || !allowedRoles.includes(profile.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

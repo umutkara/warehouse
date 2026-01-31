@@ -46,7 +46,9 @@ export async function tryCreatePostponedTask(
       .select("picking_task_id")
       .eq("unit_id", unitId);
 
-    if (ptuErr || !ptuRows?.length) return { created: false, reason: "no previous task" };
+    if (ptuErr || !ptuRows?.length) {
+      return { created: false, reason: "no previous task" };
+    }
 
     const taskIds = ptuRows.map((r: any) => r.picking_task_id).filter(Boolean);
     const { data: lastTasks, error: tasksErr } = await supabaseAdmin
@@ -56,7 +58,9 @@ export async function tryCreatePostponedTask(
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (tasksErr || !lastTasks?.[0]) return { created: false, reason: "no previous task" };
+    if (tasksErr || !lastTasks?.[0]) {
+      return { created: false, reason: "no previous task" };
+    }
 
     const lastTask = lastTasks[0];
     const scenario = lastTask.scenario ?? null;
@@ -90,7 +94,9 @@ export async function tryCreatePostponedTask(
           .select("unit_id")
           .in("picking_task_id", chunk);
         const inTask = (taskUnits ?? []).some((tu: any) => tu.unit_id === unitId);
-        if (inTask) return { created: false, reason: "unit already in open task" };
+        if (inTask) {
+          return { created: false, reason: "unit already in open task" };
+        }
       }
     }
 

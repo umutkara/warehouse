@@ -139,23 +139,11 @@ export default function UnitDetailPage() {
 
       if (res.ok) {
         const historyList = json.history || [];
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/app/units/[unitId]/page.tsx:110',message:'History loaded in UI',data:{totalEvents:historyList.length,eventTypes:historyList.map((e:any)=>e.event_type),taskEvents:historyList.filter((e:any)=>e.event_type?.includes('picking_task')).map((e:any)=>({type:e.event_type,details:e.details}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        
-        console.log(`[Unit History] Loaded ${historyList.length} events`);
-        console.log(`[Unit History] Events:`, historyList.map((e: any) => ({
-          type: e.event_type,
-          date: e.created_at,
-          details: e.details
-        })));
-        
+
         // Count task events
         const taskEvents = historyList.filter((e: any) => 
           e.event_type?.includes("picking_task")
         );
-        console.log(`[Unit History] Task events: ${taskEvents.length}`, taskEvents);
         
         setHistory(historyList);
       } else {

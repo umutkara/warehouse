@@ -58,18 +58,10 @@ export async function GET(
 
     // Load picking tasks for this unit
     // Check both new format (picking_task_units) and legacy (unit_id)
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:61',message:'Before querying picking_task_units',data:{unitId,warehouseId:profile.warehouse_id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-
     const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
       .from("picking_task_units")
       .select("picking_task_id")
       .eq("unit_id", unitId);
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:65',message:'After querying picking_task_units',data:{hasError:!!taskUnitsError,error:taskUnitsError?.message,foundCount:taskUnits?.length||0,taskUnits:taskUnits},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     if (taskUnitsError) {
       console.error("Error loading picking_task_units:", taskUnitsError);
@@ -90,13 +82,6 @@ export async function GET(
 
     const legacyTaskIds = legacyTasks?.map((t) => t.id) || [];
     const allTaskIds = [...new Set([...taskIds, ...legacyTaskIds])];
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:84',message:'Collected task IDs',data:{taskIdsCount:taskIds.length,legacyTaskIdsCount:legacyTaskIds.length,allTaskIdsCount:allTaskIds.length,allTaskIds},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-
-    console.log(`[History] Unit ${unitId}: Found ${taskIds.length} tasks via picking_task_units, ${legacyTaskIds.length} via legacy, total: ${allTaskIds.length}`);
-    console.log(`[History] Task IDs:`, allTaskIds);
 
     // Get all tasks with full information
     let tasks: any[] = [];
@@ -126,28 +111,14 @@ export async function GET(
         console.error("[History] Error loading tasks:", tasksDataError);
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:94',message:'Tasks loaded from DB (all warehouses)',data:{requestedCount:allTaskIds.length,loadedCount:tasksData?.length||0,userWarehouseId:profile.warehouse_id,requestedTaskIds:allTaskIds,foundTaskIds:tasksData?.map(t=>t.id)||[],tasks:tasksData?.map(t=>({id:t.id,status:t.status,warehouse_id:t.warehouse_id,warehouseMatch:t.warehouse_id===profile.warehouse_id}))||[]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-
       // Filter by warehouse_id (only if tasks exist)
       if (tasksData && tasksData.length > 0) {
         tasks = tasksData.filter((t) => t.warehouse_id === profile.warehouse_id);
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:111',message:'After filtering by warehouse_id',data:{beforeFilter:tasksData.length,afterFilter:tasks.length,warehouseId:profile.warehouse_id,filteredOut:tasksData.length-tasks.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
       } else {
         // Tasks don't exist in picking_tasks (orphaned picking_task_units records)
         console.warn(`[History] Warning: Found ${allTaskIds.length} task IDs in picking_task_units, but ${tasksData?.length || 0} tasks exist in picking_tasks. Orphaned records detected.`);
         tasks = [];
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:120',message:'Orphaned picking_task_units detected',data:{taskIdsInJunction:allTaskIds.length,tasksInDB:tasksData?.length||0,orphanedTaskIds:allTaskIds},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
       }
-      
-      console.log(`[History] Loaded ${tasks.length} tasks after warehouse filter (warehouse_id: ${profile.warehouse_id})`);
       
       // Get cell codes for all target cells
       const targetCellIds = tasks
@@ -171,11 +142,7 @@ export async function GET(
     // Convert tasks to history events
     // For canceled/done tasks, create TWO events: creation + cancellation/completion
     const taskEvents: any[] = [];
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:133',message:'Before converting tasks to events',data:{tasksCount:tasks.length,tasks:tasks.map(t=>({id:t.id,status:t.status}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
+
     tasks.forEach((task) => {
       const targetCellCode = task.target_picking_cell_id 
         ? (cellCodesMap.get(task.target_picking_cell_id) || "?")
@@ -234,12 +201,6 @@ export async function GET(
       const dateB = new Date(b.created_at).getTime();
       return dateB - dateA; // Newest first
     });
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/units/[unitId]/history/route.ts:199',message:'Final history before return',data:{existingCount:existingHistory.length,taskEventsCount:taskEvents.length,totalCount:allHistory.length,taskEventTypes:taskEvents.map(e=>e.event_type),allEventTypes:allHistory.map(e=>e.event_type)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-
-    console.log(`[History] Final: ${existingHistory.length} existing events + ${taskEvents.length} task events = ${allHistory.length} total`);
 
     return NextResponse.json({
       ok: true,
