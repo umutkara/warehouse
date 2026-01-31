@@ -24,8 +24,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  // Check role: worker + ops + admin/head/manager can view
-  if (!["worker", "ops", "admin", "head", "manager"].includes(profile.role)) {
+  // Check role: worker, ops, logistics, admin, head, manager can view
+  if (!["worker", "ops", "logistics", "admin", "head", "manager"].includes(profile.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
