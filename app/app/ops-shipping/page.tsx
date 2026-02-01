@@ -179,8 +179,10 @@ export default function OpsShippingPage() {
   const [lastCreatedCount, setLastCreatedCount] = useState<number | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ created: number; total: number } | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [importTasksCountAfter, setImportTasksCountAfter] = useState<number | null>(null);
   
   // Modal state
   const [modalUnitId, setModalUnitId] = useState<string | null>(null);
@@ -224,11 +226,13 @@ export default function OpsShippingPage() {
   }, []);
 
   // Load available units from storage/shipping. Optional signal for mount-only load (avoids duplicate calls).
-  async function loadAvailableUnits(abortSignal?: AbortSignal) {
+  // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
+  async function loadAvailableUnits(abortSignal?: AbortSignal, cacheBust?: boolean) {
     setLoadingUnits(true);
     setError(null);
+    const url = cacheBust ? `/api/units/storage-shipping?_t=${Date.now()}` : "/api/units/storage-shipping";
     try {
-      const res = await fetch("/api/units/storage-shipping", { cache: "no-store", signal: abortSignal });
+      const res = await fetch(url, { cache: "no-store", signal: abortSignal });
       if (abortSignal?.aborted) return;
 
       const contentType = res.headers.get("content-type");
@@ -260,33 +264,43 @@ export default function OpsShippingPage() {
   }
 
   // Load tasks. Optional signal for mount-only load (avoids duplicate calls).
-  async function loadTasks(abortSignal?: AbortSignal) {
+  // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
+  // Returns the number of tasks loaded (for showing "В списке теперь N задач" after import).
+  async function loadTasks(abortSignal?: AbortSignal, cacheBust?: boolean): Promise<number> {
     setLoadingTasks(true);
+    const base = "/api/tsd/shipping-tasks/list";
+    const params = new URLSearchParams();
+    if (cacheBust) params.set("_t", String(Date.now()));
+    const url = params.toString() ? `${base}?${params.toString()}` : base;
     try {
-      const res = await fetch("/api/tsd/shipping-tasks/list", { cache: "no-store", signal: abortSignal });
-      if (abortSignal?.aborted) return;
+      const res = await fetch(url, { cache: "no-store", signal: abortSignal });
+      if (abortSignal?.aborted) return 0;
 
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         const text = await res.text();
         console.error("Non-JSON response from /api/tsd/shipping-tasks/list:", text);
         setTasks([]);
-        return;
+        return 0;
       }
 
       const json = await res.json();
-      if (abortSignal?.aborted) return;
+      if (abortSignal?.aborted) return 0;
 
       if (res.ok) {
-        setTasks(json.tasks || []);
+        const taskList = json.tasks || [];
+        setTasks(taskList);
+        return taskList.length;
       } else {
         console.error("Error loading tasks:", json.error || "Unknown error");
         setTasks([]);
+        return 0;
       }
     } catch (e: any) {
-      if (e?.name === "AbortError") return;
+      if (e?.name === "AbortError") return 0;
       console.error("Failed to load tasks:", e);
       setTasks([]);
+      return 0;
     } finally {
       if (!abortSignal?.aborted) setLoadingTasks(false);
     }
@@ -577,6 +591,7 @@ export default function OpsShippingPage() {
     setImporting(true);
     setImportErrors([]);
     setImportSuccess(null);
+    setImportTasksCountAfter(null);
     setError(null);
 
     try {
@@ -656,19 +671,110 @@ export default function OpsShippingPage() {
         body: JSON.stringify({ rows }),
       });
 
-      const json = await res.json();
+      const contentType = res.headers.get("content-type") || "";
 
-      if (!res.ok || !json.ok) {
-        setImportErrors([json.error || "Ошибка импорта"]);
-        return;
+      if (contentType.includes("ndjson")) {
+        // Streaming: read progress and done from NDJSON stream
+        const reader = res.body?.getReader();
+        if (!reader) {
+          setImportErrors(["Ошибка чтения ответа"]);
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let gotDone = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj.type === "progress") {
+                setImportProgress({ created: obj.created, total: obj.total });
+                if (obj.created % 50 === 0) loadTasks(undefined, true);
+              } else if (obj.type === "done") {
+                gotDone = true;
+                setImportProgress(null);
+                if (obj.ok !== false && Array.isArray(obj.errors) && obj.errors.length > 0) {
+                  setImportErrors(obj.errors.map((e: any) => `Строка ${e.rowIndex}: ${e.message}`));
+                }
+                if (obj.ok === false) {
+                  setImportErrors([obj.errors?.[0]?.message || "Ошибка импорта"]);
+                }
+                const createdCount = obj.created ?? 0;
+                const availCount = obj.availableUnitsCount ?? null;
+                setImportSuccess(
+                  availCount !== null
+                    ? `Создано заданий: ${createdCount}. Доступных для матчинга: ${availCount}. Обновляю списки…`
+                    : `Создано заданий: ${createdCount}. Обновляю списки…`
+                );
+                const [tasksCount] = await Promise.all([loadTasks(undefined, true), loadAvailableUnits(undefined, true)]);
+                setImportTasksCountAfter(tasksCount);
+                setImportSuccess(
+                  availCount !== null
+                    ? `Создано заданий: ${createdCount}. Доступных для матчинга: ${availCount}. В списке теперь ${tasksCount} задач.`
+                    : `Создано заданий: ${createdCount}. В списке теперь ${tasksCount} задач.`
+                );
+              }
+            } catch (parseErr) {
+              // ignore malformed NDJSON line
+            }
+          }
+        }
+        if (buffer.trim()) {
+          try {
+            const obj = JSON.parse(buffer);
+            if (obj.type === "done") {
+              gotDone = true;
+              setImportProgress(null);
+              if (obj.ok !== false && Array.isArray(obj.errors) && obj.errors.length > 0) {
+                setImportErrors(obj.errors.map((e: any) => `Строка ${e.rowIndex}: ${e.message}`));
+              }
+              const createdCount = obj.created ?? 0;
+              const availCount = obj.availableUnitsCount ?? null;
+              setImportSuccess(`Создано заданий: ${createdCount}. Обновляю списки…`);
+              const [tasksCount] = await Promise.all([loadTasks(undefined, true), loadAvailableUnits(undefined, true)]);
+              setImportTasksCountAfter(tasksCount);
+              setImportSuccess(
+                availCount !== null
+                  ? `Создано заданий: ${createdCount}. Доступных для матчинга: ${availCount}. В списке теперь ${tasksCount} задач.`
+                  : `Создано заданий: ${createdCount}. В списке теперь ${tasksCount} задач.`
+              );
+            }
+          } catch (parseErr) {
+            // ignore malformed NDJSON buffer
+          }
+        }
+        if (!gotDone) {
+          setImportSuccess("Импорт завершён. Обновляю списки…");
+          const [tasksCount] = await Promise.all([loadTasks(undefined, true), loadAvailableUnits(undefined, true)]);
+          setImportTasksCountAfter(tasksCount);
+          setImportSuccess(`В списке теперь ${tasksCount} задач.`);
+        }
+      } else {
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          setImportErrors([json.error || "Ошибка импорта"]);
+          return;
+        }
+        if (Array.isArray(json.errors) && json.errors.length > 0) {
+          setImportErrors(json.errors.map((e: any) => `Строка ${e.rowIndex}: ${e.message}`));
+        }
+        const createdCount = json.created ?? 0;
+        const availCount = json.availableUnitsCount ?? null;
+        setImportSuccess(`Создано заданий: ${createdCount}. Обновляю списки…`);
+        const [tasksCount] = await Promise.all([loadTasks(undefined, true), loadAvailableUnits(undefined, true)]);
+        setImportTasksCountAfter(tasksCount);
+        setImportSuccess(
+          availCount !== null
+            ? `Создано заданий: ${createdCount}. Доступных для матчинга: ${availCount}. В списке теперь ${tasksCount} задач.`
+            : `Создано заданий: ${createdCount}. В списке теперь ${tasksCount} задач.`
+        );
       }
-
-      if (Array.isArray(json.errors) && json.errors.length > 0) {
-        setImportErrors(json.errors.map((e: any) => `Строка ${e.rowIndex}: ${e.message}`));
-      }
-
-      setImportSuccess(`Создано заданий: ${json.created || 0}`);
-      await Promise.all([loadTasks(), loadAvailableUnits()]);
     } catch (e: any) {
       console.error("Import Excel error:", e);
       setImportErrors([e.message || "Ошибка импорта"]);
@@ -727,8 +833,8 @@ export default function OpsShippingPage() {
       setSelectedUnitIds(new Set());
       setScenarioCategory("");
       setScenarioDestination("");
-      // Reload tasks and units
-      await Promise.all([loadTasks(), loadAvailableUnits()]);
+      // Reload tasks and units (cacheBust to avoid stale list after create)
+      await Promise.all([loadTasks(undefined, true), loadAvailableUnits(undefined, true)]);
     } catch (e: any) {
       setError(e.message || "Ошибка создания заданий");
     } finally {
@@ -813,6 +919,11 @@ export default function OpsShippingPage() {
 
         <div style={{ padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px dashed #d1d5db", marginBottom: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>📥 Импорт заданий из Excel</div>
+          {importProgress && (
+            <div style={{ fontSize: 13, color: "#1976d2", marginBottom: 8, fontWeight: 600 }}>
+              Обработано {importProgress.created} из {importProgress.total} заданий…
+            </div>
+          )}
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
             Формат колонок: <strong>заказ</strong> / <strong>куда</strong> / <strong>сценарий</strong> / <strong>код ячейки picking</strong>.
             Поле <strong>сценарий</strong> может отличаться от <strong>куда</strong> (обычно ручной ввод).

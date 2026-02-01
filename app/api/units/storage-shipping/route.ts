@@ -66,21 +66,33 @@ export async function GET(req: Request) {
     }
   }
 
-  // Get all picking tasks that are open or in_progress (use supabaseAdmin to bypass RLS)
-  const { data: pickingTasks, error: tasksError } = await supabaseAdmin
-    .from("picking_tasks")
-    .select("unit_id, id")
-    .eq("warehouse_id", profile.warehouse_id)
-    .in("status", ["open", "in_progress"]);
+  // Get all picking tasks that are open or in_progress. Supabase returns max 1000 per request — fetch in pages so we don't miss units from tasks beyond the first 1000.
+  const pageSize = 1000;
+  const maxPages = 5;
+  let pickingTasks: { unit_id: string | null; id: string }[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data: pageTasks, error: pageError } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("unit_id, id")
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("status", ["open", "in_progress"])
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-  if (tasksError) {
-    console.error("Error loading picking tasks:", tasksError);
-    return NextResponse.json({ error: tasksError.message }, { status: 400 });
+    if (pageError) {
+      console.error("Error loading picking tasks:", pageError);
+      return NextResponse.json({ error: pageError.message }, { status: 400 });
+    }
+    if (!pageTasks?.length) break;
+    pickingTasks.push(...pageTasks);
+    if (pageTasks.length < pageSize) break;
   }
 
   // Get units from picking_task_units (new multi-unit schema).
   // Chunk by 100: Supabase/Postgres limit on IN() size, so 835+ task IDs would return no rows.
-  const taskIds = (pickingTasks || []).map((t) => t.id).filter(Boolean);
+  const taskIds = pickingTasks.map((t) => t.id).filter(Boolean);
   const unitsFromMultiUnitTasks: string[] = [];
   const chunkSize = 100;
   for (let i = 0; i < taskIds.length; i += chunkSize) {
@@ -97,7 +109,7 @@ export async function GET(req: Request) {
 
   // Create a set of unit IDs that are already in tasks (both old and new schema)
   const unitIdsInTasks = new Set([
-    ...(pickingTasks || []).map((task) => task.unit_id).filter(Boolean),
+    ...pickingTasks.map((task) => task.unit_id).filter(Boolean),
     ...unitsFromMultiUnitTasks,
   ]);
 

@@ -55,22 +55,10 @@ export async function POST(req: Request) {
     );
   }
 
-  // Get task with unit (use admin to bypass RLS)
+  // Get task (no units!inner: import-created tasks have unit_id null, unit is in picking_task_units)
   const { data: task, error: taskError } = await supabaseAdmin
     .from("picking_tasks")
-    .select(`
-      id,
-      status,
-      warehouse_id,
-      unit_id,
-      target_picking_cell_id,
-      units!inner (
-        id,
-        barcode,
-        cell_id,
-        warehouse_id
-      )
-    `)
+    .select("id, status, warehouse_id, unit_id, target_picking_cell_id")
     .eq("id", taskId)
     .single();
 
@@ -92,6 +80,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Задача отменена" }, { status: 400 });
   }
 
+  // Resolve unit: legacy (task.unit_id) or from picking_task_units (import-created)
+  let unit: { id: string; barcode: string; cell_id: string | null; warehouse_id: string } | null = null;
+  if (task.unit_id) {
+    const { data: u } = await supabaseAdmin
+      .from("units")
+      .select("id, barcode, cell_id, warehouse_id")
+      .eq("id", task.unit_id)
+      .single();
+    unit = u;
+  }
+  if (!unit) {
+    const { data: taskUnits } = await supabaseAdmin
+      .from("picking_task_units")
+      .select("unit_id")
+      .eq("picking_task_id", taskId);
+    const unitIds = (taskUnits || []).map((r: { unit_id: string }) => r.unit_id).filter(Boolean);
+    if (unitIds.length > 0) {
+      const { data: units } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, cell_id, warehouse_id")
+        .in("id", unitIds);
+      const match = (units || []).find((u: any) => u.barcode === unitBarcode || (normalizeBarcode(u.barcode) === normalizeBarcode(unitBarcode)));
+      unit = match || null;
+    }
+  }
+  if (!unit || !unit.barcode) {
+    return NextResponse.json({ error: "Unit not found in task" }, { status: 404 });
+  }
+
   // Update task to in_progress if it was open (use admin to bypass RLS)
   const updateToInProgress = task.status === "open";
   if (updateToInProgress) {
@@ -108,12 +125,6 @@ export async function POST(req: Request) {
       console.error("Failed to update task to in_progress:", inProgressError);
       // Continue anyway - task update is not critical at this point
     }
-  }
-
-  // Handle units - can be array or object depending on Supabase type inference
-  const unit = Array.isArray(task.units) ? task.units[0] : task.units;
-  if (!unit || !unit.barcode) {
-    return NextResponse.json({ error: "Unit not found in task" }, { status: 404 });
   }
 
   // Verify unit barcode matches

@@ -29,31 +29,41 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Get open and in_progress tasks
-  // Use supabaseAdmin to bypass RLS (avoid recursive policies)
-  const { data: tasks, error: tasksError } = await supabaseAdmin
-    .from("picking_tasks")
-    .select(`
-      id,
-      status,
-      scenario,
-      created_at,
-      created_by_name,
-      picked_at,
-      picked_by,
-      completed_at,
-      target_picking_cell_id
-    `)
-    .eq("warehouse_id", profile.warehouse_id)
-    .in("status", ["open", "in_progress"])
-    .order("created_at", { ascending: true });
+  // Get open and in_progress tasks: newest first. Supabase defaults to max 1000 rows per request, so fetch in chunks to get up to 5000.
+  const pageSize = 1000;
+  const maxPages = 5;
+  let tasks: any[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data: pageData, error: pageError } = await supabaseAdmin
+      .from("picking_tasks")
+      .select(`
+        id,
+        status,
+        scenario,
+        created_at,
+        created_by_name,
+        picked_at,
+        picked_by,
+        completed_at,
+        target_picking_cell_id
+      `)
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("status", ["open", "in_progress"])
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-  if (tasksError) {
-    console.error("Error loading picking_tasks:", tasksError);
-    return NextResponse.json({ error: tasksError.message }, { status: 400 });
+    if (pageError) {
+      console.error("Error loading picking_tasks:", pageError);
+      return NextResponse.json({ error: pageError.message }, { status: 400 });
+    }
+    if (!pageData?.length) break;
+    tasks.push(...pageData);
+    if (pageData.length < pageSize) break;
   }
 
-  if (!tasks || tasks.length === 0) {
+  if (tasks.length === 0) {
     return NextResponse.json({
       ok: true,
       tasks: [],
@@ -124,22 +134,23 @@ export async function GET(req: Request) {
     if (!unitsMap.has(tu.picking_task_id)) {
       unitsMap.set(tu.picking_task_id, []);
     }
+    const unitData = tu.units ?? tu.unit;
     unitsMap.get(tu.picking_task_id)!.push({
-      ...tu.units,
+      ...unitData,
       from_cell_id: tu.from_cell_id,
     });
-    if (tu.units?.id) {
-      unitIdCounts.set(tu.units.id, (unitIdCounts.get(tu.units.id) || 0) + 1);
+    if (unitData?.id) {
+      unitIdCounts.set(unitData.id, (unitIdCounts.get(unitData.id) || 0) + 1);
     }
   });
 
   const tasksWithNoUnits = sortedTasks.filter((t: any) => (unitsMap.get(t.id) || []).length === 0);
+  // Hide tasks where every unit has no cell_id or no id from join (match prod: only show tasks with valid unit data)
   const tasksAllUnitsMissingCells = sortedTasks.filter((t: any) => {
     const units = unitsMap.get(t.id) || [];
     if (units.length === 0) return false;
-    return units.every((u: any) => !u.cell_id);
+    return units.every((u: any) => !u.cell_id || !u.id);
   });
-
 
   const fullyPickedTasks = sortedTasks.filter((t: any) => {
     const units = unitsMap.get(t.id) || [];
@@ -152,7 +163,8 @@ export async function GET(req: Request) {
   const unitCellIds: string[] = [];
   const fromCellIds: string[] = [];
   (taskUnits || []).forEach((tu: any) => {
-    if (tu.units?.cell_id) unitCellIds.push(tu.units.cell_id);
+    const ud = tu.units ?? tu.unit;
+    if (ud?.cell_id) unitCellIds.push(ud.cell_id);
     if (tu.from_cell_id) fromCellIds.push(tu.from_cell_id);
   });
   
@@ -181,10 +193,30 @@ export async function GET(req: Request) {
     tasksAllUnitsMissingCells.map((t: any) => t.id)
   );
 
-  // Format response (hide fully picked tasks)
-  const formattedTasks = sortedTasks
-    .filter((task: any) => !fullyPickedIds.has(task.id) && !allUnitsMissingCellsIds.has(task.id))
-    .flatMap((task: any) => {
+  const tasksAfterFilter = sortedTasks.filter(
+    (task: any) => !fullyPickedIds.has(task.id) && !allUnitsMissingCellsIds.has(task.id)
+  );
+  // Deduplicate by unit: keep only one task per unit (the newest by created_at) so duplicates from repeated imports don't inflate the list
+  const byCreatedDesc = [...tasksAfterFilter].sort(
+    (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  const seenUnitIds = new Set<string>();
+  const dedupedTasks: any[] = [];
+  for (const task of byCreatedDesc) {
+    const units = unitsMap.get(task.id) || [];
+    const unitIds = units.map((u: any) => u.id).filter(Boolean);
+    if (unitIds.length === 0) {
+      dedupedTasks.push(task);
+      continue;
+    }
+    const alreadySeen = unitIds.some((id: string) => seenUnitIds.has(id));
+    if (alreadySeen) continue;
+    dedupedTasks.push(task);
+    unitIds.forEach((id: string) => seenUnitIds.add(id));
+  }
+
+  // Format response
+  const formattedTasks = dedupedTasks.flatMap((task: any) => {
     const units = unitsMap.get(task.id) || [];
     const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;
@@ -227,8 +259,5 @@ export async function GET(req: Request) {
     return formatted;
   });
 
-  return NextResponse.json({
-    ok: true,
-    tasks: formattedTasks,
-  });
+  return NextResponse.json({ ok: true, tasks: formattedTasks });
 }

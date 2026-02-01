@@ -76,6 +76,7 @@ export async function POST(req: Request) {
     const { data: cells, error: cellsError } = await supabaseAdmin
       .from("warehouse_cells_map")
       .select("id, code, cell_type")
+      .eq("warehouse_id", profile.warehouse_id)
       .in("id", cellIds);
 
     if (cellsError) {
@@ -89,30 +90,47 @@ export async function POST(req: Request) {
       }
     });
 
-    const { data: pickingTasks, error: tasksError } = await supabaseAdmin
-      .from("picking_tasks")
-      .select("unit_id, id")
-      .eq("warehouse_id", profile.warehouse_id)
-      .in("status", ["open", "in_progress"]);
+    // Fetch all open/in_progress tasks (paginate: Supabase returns max 1000 per request)
+    const pageSize = 1000;
+    const maxPages = 10;
+    let pickingTasks: { unit_id: string | null; id: string }[] = [];
+    for (let page = 0; page < maxPages; page++) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data: pageTasks, error: pageError } = await supabaseAdmin
+        .from("picking_tasks")
+        .select("unit_id, id")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("status", ["open", "in_progress"])
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
-    if (tasksError) {
-      return NextResponse.json({ error: tasksError.message }, { status: 400 });
+      if (pageError) {
+        return NextResponse.json({ error: pageError.message }, { status: 400 });
+      }
+      if (!pageTasks?.length) break;
+      pickingTasks.push(...pageTasks);
+      if (pageTasks.length < pageSize) break;
     }
 
-    const taskIds = (pickingTasks || []).map((t) => t.id).filter(Boolean);
+    const taskIds = pickingTasks.map((t) => t.id).filter(Boolean);
     let unitsFromMultiUnitTasks: string[] = [];
     if (taskIds.length > 0) {
-      const { data: taskUnits } = await supabaseAdmin
-        .from("picking_task_units")
-        .select("unit_id")
-        .in("picking_task_id", taskIds);
-      if (taskUnits) {
-        unitsFromMultiUnitTasks = taskUnits.map((tu) => tu.unit_id).filter(Boolean);
+      const chunkSize = 200;
+      for (let i = 0; i < taskIds.length; i += chunkSize) {
+        const chunk = taskIds.slice(i, i + chunkSize);
+        const { data: taskUnits } = await supabaseAdmin
+          .from("picking_task_units")
+          .select("unit_id")
+          .in("picking_task_id", chunk);
+        if (taskUnits) {
+          unitsFromMultiUnitTasks.push(...taskUnits.map((tu) => tu.unit_id).filter(Boolean));
+        }
       }
     }
 
     const unitIdsInTasks = new Set([
-      ...(pickingTasks || []).map((task) => task.unit_id).filter(Boolean),
+      ...pickingTasks.map((task) => task.unit_id).filter(Boolean),
       ...unitsFromMultiUnitTasks,
     ]);
 
@@ -171,12 +189,17 @@ export async function POST(req: Request) {
     });
 
     const errors: Array<{ rowIndex: number; message: string }> = [];
-    let created = 0;
     const usedUnitIds = new Set<string>();
-    let matched = 0;
-    let notFound = 0;
-
     const SCENARIO_FROM = "Склад Возвратов";
+    const creatorName = profile.full_name || userData.user.email || "Unknown";
+
+    type ValidRow = {
+      rowIndex: number;
+      matchedUnit: { id: string; barcode: string; cell_id: string };
+      targetCell: (typeof pickingCells)[number];
+      scenarioValue: string;
+    };
+    const validRows: ValidRow[] = [];
 
     for (const row of rows) {
       const rowIndex = row.rowIndex ?? 0;
@@ -211,11 +234,9 @@ export async function POST(req: Request) {
 
       const matchedUnit = normalizedMap.get(normalizedOrder);
       if (!matchedUnit) {
-        notFound += 1;
         errors.push({ rowIndex, message: "Заказ не найден среди доступных" });
         continue;
       }
-      matched += 1;
 
       if (usedUnitIds.has(matchedUnit.id)) {
         errors.push({ rowIndex, message: "Заказ повторяется в файле" });
@@ -232,7 +253,6 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const creatorName = profile.full_name || userData.user.email || "Unknown";
       let scenarioValue = scenario || destination;
       if (destination) {
         const hasArrow = scenarioValue.includes("→");
@@ -243,84 +263,81 @@ export async function POST(req: Request) {
         }
       }
 
-      const taskToInsert = {
-        warehouse_id: profile.warehouse_id,
-        unit_id: null,
-        from_cell_id: null,
-        target_picking_cell_id: targetCell.id,
-        scenario: scenarioValue,
-        status: "open",
-        created_by: userData.user.id,
-        created_by_name: creatorName,
-      };
-
-      const { data: insertedTasks, error: insertError } = await supabaseAdmin
-        .from("picking_tasks")
-        .insert([taskToInsert])
-        .select();
-
-      if (insertError || !insertedTasks?.[0]?.id) {
-        errors.push({ rowIndex, message: insertError?.message || "Не удалось создать задачу" });
-        continue;
-      }
-
-      const taskId = insertedTasks[0].id;
-
-      const { error: unitsInsertError } = await supabaseAdmin
-        .from("picking_task_units")
-        .insert([
-          {
-            picking_task_id: taskId,
-            unit_id: matchedUnit.id,
-            from_cell_id: matchedUnit.cell_id,
-          },
-        ]);
-
-      if (unitsInsertError) {
-        await supabaseAdmin.from("picking_tasks").delete().eq("id", taskId);
-        errors.push({ rowIndex, message: unitsInsertError.message });
-        continue;
-      }
-
-      // Audit log for task
-      await supabase.rpc("audit_log_event", {
-        p_action: "picking_task_create",
-        p_entity_type: "picking_task",
-        p_entity_id: taskId,
-        p_summary: `Создано задание для ячейки ${targetCell.code} (${creatorName}) с 1 заказом`,
-        p_meta: {
-          task_id: taskId,
-          unit_count: 1,
-          unit_barcodes: [matchedUnit.barcode],
-          target_picking_cell_id: targetCell.id,
-          target_picking_cell_code: targetCell.code,
-          created_by_name: creatorName,
-          scenario: scenarioValue,
-        },
-      });
-
-      // Audit log for unit
-      await supabase.rpc("audit_log_event", {
-        p_action: "picking_task_create",
-        p_entity_type: "unit",
-        p_entity_id: matchedUnit.id,
-        p_summary: `Создано задание на отгрузку в ячейку ${targetCell.code} (${scenarioValue})`,
-        p_meta: {
-          task_id: taskId,
-          target_picking_cell_id: targetCell.id,
-          target_picking_cell_code: targetCell.code,
-          created_by_name: creatorName,
-          scenario: scenarioValue,
-        },
-      });
-
       usedUnitIds.add(matchedUnit.id);
-      created += 1;
+      validRows.push({ rowIndex, matchedUnit, targetCell, scenarioValue });
     }
-    return NextResponse.json({
-      ok: true,
-      created,
-      errors,
+
+    if (validRows.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        created: 0,
+        errors,
+        availableUnitsCount: availableUnits.length,
+      });
+    }
+
+    // Stream progress: batch insert (50 per batch) and send progress after each batch
+    const BATCH_SIZE = 50;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        let created = 0;
+        try {
+          for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+            const batch = validRows.slice(i, i + BATCH_SIZE);
+            const taskRows = batch.map((v) => ({
+              warehouse_id: profile.warehouse_id,
+              unit_id: null,
+              from_cell_id: null,
+              target_picking_cell_id: v.targetCell.id,
+              scenario: v.scenarioValue,
+              status: "open",
+              created_by: userData.user.id,
+              created_by_name: creatorName,
+            }));
+
+            const { data: insertedTasks, error: insertError } = await supabaseAdmin
+              .from("picking_tasks")
+              .insert(taskRows)
+              .select("id");
+
+            if (insertError || !insertedTasks?.length) {
+              batch.forEach((v) => errors.push({ rowIndex: v.rowIndex, message: insertError?.message || "Не удалось создать задачу" }));
+              continue;
+            }
+
+            const taskUnitsToInsert = insertedTasks.map((t, idx) => ({
+              picking_task_id: t.id,
+              unit_id: batch[idx].matchedUnit.id,
+              from_cell_id: batch[idx].matchedUnit.cell_id,
+            }));
+
+            const { error: unitsInsertError } = await supabaseAdmin
+              .from("picking_task_units")
+              .insert(taskUnitsToInsert);
+
+            if (unitsInsertError) {
+              const ids = insertedTasks.map((t) => t.id).filter(Boolean);
+              if (ids.length > 0) await supabaseAdmin.from("picking_tasks").delete().in("id", ids);
+              batch.forEach((v) => errors.push({ rowIndex: v.rowIndex, message: unitsInsertError.message }));
+              continue;
+            }
+
+            created += batch.length;
+            controller.enqueue(encoder.encode(JSON.stringify({ type: "progress", created, total: validRows.length }) + "\n"));
+          }
+          const donePayload = { type: "done", ok: true, created, errors, availableUnitsCount: availableUnits.length };
+          controller.enqueue(encoder.encode(JSON.stringify(donePayload) + "\n"));
+        } catch (e: any) {
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "done", ok: false, created: 0, errors: [...errors, { rowIndex: 0, message: e?.message || "Internal error" }], availableUnitsCount: availableUnits.length }) + "\n"));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson" },
     });
   } catch (e: any) {
     console.error("Import picking tasks error:", e);
