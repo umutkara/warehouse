@@ -38,6 +38,8 @@ export default function OutboundAdminPage() {
   const [bulkCellCode, setBulkCellCode] = useState<string>("");
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ updated: number; errors: Array<{ barcode: string; message: string }> } | null>(null);
+  const [deleteUnitBarcode, setDeleteUnitBarcode] = useState<string>("");
+  const [deletingUnit, setDeletingUnit] = useState(false);
 
   useEffect(() => {
     async function loadRole() {
@@ -174,6 +176,32 @@ export default function OutboundAdminPage() {
       setError(e.message || "Ошибка очистки picking ячеек");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDeleteUnit() {
+    if (!deleteUnitBarcode.trim()) return;
+    if (!confirm(`Удалить заказ ${deleteUnitBarcode} из БД навсегда? Это действие нельзя отменить.`)) {
+      return;
+    }
+    setDeletingUnit(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/units/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barcode: deleteUnitBarcode.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Ошибка удаления заказа");
+        return;
+      }
+      setDeleteUnitBarcode("");
+    } catch (e: any) {
+      setError(e.message || "Ошибка удаления заказа");
+    } finally {
+      setDeletingUnit(false);
     }
   }
 
@@ -427,6 +455,36 @@ export default function OutboundAdminPage() {
             }}
           >
             Удалить из ячейки
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>🗑️ Удаление заказа из БД (полное)</h2>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+          Удаляет заказ из таблицы units и связанные записи (picking_task_units, unit_moves, outbound_shipments). Необратимо.
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <input
+            value={deleteUnitBarcode}
+            onChange={(e) => setDeleteUnitBarcode(e.target.value)}
+            placeholder="Штрихкод заказа"
+            style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+          />
+          <button
+            onClick={handleDeleteUnit}
+            disabled={deletingUnit || role !== "admin" || !deleteUnitBarcode.trim()}
+            style={{
+              padding: "10px 16px",
+              background: deletingUnit || !deleteUnitBarcode.trim() ? "#e5e7eb" : "#dc2626",
+              color: deletingUnit || !deleteUnitBarcode.trim() ? "#6b7280" : "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: deletingUnit || !deleteUnitBarcode.trim() ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {deletingUnit ? "Удаление..." : "Удалить из БД"}
           </button>
         </div>
       </div>

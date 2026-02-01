@@ -595,7 +595,7 @@ export default function WarehouseMapPage() {
           +
         </button>
         <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 4 }}>
-          Колёсико мыши — масштаб, перетаскивание пустого места — сдвиг карты
+          Перетаскивание пустого места — сдвиг карты
         </span>
       </div>
 
@@ -608,11 +608,6 @@ export default function WarehouseMapPage() {
           borderRadius: 16,
           border: "1px solid #e5e7eb",
           background: "#f9fafb",
-        }}
-        onWheel={(e) => {
-          e.preventDefault();
-          const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-          setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + delta)));
         }}
         onMouseLeave={() => {
           if (isPanning) setIsPanning(false);
@@ -1480,6 +1475,7 @@ export default function WarehouseMapPage() {
           )}
         </div>
       )}
+      </div>
       </div>
     </>
   );
