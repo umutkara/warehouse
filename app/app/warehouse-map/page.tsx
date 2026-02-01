@@ -137,10 +137,20 @@ export default function WarehouseMapPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const canEdit = ["manager", "head", "admin"].includes(role);
+  const canDragCells = ["worker", "manager", "head", "admin"].includes(role);
 
   const [dragId, setDragId] = useState<string | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  
+
+  // Zoom и pan карты (не меняют логику ячеек)
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 2;
+  const ZOOM_STEP = 0.2;
+
   // Используем useRef для отслеживания последнего загруженного cellId, чтобы избежать повторных загрузок
   const lastLoadedCellIdRef = useRef<string | null>(null);
   const moveLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -540,43 +550,172 @@ export default function WarehouseMapPage() {
 
       {err && <div style={{ color: "crimson" }}>{err}</div>}
 
-      <div
-        onMouseMove={(e) => {
-          if (!dragId) return;
-          setCells((prev) =>
-            prev.map((c) =>
-              c.id === dragId
-                ? { ...c, x: e.clientX - offset.x, y: e.clientY - offset.y }
-                : c
-            )
-          );
-        }}
-        onMouseUp={async () => {
-          if (!dragId) return;
-          const cell = cells.find((c) => c.id === dragId);
-          setDragId(null);
-          if (!cell) return;
+      {/* Zoom: кнопки */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Масштаб:</span>
+        <button
+          type="button"
+          onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP))}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            border: "1px solid #e5e7eb",
+            background: "#fff",
+            fontSize: 18,
+            fontWeight: 700,
+            cursor: "pointer",
+            color: "#374151",
+            lineHeight: 1,
+          }}
+          title="Уменьшить"
+        >
+          −
+        </button>
+        <span style={{ fontSize: 13, fontWeight: 600, minWidth: 44, textAlign: "center" }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP))}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            border: "1px solid #e5e7eb",
+            background: "#fff",
+            fontSize: 18,
+            fontWeight: 700,
+            cursor: "pointer",
+            color: "#374151",
+            lineHeight: 1,
+          }}
+          title="Увеличить"
+        >
+          +
+        </button>
+        <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 4 }}>
+          Колёсико мыши — масштаб, перетаскивание пустого места — сдвиг карты
+        </span>
+      </div>
 
-          await fetch("/api/cells/update", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ id: cell.id, x: cell.x, y: cell.y }),
-          });
-        }}
+      {/* Область карты с zoom/pan */}
+      <div
         style={{
-          position: "relative",
-          background: "linear-gradient(to bottom right, #fafafa 0%, #ffffff 100%)",
-          border: "1px solid #e5e7eb",
+          overflow: "auto",
+          minHeight: 400,
           height: "100%",
           borderRadius: 16,
-          boxShadow: "inset 0 1px 3px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.05)",
+          border: "1px solid #e5e7eb",
+          background: "#f9fafb",
+        }}
+        onWheel={(e) => {
+          e.preventDefault();
+          const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+          setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + delta)));
+        }}
+        onMouseLeave={() => {
+          if (isPanning) setIsPanning(false);
+          panStartRef.current = null;
         }}
       >
+        <div
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+            position: "relative",
+            minWidth: "100%",
+            minHeight: 400,
+          }}
+        >
+          {/* Слой для pan: клик по пустому месту — перетаскивание карты */}
+          <div
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (dragId) return;
+              setIsPanning(true);
+              panStartRef.current = {
+                clientX: e.clientX,
+                clientY: e.clientY,
+                panX: pan.x,
+                panY: pan.y,
+              };
+            }}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              minWidth: 3000,
+              minHeight: 3000,
+              zIndex: 0,
+              cursor: isPanning ? "grabbing" : "grab",
+            }}
+          />
+          <div
+            onMouseDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (dragId) return;
+              setIsPanning(true);
+              panStartRef.current = {
+                clientX: e.clientX,
+                clientY: e.clientY,
+                panX: pan.x,
+                panY: pan.y,
+              };
+            }}
+            onMouseMove={(e) => {
+              if (isPanning && panStartRef.current) {
+                setPan({
+                  x: panStartRef.current.panX + e.clientX - panStartRef.current.clientX,
+                  y: panStartRef.current.panY + e.clientY - panStartRef.current.clientY,
+                });
+                return;
+              }
+              if (!dragId) return;
+              setCells((prev) =>
+                prev.map((c) =>
+                  c.id === dragId
+                    ? { ...c, x: e.clientX - offset.x, y: e.clientY - offset.y }
+                    : c
+                )
+              );
+            }}
+            onMouseUp={async () => {
+              if (isPanning) {
+                setIsPanning(false);
+                panStartRef.current = null;
+                return;
+              }
+              if (!dragId) return;
+              const cell = cells.find((c) => c.id === dragId);
+              setDragId(null);
+              if (!cell) return;
+
+              await fetch("/api/cells/update", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ id: cell.id, x: cell.x, y: cell.y }),
+              });
+            }}
+            style={{
+              position: "relative",
+              background: "linear-gradient(to bottom right, #fafafa 0%, #ffffff 100%)",
+              border: "1px solid #e5e7eb",
+              minHeight: 400,
+              borderRadius: 16,
+              boxShadow: "inset 0 1px 3px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.05)",
+              zIndex: 1,
+              cursor: isPanning ? "grabbing" : "grab",
+            }}
+          >
         {visibleCells.map((c) => (
           <div
             key={c.id}
             onMouseDown={(e) => {
-              if (!canEdit) return;
+              if (!canDragCells) return;
               setDragId(c.id);
               setOffset({
                 x: e.clientX - c.x,
@@ -633,7 +772,7 @@ export default function WarehouseMapPage() {
               alignItems: "center",
               justifyContent: "center",
               fontWeight: 700,
-              cursor: canEdit ? "move" : "pointer",
+              cursor: canDragCells ? "move" : "pointer",
               userSelect: "none",
               borderRadius: 10,
               transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -727,8 +866,8 @@ export default function WarehouseMapPage() {
             </div>
           </div>
         ))}
-      </div>
-
+          </div>
+        </div>
       </div>
 
       {selectedCell && (

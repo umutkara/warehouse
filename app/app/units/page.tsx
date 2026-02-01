@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type Unit = {
   id: string;
@@ -66,16 +66,47 @@ function getOpsStatusText(status: string | null | undefined): string {
 // ⚡ Force dynamic for real-time data
 export const dynamic = 'force-dynamic';
 
+const STATUS_LABELS: Record<string, string> = {
+  all: "Все",
+  on_warehouse: "На складе",
+  receiving: "Приёмка",
+  stored: "Хранение",
+  picking: "Пикинг",
+  shipped: "Отгрузка",
+  out: "OUT",
+  ff: "FF",
+  bin: "BIN",
+  shipping: "Shipping",
+};
+const AGE_LABELS: Record<string, string> = {
+  all: "Все",
+  "24h": "> 24 ч",
+  "48h": "> 48 ч",
+  "7d": "> 7 д",
+};
+
+function getInitialFilters(searchParams: URLSearchParams) {
+  return {
+    age: searchParams.get("age") || "all",
+    status: searchParams.get("status") || "all",
+    search: searchParams.get("search") || "",
+    ops: searchParams.get("ops") || "all",
+  };
+}
+
 export default function UnitsListPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initial = useMemo(() => getInitialFilters(searchParams), []);
+
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [ageFilter, setAgeFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [searchInput, setSearchInput] = useState<string>("");
-  const [opsStatusFilter, setOpsStatusFilter] = useState<string>("all");
+  const [ageFilter, setAgeFilter] = useState<string>(initial.age);
+  const [statusFilter, setStatusFilter] = useState<string>(initial.status);
+  const [searchQuery, setSearchQuery] = useState<string>(initial.search);
+  const [searchInput, setSearchInput] = useState<string>(initial.search);
+  const [opsStatusFilter, setOpsStatusFilter] = useState<string>(initial.ops);
   const [userRole, setUserRole] = useState<string>("guest");
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [loadingUnit, setLoadingUnit] = useState(false);
@@ -84,22 +115,53 @@ export default function UnitsListPage() {
   const [savingOpsStatus, setSavingOpsStatus] = useState(false);
   const [totalUnits, setTotalUnits] = useState<number | null>(null);
 
-  // ⚡ OPTIMIZATION: Memoized load function
+  // Sync filters from URL when URL changes (e.g. back/forward, shared link)
+  useEffect(() => {
+    const age = searchParams.get("age") || "all";
+    const status = searchParams.get("status") || "all";
+    const search = searchParams.get("search") || "";
+    const ops = searchParams.get("ops") || "all";
+    setAgeFilter(age);
+    setStatusFilter(status);
+    setSearchQuery(search);
+    setSearchInput(search);
+    setOpsStatusFilter(ops);
+  }, [searchParams]);
+
+  const applyFiltersToUrl = useCallback(
+    (updates: { age?: string; status?: string; search?: string; ops?: string }) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const age = updates.age ?? ageFilter;
+      const status = updates.status ?? statusFilter;
+      const search = updates.search ?? searchQuery;
+      const ops = updates.ops ?? opsStatusFilter;
+      if (age !== "all") params.set("age", age);
+      else params.delete("age");
+      if (status !== "all") params.set("status", status);
+      else params.delete("status");
+      if (search.trim()) params.set("search", search.trim());
+      else params.delete("search");
+      if (ops !== "all") params.set("ops", ops);
+      else params.delete("ops");
+      router.replace(`/app/units?${params.toString()}`, { scroll: false });
+    },
+    [searchParams, ageFilter, statusFilter, searchQuery, opsStatusFilter, router]
+  );
+
   const loadUnits = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const params = new URLSearchParams({ 
+      const params = new URLSearchParams({
         age: ageFilter,
         status: statusFilter,
       });
-      if (searchQuery.trim()) {
-        params.append("search", searchQuery.trim());
-      }
+      if (searchQuery.trim()) params.set("search", searchQuery.trim());
+      if (opsStatusFilter !== "all") params.set("ops", opsStatusFilter);
 
       const res = await fetch(`/api/units/list?${params.toString()}`, {
-        next: { revalidate: 30 } // ⚡ Cache for 30 seconds
+        cache: "no-store",
       });
 
       if (!res.ok) {
@@ -120,29 +182,13 @@ export default function UnitsListPage() {
     } finally {
       setLoading(false);
     }
-  }, [ageFilter, statusFilter, searchQuery, router]);
-
-  // Client-side filter by OPS статус
-  const filteredUnits = useMemo(() => {
-    return units.filter((unit) => {
-      const currentOps = unit.meta?.ops_status || null;
-
-      if (opsStatusFilter === "no_status") {
-        return !currentOps;
-      }
-
-      if (opsStatusFilter !== "all" && opsStatusFilter) {
-        return currentOps === opsStatusFilter;
-      }
-
-      // "all" – no OPS filter
-      return true;
-    });
-  }, [units, opsStatusFilter]);
+  }, [ageFilter, statusFilter, searchQuery, opsStatusFilter, router]);
 
   useEffect(() => {
     loadUnits();
   }, [loadUnits]);
+
+  const filteredUnits = units;
 
   useEffect(() => {
     async function loadRole() {
@@ -183,25 +229,45 @@ export default function UnitsListPage() {
   }, [selectedUnit?.id]);
 
   // ⚡ OPTIMIZATION: Memoized handlers
-  const handleSearch = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchQuery(searchInput);
-  }, [searchInput]);
+  const handleSearch = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const q = searchInput.trim();
+      setSearchQuery(q);
+      applyFiltersToUrl({ search: q });
+    },
+    [searchInput, applyFiltersToUrl]
+  );
 
   const clearSearch = useCallback(() => {
     setSearchInput("");
     setSearchQuery("");
-  }, []);
+    applyFiltersToUrl({ search: "" });
+  }, [applyFiltersToUrl]);
+
+  const clearAllFilters = useCallback(() => {
+    setSearchInput("");
+    setSearchQuery("");
+    setStatusFilter("all");
+    setAgeFilter("all");
+    setOpsStatusFilter("all");
+    router.replace("/app/units", { scroll: false });
+  }, [router]);
+
+  const hasActiveFilters =
+    searchQuery !== "" ||
+    statusFilter !== "all" ||
+    ageFilter !== "all" ||
+    opsStatusFilter !== "all";
 
   const handleExportToExcel = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ 
+      const params = new URLSearchParams({
         age: ageFilter,
         status: statusFilter,
       });
-      if (searchQuery.trim()) {
-        params.append("search", searchQuery.trim());
-      }
+      if (searchQuery.trim()) params.set("search", searchQuery.trim());
+      if (opsStatusFilter !== "all") params.set("ops", opsStatusFilter);
 
       const res = await fetch(`/api/units/export-excel?${params.toString()}`, {
         cache: "no-store",
@@ -224,7 +290,7 @@ export default function UnitsListPage() {
     } catch (e: any) {
       setError("Ошибка экспорта");
     }
-  }, [ageFilter, statusFilter, searchQuery]);
+  }, [ageFilter, statusFilter, searchQuery, opsStatusFilter]);
 
   const canEditOpsStatus = ["ops", "logistics", "admin", "head"].includes(userRole);
 
@@ -319,19 +385,9 @@ export default function UnitsListPage() {
         <div>
           <h1 style={styles.title}>Список заказов</h1>
           <p style={styles.subtitle}>
-            Всего units: {totalUnits ?? units.length}
-            {totalUnits !== null && totalUnits > units.length && (
-              <>
-                {" "}
-                • Показано: {units.length}
-              </>
-            )}
-            {opsStatusFilter !== "all" && (
-              <>
-                {" "}
-                • По текущему OPS фильтру: {filteredUnits.length}
-              </>
-            )}
+            {hasActiveFilters
+              ? `Найдено ${totalUnits ?? filteredUnits.length} заказов`
+              : `Всего: ${totalUnits ?? filteredUnits.length} заказов`}
           </p>
         </div>
 
@@ -340,7 +396,7 @@ export default function UnitsListPage() {
         </button>
       </div>
 
-      {/* Search and Export */}
+      {/* Search + Export */}
       <div style={styles.searchAndExportContainer}>
         <form onSubmit={handleSearch} style={styles.searchContainer}>
           <input
@@ -360,132 +416,225 @@ export default function UnitsListPage() {
           )}
         </form>
 
-        {statusFilter === "on_warehouse" && (
-          <button onClick={handleExportToExcel} style={styles.exportButton}>
-            📊 Экспорт в Excel
-          </button>
-        )}
+        <button onClick={handleExportToExcel} style={styles.exportButton}>
+          📊 Экспорт в Excel
+        </button>
       </div>
+
+      {/* Active filters (chips) + Сбросить всё */}
+      {hasActiveFilters && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 16,
+            padding: "12px 16px",
+            background: "#f8fafc",
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <span style={{ fontSize: 13, color: "#64748b", marginRight: 4 }}>Фильтры:</span>
+          {searchQuery && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                background: "#fff",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                fontSize: 13,
+              }}
+            >
+              Поиск: &quot;{searchQuery}&quot;
+              <button
+                type="button"
+                onClick={clearSearch}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                  color: "#64748b",
+                  fontSize: 16,
+                }}
+                title="Убрать"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          {statusFilter !== "all" && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                background: "#fff",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                fontSize: 13,
+              }}
+            >
+              Статус: {STATUS_LABELS[statusFilter] ?? statusFilter}
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter("all");
+                  applyFiltersToUrl({ status: "all" });
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                  color: "#64748b",
+                  fontSize: 16,
+                }}
+                title="Убрать"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          {ageFilter !== "all" && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                background: "#fff",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                fontSize: 13,
+              }}
+            >
+              Время: {AGE_LABELS[ageFilter] ?? ageFilter}
+              <button
+                type="button"
+                onClick={() => {
+                  setAgeFilter("all");
+                  applyFiltersToUrl({ age: "all" });
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                  color: "#64748b",
+                  fontSize: 16,
+                }}
+                title="Убрать"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          {opsStatusFilter !== "all" && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                background: "#fff",
+                borderRadius: 8,
+                border: "1px solid #e2e8f0",
+                fontSize: 13,
+              }}
+            >
+              OPS: {opsStatusFilter === "no_status" ? "Без статуса" : getOpsStatusText(opsStatusFilter)}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpsStatusFilter("all");
+                  applyFiltersToUrl({ ops: "all" });
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                  color: "#64748b",
+                  fontSize: 16,
+                }}
+                title="Убрать"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            style={{
+              marginLeft: 8,
+              padding: "6px 12px",
+              background: "transparent",
+              border: "1px solid #94a3b8",
+              borderRadius: 8,
+              color: "#64748b",
+              fontSize: 13,
+              cursor: "pointer",
+              fontWeight: 500,
+            }}
+          >
+            Сбросить всё
+          </button>
+        </div>
+      )}
 
       {/* Status Filter */}
       <div style={styles.filters}>
         <div style={styles.filterLabel}>Статус:</div>
         <div style={styles.filterButtons}>
-          <button
-            onClick={() => setStatusFilter("all")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "all" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Все
-          </button>
-          <button
-            onClick={() => setStatusFilter("on_warehouse")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "on_warehouse" ? styles.filterButtonActive : {}),
-            }}
-          >
-            На складе
-          </button>
-          <button
-            onClick={() => setStatusFilter("receiving")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "receiving" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Приёмка
-          </button>
-          <button
-            onClick={() => setStatusFilter("stored")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "stored" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Хранение
-          </button>
-          <button
-            onClick={() => setStatusFilter("picking")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "picking" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Пикинг
-          </button>
-          <button
-            onClick={() => setStatusFilter("shipped")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "shipped" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Отгрузка
-          </button>
-          <button
-            onClick={() => setStatusFilter("out")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "out" ? styles.filterButtonActive : {}),
-            }}
-          >
-            OUT
-          </button>
-          <button
-            onClick={() => setStatusFilter("ff")}
-            style={{
-              ...styles.filterButton,
-              ...(statusFilter === "ff" ? styles.filterButtonActive : {}),
-            }}
-          >
-            FF
-          </button>
+          {(["all", "on_warehouse", "receiving", "stored", "picking", "shipped", "out", "ff"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setStatusFilter(s);
+                applyFiltersToUrl({ status: s });
+              }}
+              style={{
+                ...styles.filterButton,
+                ...(statusFilter === s ? styles.filterButtonActive : {}),
+              }}
+            >
+              {STATUS_LABELS[s] ?? s}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Age Filter */}
       <div style={styles.filters}>
-        <div style={styles.filterLabel}>Фильтр по времени:</div>
+        <div style={styles.filterLabel}>Время на складе:</div>
         <div style={styles.filterButtons}>
-          <button
-            onClick={() => setAgeFilter("all")}
-            style={{
-              ...styles.filterButton,
-              ...(ageFilter === "all" ? styles.filterButtonActive : {}),
-            }}
-          >
-            Все
-          </button>
-          <button
-            onClick={() => setAgeFilter("24h")}
-            style={{
-              ...styles.filterButton,
-              ...(ageFilter === "24h" ? styles.filterButtonActive : {}),
-            }}
-          >
-            &gt; 24 часов
-          </button>
-          <button
-            onClick={() => setAgeFilter("48h")}
-            style={{
-              ...styles.filterButton,
-              ...(ageFilter === "48h" ? styles.filterButtonActive : {}),
-            }}
-          >
-            &gt; 48 часов
-          </button>
-          <button
-            onClick={() => setAgeFilter("7d")}
-            style={{
-              ...styles.filterButton,
-              ...(ageFilter === "7d" ? styles.filterButtonActive : {}),
-            }}
-          >
-            &gt; 7 дней
-          </button>
+          {(["all", "24h", "48h", "7d"] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => {
+                setAgeFilter(a);
+                applyFiltersToUrl({ age: a });
+              }}
+              style={{
+                ...styles.filterButton,
+                ...(ageFilter === a ? styles.filterButtonActive : {}),
+              }}
+            >
+              {AGE_LABELS[a] ?? a}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -495,7 +644,11 @@ export default function UnitsListPage() {
         <div>
           <select
             value={opsStatusFilter}
-            onChange={(e) => setOpsStatusFilter(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setOpsStatusFilter(v);
+              applyFiltersToUrl({ ops: v });
+            }}
             style={{
               padding: "6px 16px",
               borderRadius: 6,

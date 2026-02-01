@@ -137,8 +137,8 @@ export async function POST(req: Request) {
       // Don't fail the request if logging fails, but log the error
     }
 
-    // Автозадача «Перенос 1»: если статус = postponed_1 и заказ уже в shipping/storage — создать задачу из последней задачи по unit
-    if (status === "postponed_1") {
+    // Автозадача «Перенос 1/2»: если статус = postponed_1 или postponed_2 и заказ уже в shipping/storage — создать задачу из последней задачи по unit
+    if (status === "postponed_1" || status === "postponed_2") {
       try {
         const result = await tryCreatePostponedTask(
           unitId,

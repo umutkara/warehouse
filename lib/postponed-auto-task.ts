@@ -1,13 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const POSTPONED_OPS_STATUS = "postponed_1";
+const POSTPONED_OPS_STATUSES = ["postponed_1", "postponed_2"] as const;
 
 export type TryCreatePostponedTaskResult =
   | { created: true; taskId: string }
   | { created: false; reason?: string };
 
 /**
- * Если у unit OPS статус "Перенос 1", он в ячейке shipping/storage и есть прошлая задача —
+ * Если у unit OPS статус "Перенос 1" или "Перенос 2", он в ячейке shipping/storage и есть прошлая задача —
  * создаёт новую задачу ТСД с тем же сценарием и picking-ячейкой (на основе последней задачи по этому unit).
  * Не бросает исключения — при любой ошибке возвращает { created: false }.
  */
@@ -27,7 +27,7 @@ export async function tryCreatePostponedTask(
       .single();
 
     if (unitErr || !unit) return { created: false, reason: "unit not found" };
-    if ((unit.meta as any)?.ops_status !== POSTPONED_OPS_STATUS) return { created: false, reason: "not postponed_1" };
+    if (!POSTPONED_OPS_STATUSES.includes((unit.meta as any)?.ops_status)) return { created: false, reason: "not postponed_1/2" };
     if (!unit.cell_id) return { created: false, reason: "unit not in cell" };
 
     const { data: cellRow, error: cellErr } = await supabaseAdmin

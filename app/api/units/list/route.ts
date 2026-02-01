@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * - search: search by barcode (partial match)
  * - status: filter by status (bin, stored, picking, shipping, out, rejected, ff, all)
  *          OR by cell_type (bin, shipping) - filters units in cells of specific type
+ * - ops: OPS статус (postponed_1, no_status, etc.) or "all"
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -35,6 +36,7 @@ export async function GET(req: Request) {
     const ageFilter = searchParams.get("age") || "all";
     const searchQuery = searchParams.get("search") || "";
     const statusFilter = searchParams.get("status") || "all";
+    const opsFilter = searchParams.get("ops") || "all";
 
     // Calculate date threshold based on filter
     let dateThreshold: string | null = null;
@@ -109,6 +111,17 @@ export async function GET(req: Request) {
     if (dateThreshold) {
       query = query.lt("created_at", dateThreshold);
       countQuery = countQuery.lt("created_at", dateThreshold);
+    }
+
+    // Apply OPS status filter (meta.ops_status)
+    if (opsFilter && opsFilter !== "all") {
+      if (opsFilter === "no_status") {
+        query = (query as any).is("meta->>ops_status", null);
+        countQuery = (countQuery as any).is("meta->>ops_status", null);
+      } else {
+        query = query.contains("meta", { ops_status: opsFilter });
+        countQuery = countQuery.contains("meta", { ops_status: opsFilter });
+      }
     }
 
     const { count: totalCount } = await countQuery;

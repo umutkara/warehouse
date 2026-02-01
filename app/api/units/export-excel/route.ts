@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * - age: all | 24h | 48h | 7d
  * - status: on_warehouse | bin | stored | picking | shipping | out | rejected | ff | all
  * - search: search by barcode
+ * - ops: OPS статус or "all"
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -34,6 +35,7 @@ export async function GET(req: Request) {
     const ageFilter = searchParams.get("age") || "all";
     const searchQuery = searchParams.get("search") || "";
     const statusFilter = searchParams.get("status") || "on_warehouse";
+    const opsFilter = searchParams.get("ops") || "all";
 
     // Calculate date threshold
     let dateThreshold: string | null = null;
@@ -65,6 +67,7 @@ export async function GET(req: Request) {
         price,
         cell_id,
         created_at,
+        meta,
         warehouse_cells!units_cell_id_fkey(code, cell_type)
       `)
       .eq("warehouse_id", profile.warehouse_id)
@@ -87,6 +90,15 @@ export async function GET(req: Request) {
     // Apply age filter
     if (dateThreshold) {
       query = query.lt("created_at", dateThreshold);
+    }
+
+    // Apply OPS status filter
+    if (opsFilter && opsFilter !== "all") {
+      if (opsFilter === "no_status") {
+        query = (query as any).is("meta->>ops_status", null);
+      } else {
+        query = query.contains("meta", { ops_status: opsFilter });
+      }
     }
 
     const { data: units, error: unitsError } = await query;
