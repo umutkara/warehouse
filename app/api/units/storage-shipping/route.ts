@@ -8,6 +8,18 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * EXCLUDING units that are already in picking_tasks with status 'open' or 'in_progress'
  */
 export async function GET(req: Request) {
+  try {
+    return await getStorageShippingUnits(req);
+  } catch (err: any) {
+    console.error("GET /api/units/storage-shipping error:", err);
+    return NextResponse.json(
+      { error: err?.message ?? "Internal server error", details: String(err) },
+      { status: 500 }
+    );
+  }
+}
+
+async function getStorageShippingUnits(_req: Request) {
   const supabase = await supabaseServer();
   // Use supabaseAdmin to bypass RLS and avoid recursive policy checks
 
@@ -31,20 +43,32 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Get all units for the warehouse (cell_id = where unit actually lies)
-  const { data: units, error: unitsError } = await supabaseAdmin
-    .from("units")
-    .select("id, barcode, status, cell_id, created_at, meta")
-    .eq("warehouse_id", profile.warehouse_id)
-    .not("cell_id", "is", null)
-    .order("created_at", { ascending: false });
+  // Get all units for the warehouse (cell_id = where unit actually lies).
+  // Supabase returns max 1000 per request — paginate so we don't miss units beyond the first page.
+  const unitsPageSize = 1000;
+  const unitsMaxPages = 50;
+  let units: { id: string; barcode: string; status: string; cell_id: string | null; created_at: string; meta: any }[] = [];
+  for (let page = 0; page < unitsMaxPages; page++) {
+    const from = page * unitsPageSize;
+    const to = from + unitsPageSize - 1;
+    const { data: pageUnits, error: unitsError } = await supabaseAdmin
+      .from("units")
+      .select("id, barcode, status, cell_id, created_at, meta")
+      .eq("warehouse_id", profile.warehouse_id)
+      .not("cell_id", "is", null)
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-  if (unitsError) {
-    console.error("Error loading units:", unitsError);
-    return NextResponse.json({ error: unitsError.message }, { status: 400 });
+    if (unitsError) {
+      console.error("Error loading units:", unitsError);
+      return NextResponse.json({ error: unitsError.message }, { status: 400 });
+    }
+    if (!pageUnits?.length) break;
+    units.push(...pageUnits);
+    if (pageUnits.length < unitsPageSize) break;
   }
 
-  if (!units || units.length === 0) {
+  if (units.length === 0) {
     return NextResponse.json({ ok: true, units: [] });
   }
 
@@ -52,14 +76,15 @@ export async function GET(req: Request) {
   // view is per-warehouse, so we must filter by warehouse_id to get the correct cell code for this warehouse.
   const cellIds = [...new Set(units.map((u: any) => u.cell_id).filter(Boolean))] as string[];
   const cellsMap = new Map<string, { id: string; code: string; cell_type: string }>();
-  if (cellIds.length > 0) {
+  const cellChunkSize = 200;
+  for (let i = 0; i < cellIds.length; i += cellChunkSize) {
+    const chunk = cellIds.slice(i, i + cellChunkSize);
     const { data: cells, error: cellsError } = await supabaseAdmin
       .from("warehouse_cells_map")
       .select("id, code, cell_type")
       .eq("warehouse_id", profile.warehouse_id)
-      .in("id", cellIds);
-
-    if (!cellsError && cells) {
+      .in("id", chunk);
+    if (!cellsError && cells?.length) {
       cells.forEach((c: any) => {
         if (c?.id) cellsMap.set(c.id, { id: c.id, code: c.code, cell_type: c.cell_type });
       });
