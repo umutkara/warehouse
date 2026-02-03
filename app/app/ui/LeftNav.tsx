@@ -299,8 +299,8 @@ export default function LeftNav({ role }: { role: string }) {
         </button>
       </div>
 
-      {/* Navigation */}
-      <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
+      {/* Navigation: minHeight 0 allows flex child to shrink; overflowY auto scrolls long list */}
+      <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1, minHeight: 0, overflowY: "auto" }}>
         {/* Status-based pages (hidden for logistics-only) */}
         {canWork && !isLogisticsOnly && (
           <>
