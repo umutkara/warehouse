@@ -156,7 +156,9 @@ async function getStorageShippingUnits(_req: Request) {
     .filter((unit) => {
       const isInStorageOrShipping = unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping");
       const isNotInTasks = !unitIdsInTasks.has(unit.id);
-      return isInStorageOrShipping && isNotInTasks;
+      // Не показывать заказы со статусом rejected (даже если cell_id указывает на storage/shipping из‑за рассинхрона)
+      const isNotRejectedStatus = unit.status !== "rejected";
+      return isInStorageOrShipping && isNotInTasks && isNotRejectedStatus;
     });
 
   return NextResponse.json({
