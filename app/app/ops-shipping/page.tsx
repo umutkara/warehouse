@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Alert, Button } from "@/lib/ui/components";
 import * as XLSX from "xlsx";
 
@@ -174,6 +174,11 @@ export default function OpsShippingPage() {
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
+  const [bulkCanceling, setBulkCanceling] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [taskFilterStatus, setTaskFilterStatus] = useState<string>("");
+  const [taskFilterFromCell, setTaskFilterFromCell] = useState<string>("");
+  const [taskFilterTargetCell, setTaskFilterTargetCell] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastCreatedCount, setLastCreatedCount] = useState<number | null>(null);
@@ -193,6 +198,41 @@ export default function OpsShippingPage() {
   const scenarioString = scenarioCategory && scenarioDestination
     ? `${SCENARIO_FROM} → ${scenarioCategory} → ${scenarioDestination}`
     : "";
+
+  // Фильтрация задач по статусу, ячейке FROM и TO
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (taskFilterStatus && task.status !== taskFilterStatus) return false;
+      if (taskFilterFromCell) {
+        const fromCodes = (task.fromCells || []).map((c) => c.code);
+        if (!fromCodes.includes(taskFilterFromCell)) return false;
+      }
+      if (taskFilterTargetCell) {
+        if (task.targetCell?.code !== taskFilterTargetCell) return false;
+      }
+      return true;
+    });
+  }, [tasks, taskFilterStatus, taskFilterFromCell, taskFilterTargetCell]);
+
+  // Только отменяемые задачи (open/in_progress) среди отфильтрованных
+  const cancelableFilteredTasks = useMemo(
+    () => filteredTasks.filter((t) => t.status === "open" || t.status === "in_progress"),
+    [filteredTasks]
+  );
+
+  // Уникальные коды ячеек FROM и TO для фильтров
+  const taskFilterFromCellOptions = useMemo(() => {
+    const codes = new Set<string>();
+    tasks.forEach((t) => (t.fromCells || []).forEach((c) => codes.add(c.code)));
+    return Array.from(codes).sort();
+  }, [tasks]);
+  const taskFilterTargetCellOptions = useMemo(() => {
+    const codes = new Set<string>();
+    tasks.forEach((t) => {
+      if (t.targetCell?.code) codes.add(t.targetCell.code);
+    });
+    return Array.from(codes).sort();
+  }, [tasks]);
 
   // Load picking cells, available units and tasks on mount.
   // AbortController prevents duplicate API calls when effect runs twice (e.g. React Strict Mode).
@@ -344,6 +384,100 @@ export default function OpsShippingPage() {
       setError(`Ошибка отмены задачи: ${e.message}`);
     } finally {
       setCancelingTaskId(null);
+    }
+  }
+
+  function handleToggleTaskSelection(taskId: string) {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function handleSelectAllTasks() {
+    const cancelableIds = new Set(cancelableFilteredTasks.map((t) => t.id));
+    const allCancelableSelected = cancelableIds.size > 0 && [...cancelableIds].every((id) => selectedTaskIds.has(id));
+    if (allCancelableSelected) {
+      // Снять выбор с всех отображаемых отменяемых задач (остальные оставить)
+      setSelectedTaskIds((prev) => new Set([...prev].filter((id) => !cancelableIds.has(id))));
+    } else {
+      // Выбрать все отображаемые отменяемые задачи
+      setSelectedTaskIds((prev) => new Set([...prev, ...cancelableIds]));
+    }
+  }
+
+  async function handleBulkCancelSelected() {
+    const toCancel = [...selectedTaskIds].filter((id) => {
+      const task = tasks.find((t) => t.id === id);
+      return task && (task.status === "open" || task.status === "in_progress");
+    });
+    if (toCancel.length === 0) return;
+    if (!confirm(`Отменить выбранные задачи (${toCancel.length})? Заказы вернутся в исходные ячейки.`)) return;
+    setBulkCanceling(true);
+    setError(null);
+    setSuccess(null);
+    let done = 0;
+    const failed: string[] = [];
+    for (const taskId of toCancel) {
+      try {
+        const res = await fetch(`/api/picking-tasks/${taskId}/cancel`, { method: "POST" });
+        const json = await res.json();
+        if (res.ok) {
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+          setSelectedTaskIds((prev) => {
+            const next = new Set(prev);
+            next.delete(taskId);
+            return next;
+          });
+          done++;
+        } else failed.push(taskId);
+      } catch {
+        failed.push(taskId);
+      }
+    }
+    setBulkCanceling(false);
+    if (done > 0) setSuccess(`Отменено задач: ${done}.${failed.length > 0 ? ` Ошибки: ${failed.length}.` : ""}`);
+    if (failed.length > 0) setError(`Не удалось отменить: ${failed.length} задач.`);
+    if (done > 0) {
+      loadTasks(undefined, true, true).then(() => {});
+      loadAvailableUnits(undefined, true, true).catch(() => {});
+    }
+  }
+
+  async function handleBulkCancelFiltered() {
+    if (cancelableFilteredTasks.length === 0) return;
+    if (!confirm(`Отменить все отображаемые задачи (${cancelableFilteredTasks.length})? Заказы вернутся в исходные ячейки.`)) return;
+    setBulkCanceling(true);
+    setError(null);
+    setSuccess(null);
+    const toCancel = cancelableFilteredTasks.map((t) => t.id);
+    let done = 0;
+    const failed: string[] = [];
+    for (const taskId of toCancel) {
+      try {
+        const res = await fetch(`/api/picking-tasks/${taskId}/cancel`, { method: "POST" });
+        const json = await res.json();
+        if (res.ok) {
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+          setSelectedTaskIds((prev) => {
+            const next = new Set(prev);
+            next.delete(taskId);
+            return next;
+          });
+          done++;
+        } else failed.push(taskId);
+      } catch {
+        failed.push(taskId);
+      }
+    }
+    setBulkCanceling(false);
+    if (done > 0) setSuccess(`Отменено задач: ${done}.${failed.length > 0 ? ` Ошибки: ${failed.length}.` : ""}`);
+    if (failed.length > 0) setError(`Не удалось отменить: ${failed.length} задач.`);
+    if (done > 0) {
+      loadTasks(undefined, true, true).then(() => {});
+      loadAvailableUnits(undefined, true, true).catch(() => {});
     }
   }
 
@@ -1329,12 +1463,84 @@ export default function OpsShippingPage() {
 
       {/* Tasks table */}
       <div style={{ marginTop: 32 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700 }}>Созданные задачи ({tasks.length})</h2>
-          <Button variant="secondary" size="sm" onClick={() => loadTasks()} disabled={loadingTasks}>
-            {loadingTasks ? "Загрузка..." : "Обновить"}
-          </Button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>
+            Созданные задачи {filteredTasks.length !== tasks.length ? `(${filteredTasks.length} из ${tasks.length})` : `(${tasks.length})`}
+          </h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Button variant="secondary" size="sm" onClick={() => loadTasks()} disabled={loadingTasks}>
+              {loadingTasks ? "Загрузка..." : "Обновить"}
+            </Button>
+            {selectedTaskIds.size > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleBulkCancelSelected}
+                disabled={bulkCanceling}
+                style={{ color: "#dc2626", borderColor: "#fecaca" }}
+              >
+                {bulkCanceling ? "Отмена..." : `Отменить выбранные (${selectedTaskIds.size})`}
+              </Button>
+            )}
+            {cancelableFilteredTasks.length > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleBulkCancelFiltered}
+                disabled={bulkCanceling}
+                style={{ color: "#b91c1c", borderColor: "#fecaca" }}
+              >
+                {bulkCanceling ? "Отмена..." : `Отменить все отображаемые (${cancelableFilteredTasks.length})`}
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* Фильтры по задачам */}
+        {tasks.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#666" }}>Фильтр:</span>
+            <select
+              value={taskFilterStatus}
+              onChange={(e) => setTaskFilterStatus(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}
+            >
+              <option value="">Все статусы</option>
+              <option value="open">Открыта</option>
+              <option value="in_progress">В работе</option>
+              <option value="done">Выполнена</option>
+            </select>
+            <select
+              value={taskFilterFromCell}
+              onChange={(e) => setTaskFilterFromCell(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}
+            >
+              <option value="">Все FROM</option>
+              {taskFilterFromCellOptions.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+            <select
+              value={taskFilterTargetCell}
+              onChange={(e) => setTaskFilterTargetCell(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}
+            >
+              <option value="">Все TO</option>
+              {taskFilterTargetCellOptions.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+            {(taskFilterStatus || taskFilterFromCell || taskFilterTargetCell) && (
+              <button
+                type="button"
+                onClick={() => { setTaskFilterStatus(""); setTaskFilterFromCell(""); setTaskFilterTargetCell(""); }}
+                style={{ padding: "6px 12px", fontSize: 13, color: "#666", background: "#f3f4f6", border: "1px solid #ddd", borderRadius: 6, cursor: "pointer" }}
+              >
+                Сбросить фильтры
+              </button>
+            )}
+          </div>
+        )}
 
         {loadingTasks ? (
           <div style={{ padding: 24, textAlign: "center", color: "#666" }}>Загрузка задач...</div>
@@ -1342,11 +1548,26 @@ export default function OpsShippingPage() {
           <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
             Нет активных задач (open/in_progress)
           </div>
+        ) : filteredTasks.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
+            Нет задач по выбранным фильтрам
+          </div>
         ) : (
           <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f5f5f5" }}>
+                  <th style={{ padding: "12px", width: 40, borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>
+                    {cancelableFilteredTasks.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={selectedTaskIds.size > 0 && cancelableFilteredTasks.every((t) => selectedTaskIds.has(t.id))}
+                        onChange={handleSelectAllTasks}
+                        style={{ cursor: "pointer" }}
+                        title="Выбрать все отображаемые"
+                      />
+                    )}
+                  </th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>Статус</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>Штрихкод</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>FROM</th>
@@ -1357,8 +1578,21 @@ export default function OpsShippingPage() {
                 </tr>
               </thead>
               <tbody>
-                {tasks.map((task) => (
+                {filteredTasks.map((task) => {
+                  const canCancel = task.status === "open" || task.status === "in_progress";
+                  return (
                   <tr key={task.id} style={{ borderBottom: "1px solid #eee" }}>
+                    <td style={{ padding: "12px" }}>
+                      {canCancel && (
+                        <input
+                          type="checkbox"
+                          checked={selectedTaskIds.has(task.id)}
+                          onChange={() => handleToggleTaskSelection(task.id)}
+                          disabled={bulkCanceling || cancelingTaskId === task.id}
+                          style={{ cursor: "pointer" }}
+                        />
+                      )}
+                    </td>
                     <td style={{ padding: "12px" }}>
                       <span
                         style={{
@@ -1409,27 +1643,27 @@ export default function OpsShippingPage() {
                       {(task.status === "open" || task.status === "in_progress") && (
                         <button
                           onClick={() => handleCancelTask(task.id)}
-                          disabled={cancelingTaskId === task.id}
+                          disabled={bulkCanceling || cancelingTaskId === task.id}
                           style={{
                             padding: "6px 12px",
                             fontSize: 12,
                             fontWeight: 600,
-                            color: cancelingTaskId === task.id ? "#9ca3af" : "#dc2626",
-                            background: cancelingTaskId === task.id ? "#f3f4f6" : "#fef2f2",
-                            border: `1px solid ${cancelingTaskId === task.id ? "#d1d5db" : "#fecaca"}`,
+                            color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#dc2626",
+                            background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#fef2f2",
+                            border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#fecaca"}`,
                             borderRadius: 6,
-                            cursor: cancelingTaskId === task.id ? "not-allowed" : "pointer",
+                            cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
                             transition: "all 0.2s",
-                            opacity: cancelingTaskId === task.id ? 0.6 : 1,
+                            opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
                           }}
                           onMouseEnter={(e) => {
-                            if (cancelingTaskId !== task.id) {
+                            if (!bulkCanceling && cancelingTaskId !== task.id) {
                               e.currentTarget.style.background = "#fee2e2";
                               e.currentTarget.style.borderColor = "#fca5a5";
                             }
                           }}
                           onMouseLeave={(e) => {
-                            if (cancelingTaskId !== task.id) {
+                            if (!bulkCanceling && cancelingTaskId !== task.id) {
                               e.currentTarget.style.background = "#fef2f2";
                               e.currentTarget.style.borderColor = "#fecaca";
                             }
@@ -1440,7 +1674,8 @@ export default function OpsShippingPage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
