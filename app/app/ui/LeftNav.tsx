@@ -105,6 +105,12 @@ const Icons = {
       <path d="M9 8h4M9 12h4M9 16h2" />
     </svg>
   ),
+  Hub: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 2l6 3v4l-6 3-6-3V5l6-3z" />
+      <path d="M4 9l6 3v6l-6-3V9zM10 12l6 3v3l-6-3v-3z" />
+    </svg>
+  ),
   Surplus: () => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="6" width="14" height="10" rx="1" />
@@ -370,6 +376,11 @@ export default function LeftNav({ role }: { role: string }) {
         </NavButton>
         <NavButton href="/app/archive" icon={<Icons.Archive />} isCollapsed={!shouldExpand}>
           Архив
+        </NavButton>
+
+        <SectionTitle isCollapsed={!shouldExpand}>Демо</SectionTitle>
+        <NavButton href="/app/demo-hubs" icon={<Icons.Hub />} isCollapsed={!shouldExpand}>
+          Хабы
         </NavButton>
       </nav>
     </aside>
