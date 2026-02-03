@@ -227,9 +227,10 @@ export default function OpsShippingPage() {
 
   // Load available units from storage/shipping. Optional signal for mount-only load (avoids duplicate calls).
   // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
-  async function loadAvailableUnits(abortSignal?: AbortSignal, cacheBust?: boolean) {
-    setLoadingUnits(true);
-    setError(null);
+  // Optional silent: when true, does not set loadingUnits (no loading flash after cancel).
+  async function loadAvailableUnits(abortSignal?: AbortSignal, cacheBust?: boolean, silent?: boolean) {
+    if (!silent) setLoadingUnits(true);
+    if (!silent) setError(null);
     const url = cacheBust ? `/api/units/storage-shipping?_t=${Date.now()}` : "/api/units/storage-shipping";
     try {
       const res = await fetch(url, { cache: "no-store", signal: abortSignal });
@@ -256,18 +257,19 @@ export default function OpsShippingPage() {
     } catch (e: any) {
       if (e?.name === "AbortError") return;
       console.error("Failed to load units:", e);
-      setError("Ошибка загрузки заказов");
+      if (!silent) setError("Ошибка загрузки заказов");
       setAvailableUnits([]);
     } finally {
-      if (!abortSignal?.aborted) setLoadingUnits(false);
+      if (!silent && !abortSignal?.aborted) setLoadingUnits(false);
     }
   }
 
   // Load tasks. Optional signal for mount-only load (avoids duplicate calls).
   // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
+  // Optional silent: when true, does not set loadingTasks (no "Загрузка..." flash after cancel).
   // Returns the number of tasks loaded (for showing "В списке теперь N задач" after import).
-  async function loadTasks(abortSignal?: AbortSignal, cacheBust?: boolean): Promise<number> {
-    setLoadingTasks(true);
+  async function loadTasks(abortSignal?: AbortSignal, cacheBust?: boolean, silent?: boolean): Promise<number> {
+    if (!silent) setLoadingTasks(true);
     const base = "/api/tsd/shipping-tasks/list";
     const params = new URLSearchParams();
     if (cacheBust) params.set("_t", String(Date.now()));
@@ -302,7 +304,7 @@ export default function OpsShippingPage() {
       setTasks([]);
       return 0;
     } finally {
-      if (!abortSignal?.aborted) setLoadingTasks(false);
+      if (!silent && !abortSignal?.aborted) setLoadingTasks(false);
     }
   }
 
@@ -327,12 +329,16 @@ export default function OpsShippingPage() {
       }
 
       setSuccess(`Задача отменена. Возвращено ${json.units_returned} заказов в исходные ячейки.`);
-      
-      // Обновить список задач
-      await loadTasks();
-      
-      // Обновить список доступных units
-      await loadAvailableUnits();
+      // Оптимистично убираем задачу из списка — страница не перезагружается
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      setSelectedTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+      // Тихий подгруз данных в фоне (без "Загрузка...")
+      loadTasks(undefined, true, true).then(() => {});
+      loadAvailableUnits(undefined, true, true).catch(() => {});
 
     } catch (e: any) {
       setError(`Ошибка отмены задачи: ${e.message}`);
