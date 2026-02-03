@@ -93,6 +93,13 @@ const Icons = {
       <path d="M7 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
     </svg>
   ),
+  Duplicates: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="9" height="12" rx="1" />
+      <rect x="8" y="2" width="9" height="12" rx="1" />
+      <path d="M8 6h4M8 9h3" />
+    </svg>
+  ),
   SLA: () => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="10" cy="10" r="7" />
@@ -357,11 +364,8 @@ export default function LeftNav({ role }: { role: string }) {
 
         {/* Common section */}
         <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>
-        <NavButton href="/app/duplicates" icon={<Icons.Units />} isCollapsed={!shouldExpand}>
+        <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
           Дубли
-        </NavButton>
-        <NavButton href="/app/warehouse-map" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
-          Карта склада
         </NavButton>
         {canWork && !isLogisticsOnly && (
           <NavButton href="/app/cells/labels" icon={<Icons.Label />} isCollapsed={!shouldExpand}>
@@ -373,9 +377,6 @@ export default function LeftNav({ role }: { role: string }) {
         </NavButton>
         <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
           Излишки
-        </NavButton>
-        <NavButton href="/app/archive" icon={<Icons.Archive />} isCollapsed={!shouldExpand}>
-          Архив
         </NavButton>
 
         <SectionTitle isCollapsed={!shouldExpand}>Демо</SectionTitle>
