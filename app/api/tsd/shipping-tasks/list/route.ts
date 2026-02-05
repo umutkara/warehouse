@@ -216,7 +216,7 @@ export async function GET(req: Request) {
   }
 
   // Format response
-  const formattedTasks = dedupedTasks.flatMap((task: any) => {
+  const formattedTasks = dedupedTasks.flatMap((task: any, idx: number) => {
     const units = unitsMap.get(task.id) || [];
     const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;

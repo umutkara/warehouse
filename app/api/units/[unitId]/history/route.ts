@@ -86,7 +86,9 @@ export async function GET(
     // Get all tasks with full information
     let tasks: any[] = [];
     let cellCodesMap = new Map<string, string>();
-    
+    let auditScenarioByTaskId = new Map<string, string>();
+    let orphanedAuditRows: any[] = []; // при «осиротевших» задачах — события из audit
+
     if (allTaskIds.length > 0) {
       // Load tasks - check if they exist at all (orphaned picking_task_units records)
       const { data: tasksData, error: tasksDataError } = await supabaseAdmin
@@ -119,6 +121,45 @@ export async function GET(
         console.warn(`[History] Warning: Found ${allTaskIds.length} task IDs in picking_task_units, but ${tasksData?.length || 0} tasks exist in picking_tasks. Orphaned records detected.`);
         tasks = [];
       }
+
+      // Для задач с пустым scenario — взять сценарий из audit_events. Для «осиротевших» (task удалён из picking_tasks) — запрашиваем audit по всем allTaskIds.
+      const taskIdsWithoutScenario = tasks.length > 0
+        ? tasks.filter((t) => !t.scenario?.trim()).map((t) => t.id)
+        : allTaskIds;
+      if (taskIdsWithoutScenario.length > 0) {
+        let auditRows: any[] | null = null;
+        const { data: auditByEntity } = await supabaseAdmin
+          .from("audit_events")
+          .select("entity_id, meta, created_at")
+          .eq("entity_type", "picking_task")
+          .eq("action", "picking_task_create")
+          .in("entity_id", taskIdsWithoutScenario)
+          .eq("warehouse_id", profile.warehouse_id)
+          .order("created_at", { ascending: false });
+        auditRows = auditByEntity ?? null;
+        if (!auditRows?.length) {
+          try {
+            const { data: auditByRecord } = await supabaseAdmin
+              .from("audit_events")
+              .select("record_id, meta, created_at")
+              .eq("action", "picking_task_create")
+              .in("record_id", taskIdsWithoutScenario)
+              .eq("warehouse_id", profile.warehouse_id)
+              .order("created_at", { ascending: false })
+              .limit(500);
+            if (auditByRecord?.length) auditRows = auditByRecord;
+          } catch (_) {}
+        }
+        auditRows?.forEach((row: any) => {
+          const tid = row.entity_id ?? row.record_id;
+          const meta = row.meta ?? {};
+          const scenarioFromMeta = typeof meta === "string" ? (() => { try { const p = JSON.parse(meta); return p?.scenario; } catch { return null; } })() : meta?.scenario;
+          if (tid && scenarioFromMeta && typeof scenarioFromMeta === "string" && scenarioFromMeta.trim() && !auditScenarioByTaskId.has(tid)) {
+            auditScenarioByTaskId.set(tid, scenarioFromMeta.trim());
+          }
+        });
+        if (tasks.length === 0 && (auditRows?.length ?? 0) > 0) orphanedAuditRows = auditRows ?? [];
+      }
       
       // Get cell codes for all target cells
       const targetCellIds = tasks
@@ -143,19 +184,19 @@ export async function GET(
     // For canceled/done tasks, create TWO events: creation + cancellation/completion
     const taskEvents: any[] = [];
 
-    tasks.forEach((task) => {
+    tasks.forEach((task, idx) => {
       const targetCellCode = task.target_picking_cell_id 
         ? (cellCodesMap.get(task.target_picking_cell_id) || "?")
         : "?";
-      
+      const scenarioResolved = (task.scenario && task.scenario.trim()) ? task.scenario.trim() : (auditScenarioByTaskId.get(task.id) || null);
       const baseDetails = {
         task_id: task.id,
-        scenario: task.scenario || null,
+        scenario: scenarioResolved,
         target_cell: targetCellCode,
         created_at: task.created_at,
         created_by_name: task.created_by_name,
       };
-      
+
       // Always add creation event (even for canceled/done tasks)
       taskEvents.push({
         event_type: "picking_task_created",
@@ -191,6 +232,27 @@ export async function GET(
           },
         });
       }
+    });
+
+    // Для «осиротевших» задач (task удалён из picking_tasks) — события только из audit
+    orphanedAuditRows.forEach((row: any) => {
+      const taskId = row.entity_id ?? row.record_id;
+      const meta = row.meta ?? {};
+      const scenarioFromMeta = typeof meta === "string" ? (() => { try { const p = JSON.parse(meta); return p?.scenario; } catch { return null; } })() : meta?.scenario;
+      const created_at = row.created_at ?? new Date().toISOString();
+      const created_by_name = (typeof meta === "object" && meta?.created_by_name) ? meta.created_by_name : "—";
+      taskEvents.push({
+        event_type: "picking_task_created",
+        created_at,
+        details: {
+          task_id: taskId,
+          scenario: scenarioFromMeta && typeof scenarioFromMeta === "string" ? scenarioFromMeta.trim() : null,
+          target_cell: meta?.target_picking_cell_code ?? "?",
+          created_at,
+          created_by_name,
+          status: "open",
+        },
+      });
     });
 
     // Merge task events with existing history and sort by date

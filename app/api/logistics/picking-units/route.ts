@@ -105,19 +105,66 @@ export async function GET(req: Request) {
     .select("id, scenario, status")
     .in("id", taskIds)
     .eq("warehouse_id", profile.warehouse_id);
-  
+
+  // Для задач с пустым scenario — взять сценарий из audit_events. При «осиротевших» задачах (task удалён из picking_tasks) — запрашиваем audit по всем taskIds.
+  const taskIdsWithoutScenario =
+    (tasks && tasks.length > 0)
+      ? (tasks as any[]).filter((t: any) => !t.scenario?.trim()).map((t: any) => t.id)
+      : taskIds;
+  let auditScenarioByTaskId = new Map<string, string>();
+  if (taskIdsWithoutScenario.length > 0) {
+    const chunkSize = 100;
+    let auditRows: any[] = [];
+    for (let i = 0; i < taskIdsWithoutScenario.length; i += chunkSize) {
+      const chunk = taskIdsWithoutScenario.slice(i, i + chunkSize);
+      const auditByEntity = await supabaseAdmin
+        .from("audit_events")
+        .select("entity_id, meta")
+        .eq("entity_type", "picking_task")
+        .eq("action", "picking_task_create")
+        .in("entity_id", chunk)
+        .eq("warehouse_id", profile.warehouse_id)
+        .order("created_at", { ascending: false });
+      if (auditByEntity.data?.length) auditRows.push(...auditByEntity.data);
+    }
+    try {
+      for (let i = 0; i < taskIdsWithoutScenario.length; i += chunkSize) {
+        const chunk = taskIdsWithoutScenario.slice(i, i + chunkSize);
+        const auditByRecord = await supabaseAdmin
+          .from("audit_events")
+          .select("record_id, meta")
+          .eq("action", "picking_task_create")
+          .in("record_id", chunk)
+          .eq("warehouse_id", profile.warehouse_id)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        if (auditByRecord.data?.length) auditRows.push(...auditByRecord.data);
+      }
+    } catch (_) {
+      // record_id column may not exist
+    }
+    auditRows.forEach((row: any) => {
+      const tid = row.entity_id ?? row.record_id;
+      const meta = row.meta ?? {};
+      const scenarioFromMeta = typeof meta === "string" ? (() => { try { const p = JSON.parse(meta); return p?.scenario; } catch { return null; } })() : meta?.scenario;
+      if (tid && scenarioFromMeta && typeof scenarioFromMeta === "string" && scenarioFromMeta.trim() && !auditScenarioByTaskId.has(tid)) {
+        auditScenarioByTaskId.set(tid, scenarioFromMeta.trim());
+      }
+    });
+  }
+
   // Create maps: unit_id -> scenario
   const tasksMap = new Map(tasks?.map(t => [t.id, t]) || []);
   const taskUnitsMap = new Map(taskUnits?.map(tu => [tu.unit_id, tu.picking_task_id]) || []);
   const legacyTasksMap = new Map(legacyTasks?.map(t => [t.unit_id, t]) || []);
 
   // Enrich units with cell and scenario info
-  const enrichedUnits = (filteredUnits || []).map(u => {
+  const enrichedUnits = (filteredUnits || []).map((u, idx) => {
     // Try new format first (via picking_task_units)
     const taskId = taskUnitsMap.get(u.id);
     const task = taskId ? tasksMap.get(taskId) : null;
-    const scenario = task?.scenario || legacyTasksMap.get(u.id)?.scenario || null;
-    
+    const scenarioFromTask = task?.scenario?.trim() || legacyTasksMap.get(u.id)?.scenario?.trim() || null;
+    const scenario = scenarioFromTask || (taskId ? auditScenarioByTaskId.get(taskId) || null : null);
     return {
       ...u,
       cell: cellsMap.get(u.cell_id) || null,
