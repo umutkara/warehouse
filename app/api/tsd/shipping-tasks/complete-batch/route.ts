@@ -81,6 +81,36 @@ export async function POST(req: Request) {
   // For now, we allow partial completion (task will remain open/in_progress)
   const allUnitsMoved = totalUnits > 0 && movedUnitsCount >= totalUnits;
 
+  // Пустая задача (0 заказов в picking_task_units) — закрываем, чтобы не висела в списке
+  if (totalUnits === 0) {
+    const { error: updateError } = await supabaseAdmin
+      .from("picking_tasks")
+      .update({
+        status: "done",
+        completed_by: userData.user.id,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", taskId);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    await supabase.rpc("audit_log_event", {
+      p_action: "picking_task_complete",
+      p_entity_type: "picking_task",
+      p_entity_id: taskId,
+      p_summary: "Задание без заказов закрыто",
+      p_meta: { task_id: taskId, unit_count: 0, empty_task: true },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      taskCompleted: true,
+      message: "Задание без заказов закрыто.",
+    });
+  }
+
   if (allUnitsMoved) {
     // Mark task as done
     const { error: updateError } = await supabaseAdmin
@@ -115,13 +145,78 @@ export async function POST(req: Request) {
       taskCompleted: true,
       message: `Задание завершено: ${movedUnitsCount}/${totalUnits} заказов перемещено`,
     });
-  } else {
-    // Task remains in_progress (partial completion)
-    // Note: Task should already be in_progress (set when FROM cell was scanned)
+  }
+
+  // Recovery: if frontend sent fewer movedUnitIds (e.g. task skipped in batch), check DB — if all units are already in target picking cell, mark task done
+  const targetCellId = task.target_picking_cell_id;
+  if (!targetCellId || totalUnits === 0) {
     return NextResponse.json({
       ok: true,
       taskCompleted: false,
       message: `Перемещено ${movedUnitsCount}/${totalUnits} заказов. Задание остается в работе.`,
     });
   }
+
+  const unitIdsInTask = (taskUnits || []).map((tu: any) => tu.unit_id).filter(Boolean);
+  if (unitIdsInTask.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      taskCompleted: false,
+      message: `В задаче нет заказов (${movedUnitsCount} передано).`,
+    });
+  }
+
+  const { data: unitsNow } = await supabaseAdmin
+    .from("units")
+    .select("id, cell_id, status")
+    .in("id", unitIdsInTask)
+    .eq("warehouse_id", profile.warehouse_id);
+
+  const allInPicking =
+    (unitsNow?.length ?? 0) === unitIdsInTask.length &&
+    (unitsNow || []).every(
+      (u: any) => u.cell_id === targetCellId || u.status === "picking"
+    );
+
+  if (allInPicking) {
+    const { error: updateError } = await supabaseAdmin
+      .from("picking_tasks")
+      .update({
+        status: "done",
+        completed_by: userData.user.id,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", taskId);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    await supabase.rpc("audit_log_event", {
+      p_action: "picking_task_complete",
+      p_entity_type: "picking_task",
+      p_entity_id: taskId,
+      p_summary: `Задание завершено (восстановление): все заказы уже в ячейке`,
+      p_meta: {
+        task_id: taskId,
+        unit_count: totalUnits,
+        moved_count: movedUnitsCount,
+        target_picking_cell_id: targetCellId,
+        recovery: true,
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      taskCompleted: true,
+      message: `Задание завершено: все ${totalUnits} заказов уже в picking-ячейке.`,
+    });
+  }
+
+  // Task remains in_progress (partial completion)
+  return NextResponse.json({
+    ok: true,
+    taskCompleted: false,
+    message: `Перемещено ${movedUnitsCount}/${totalUnits} заказов. Задание остается в работе.`,
+  });
 }

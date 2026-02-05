@@ -192,9 +192,13 @@ export async function GET(req: Request) {
   const allUnitsMissingCellsIds = new Set(
     tasksAllUnitsMissingCells.map((t: any) => t.id)
   );
+  const noUnitsTaskIds = new Set(tasksWithNoUnits.map((t: any) => t.id));
 
   const tasksAfterFilter = sortedTasks.filter(
-    (task: any) => !fullyPickedIds.has(task.id) && !allUnitsMissingCellsIds.has(task.id)
+    (task: any) =>
+      !fullyPickedIds.has(task.id) &&
+      !allUnitsMissingCellsIds.has(task.id) &&
+      !noUnitsTaskIds.has(task.id)
   );
   // Deduplicate by unit: keep only one task per unit (the newest by created_at) so duplicates from repeated imports don't inflate the list
   const byCreatedDesc = [...tasksAfterFilter].sort(

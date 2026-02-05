@@ -548,16 +548,12 @@ export default function TsdPage() {
     // Заказы уже перемещены в picking во время сканирования
     const movedUnitIds = shippingNewScannedUnits.map((u) => u.id);
       
-      // Завершаем каждую задачу отдельно
+      // Завершаем каждую задачу отдельно (вызываем complete-batch даже при 0 movedUnitIds — сервер может завершить задачу по факту в БД, если все заказы уже в picking)
       const taskResults = [];
       for (const task of currentTaskNew.tasks) {
-        // Получаем заказы, которые относятся к этой задаче
         const taskUnitIds = (task.units || []).map((u: any) => u.id);
         const movedInThisTask = movedUnitIds.filter((id) => taskUnitIds.includes(id));
-        
-        if (movedInThisTask.length === 0) continue;
-        
-        // Завершаем задачу
+
         const completeRes = await fetch("/api/tsd/shipping-tasks/complete-batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -566,13 +562,14 @@ export default function TsdPage() {
             movedUnitIds: movedInThisTask,
           }),
         });
-        
+
         if (!completeRes.ok) {
           const json = await completeRes.json().catch(() => ({}));
           throw new Error(json.error || `Ошибка завершения задачи ${task.id}`);
         }
-        
-        taskResults.push({ taskId: task.id, movedCount: movedInThisTask.length });
+
+        const completeJson = await completeRes.json().catch(() => ({}));
+        taskResults.push({ taskId: task.id, movedCount: movedInThisTask.length, taskCompleted: completeJson.taskCompleted });
       }
       
       setSuccess(`✅ Задача завершена! ${shippingNewScannedUnits.length} заказов перемещено в ${toCellCode}`);
@@ -2384,15 +2381,6 @@ export default function TsdPage() {
             style={{ flex: 1, minWidth: 100 }}
           >
             Инвентаризация
-          </Button>
-          <Button
-            variant={mode === "shipping" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("shipping")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Отгрузка
           </Button>
           <Button
             variant={mode === "shipping_new" ? "primary" : "secondary"}
