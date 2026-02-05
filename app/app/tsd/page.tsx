@@ -1152,6 +1152,9 @@ export default function TsdPage() {
     // SHIPPING → REJECTED ✅ (обратная совместимость)
     // SHIPPING → FF ✅
     // REJECTED → REJECTED ✅
+    // REJECTED → FF ✅
+    // REJECTED → STORAGE ✅
+    // REJECTED → SHIPPING ✅
     // FF → FF ✅
     // FF → STORAGE ✅
     // FF → SHIPPING ✅
@@ -1188,12 +1191,12 @@ export default function TsdPage() {
     }
 
     if (fromType === 'rejected') {
-      if (toType === 'rejected') {
+      if (toType === 'rejected' || toType === 'ff' || toType === 'storage' || toType === 'shipping') {
         return { valid: true };
       }
       return {
         valid: false,
-        error: `Из REJECTED можно переместить только в REJECTED. Выбрано: ${toType.toUpperCase()}`
+        error: `Из REJECTED можно переместить только в REJECTED, FF, STORAGE или SHIPPING. Выбрано: ${toType.toUpperCase()}`
       };
     }
 
@@ -4106,7 +4109,7 @@ export default function TsdPage() {
               <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
               <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
               <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                📌 Разрешено: BIN→STORAGE/SHIPPING/REJECTED/FF, STORAGE→SHIPPING/STORAGE/REJECTED/FF, SHIPPING→STORAGE/SHIPPING/REJECTED/FF, REJECTED→REJECTED, FF→FF/STORAGE/SHIPPING
+                📌 Разрешено: BIN→STORAGE/SHIPPING/REJECTED/FF, STORAGE→SHIPPING/STORAGE/REJECTED/FF, SHIPPING→STORAGE/SHIPPING/REJECTED/FF, REJECTED→REJECTED/FF/STORAGE/SHIPPING, FF→FF/STORAGE/SHIPPING
               </li>
             </ol>
           ) : mode === "inventory" ? (

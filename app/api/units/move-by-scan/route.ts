@@ -132,6 +132,7 @@ export async function POST(req: Request) {
     // storage/shipping → picking (OPS создал задание)
     // storage ⇄ shipping (изменение решения)
     // rejected → rejected (обратная совместимость)
+    // rejected → ff, storage, shipping (ТСД перемещение из отклонённых)
     // storage/shipping → rejected/ff (обратная совместимость)
     // picking → out (через ТСД отгрузка - но это отдельный API)
     const allowedMoves: Record<string, string[]> = {
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
       storage: ["storage", "shipping", "picking", "rejected", "ff"],
       shipping: ["shipping", "storage", "picking", "rejected", "ff"],
       picking: ["picking"], // Picking может перемещаться внутри picking зоны
-      rejected: ["rejected"],
+      rejected: ["rejected", "ff", "storage", "shipping"],
       ff: ["ff", "storage", "shipping"],
     };
 
