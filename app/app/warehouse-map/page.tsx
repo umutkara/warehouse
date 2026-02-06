@@ -146,6 +146,7 @@ export default function WarehouseMapPage() {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [mapFullscreenOpen, setMapFullscreenOpen] = useState(false);
   const panStartRef = useRef<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 2;
@@ -308,6 +309,20 @@ export default function WarehouseMapPage() {
     [cells, zoneFilters]
   );
 
+  // Размер области карты под формат ячеек (чтобы ни одна ячейка не выходила за границы)
+  const MAP_PAD = 24;
+  const mapBounds = useMemo(() => {
+    if (visibleCells.length === 0) return { width: 400, height: 400 };
+    const minX = Math.min(...visibleCells.map((c) => c.x));
+    const minY = Math.min(...visibleCells.map((c) => c.y));
+    const maxX = Math.max(...visibleCells.map((c) => c.x + (c.w ?? CELL_SIZE)));
+    const maxY = Math.max(...visibleCells.map((c) => c.y + (c.h ?? CELL_SIZE)));
+    return {
+      width: Math.max(400, maxX - minX + 2 * MAP_PAD),
+      height: Math.max(400, maxY - minY + 2 * MAP_PAD),
+    };
+  }, [visibleCells]);
+
   return (
     <>
       <style>{`
@@ -318,8 +333,8 @@ export default function WarehouseMapPage() {
       `}</style>
       
       <div style={{ height: "calc(100vh - 120px)", display: "flex" }}>
-        <div style={{ flex: 1 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16, flexShrink: 0 }}>
           <input
             placeholder="🔍 Поиск по штрихкоду"
             value={searchBarcode}
@@ -408,81 +423,44 @@ export default function WarehouseMapPage() {
           🗺️ Карта склада
         </h2>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: "#666" }}>Сводка:</div>
-
-          <StatPill label="Сортировка" value={zoneStats?.counts?.bin} onClick={() => setOnlyZone("bin")} />
-          <StatPill label="Хранение" value={zoneStats?.counts?.storage} onClick={() => setOnlyZone("storage")} />
-          <StatPill label="Отгрузка" value={zoneStats?.counts?.shipping} onClick={() => setOnlyZone("shipping")} />
-          <StatPill label="Отклонённые" value={zoneStats?.counts?.rejected} onClick={() => setOnlyZone("rejected")} />
-          <StatPill label="Излишки" value={zoneStats?.counts?.surplus} onClick={() => setOnlyZone("surplus")} />
-
-          <StatPill label="Не размещено" value={zoneStats?.unplaced} />
-          <StatPill label="Всего" value={zoneStats?.total} />
-        </div>
-
-        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 16 }}>
-          {ZONES.map((zone) => (
-            <div
-              key={zone}
-              onClick={() => setOnlyZone(zone)}
-              style={{
-                padding: 16,
-                background: "#fff",
-                borderRadius: 12,
-                border: "2px solid #e5e7eb",
-                cursor: "pointer",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 14, color: "#6b7280" }}>{ZONE_LABEL[zone]}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#111827" }}>
-                  {zoneStats?.counts?.[zone] ?? "-"}
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: "#9ca3af" }}>Открыть →</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {/* Чекбоксы по типам ячеек */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, flexShrink: 0 }}>
           {ZONES.map((z) => (
-            <label 
-              key={z} 
-              style={{ 
-                display: "flex", 
-                gap: 8, 
-                alignItems: "center", 
-                fontSize: 13,
-                fontWeight: 600,
-                padding: "8px 14px",
-                borderRadius: 8,
+            <label
+              key={z}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 16px",
+                borderRadius: 12,
                 border: "2px solid",
                 borderColor: zoneFilters[z] ? "#667eea" : "#e5e7eb",
-                background: zoneFilters[z] 
-                  ? "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%)"
+                background: zoneFilters[z]
+                  ? "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)"
                   : "#fff",
                 cursor: "pointer",
-                transition: "all 0.2s",
+                fontSize: 14,
+                fontWeight: 600,
+                color: zoneFilters[z] ? "#4338ca" : "#6b7280",
+                boxShadow: zoneFilters[z] ? "0 2px 8px rgba(102, 126, 234, 0.2)" : "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.2s ease",
                 userSelect: "none",
-                boxShadow: zoneFilters[z] 
-                  ? "0 2px 8px rgba(102, 126, 234, 0.15)"
-                  : "0 1px 3px rgba(0, 0, 0, 0.05)",
               }}
               onMouseEnter={(e) => {
                 if (!zoneFilters[z]) {
-                  e.currentTarget.style.borderColor = "#667eea";
-                  e.currentTarget.style.background = "#f9fafb";
+                  e.currentTarget.style.borderColor = "#a5b4fc";
+                  e.currentTarget.style.background = "#f8fafc";
+                } else {
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.25)";
                 }
               }}
               onMouseLeave={(e) => {
                 if (!zoneFilters[z]) {
                   e.currentTarget.style.borderColor = "#e5e7eb";
                   e.currentTarget.style.background = "#fff";
+                } else {
+                  e.currentTarget.style.boxShadow = "0 2px 8px rgba(102, 126, 234, 0.2)";
                 }
               }}
             >
@@ -491,17 +469,14 @@ export default function WarehouseMapPage() {
                 checked={zoneFilters[z]}
                 onChange={() => toggleZone(z)}
                 style={{
-                  width: 16,
-                  height: 16,
+                  width: 18,
+                  height: 18,
                   cursor: "pointer",
                   accentColor: "#667eea",
                 }}
               />
-              <span style={{ 
-                color: zoneFilters[z] ? "#667eea" : "#6b7280",
-              }}>
-                {ZONE_LABEL[z]}
-              </span>
+              <span style={{ letterSpacing: "0.02em" }}>{ZONE_LABEL[z]}</span>
+              <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 500 }}>({z})</span>
             </label>
           ))}
         </div>
@@ -597,17 +572,48 @@ export default function WarehouseMapPage() {
         <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 4 }}>
           Перетаскивание пустого места — сдвиг карты
         </span>
+        <button
+          type="button"
+          onClick={() => setMapFullscreenOpen(true)}
+          style={{
+            marginLeft: "auto",
+            padding: "10px 18px",
+            borderRadius: 10,
+            border: "2px solid #667eea",
+            background: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
+            color: "#4338ca",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            boxShadow: "0 2px 8px rgba(102, 126, 234, 0.2)",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.3)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)";
+            e.currentTarget.style.boxShadow = "0 2px 8px rgba(102, 126, 234, 0.2)";
+          }}
+        >
+          <span style={{ fontSize: 18 }}>⛶</span>
+          Открыть во весь экран
+        </button>
       </div>
 
       {/* Область карты с zoom/pan */}
       <div
         style={{
+          flex: 1,
           overflow: "auto",
           minHeight: 400,
-          height: "100%",
           borderRadius: 16,
           border: "1px solid #e5e7eb",
-          background: "#f9fafb",
+          background: "transparent",
         }}
         onMouseLeave={() => {
           if (isPanning) setIsPanning(false);
@@ -619,8 +625,8 @@ export default function WarehouseMapPage() {
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
             position: "relative",
-            minWidth: "100%",
-            minHeight: 400,
+            width: mapBounds.width,
+            height: mapBounds.height,
           }}
         >
           {/* Слой для pan: клик по пустому месту — перетаскивание карты */}
@@ -643,8 +649,8 @@ export default function WarehouseMapPage() {
               left: 0,
               right: 0,
               bottom: 0,
-              minWidth: 3000,
-              minHeight: 3000,
+              width: "100%",
+              height: "100%",
               zIndex: 0,
               cursor: isPanning ? "grabbing" : "grab",
             }}
@@ -697,11 +703,14 @@ export default function WarehouseMapPage() {
             }}
             style={{
               position: "relative",
+              width: mapBounds.width,
+              height: mapBounds.height,
+              minWidth: 400,
+              minHeight: 400,
               background: "linear-gradient(to bottom right, #fafafa 0%, #ffffff 100%)",
               border: "1px solid #e5e7eb",
-              minHeight: 400,
               borderRadius: 16,
-              boxShadow: "inset 0 1px 3px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.05)",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
               zIndex: 1,
               cursor: isPanning ? "grabbing" : "grab",
             }}
@@ -865,6 +874,128 @@ export default function WarehouseMapPage() {
         </div>
       </div>
 
+      {/* Модальное окно: карта во весь экран (только просмотр) */}
+      {mapFullscreenOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0, 0, 0, 0.85)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setMapFullscreenOpen(false)}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "auto",
+              padding: 24,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setMapFullscreenOpen(false)}
+              style={{
+                position: "fixed",
+                top: 20,
+                right: 20,
+                zIndex: 10000,
+                width: 48,
+                height: 48,
+                borderRadius: 12,
+                border: "2px solid rgba(255,255,255,0.3)",
+                background: "rgba(255,255,255,0.15)",
+                color: "#fff",
+                fontSize: 24,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.25)";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.5)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.15)";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.3)";
+              }}
+            >
+              ×
+            </button>
+            <div
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "0 0",
+                position: "relative",
+                width: mapBounds.width,
+                height: mapBounds.height,
+                background: "linear-gradient(to bottom right, #fafafa 0%, #ffffff 100%)",
+                border: "2px solid #e5e7eb",
+                borderRadius: 16,
+                boxShadow: "0 8px 40px rgba(0,0,0,0.4)",
+              }}
+            >
+              {visibleCells.map((c) => (
+                <div
+                  key={c.id}
+                  style={{
+                    position: "absolute",
+                    left: c.x,
+                    top: c.y,
+                    width: CELL_SIZE,
+                    height: CELL_SIZE,
+                    background: cellBg(c),
+                    border: `2px solid ${borderColor(c.calc_status)}`,
+                    boxShadow: c.calc_status === "blocked"
+                      ? "0 2px 8px rgba(220, 38, 38, 0.2)"
+                      : c.units_count > 0
+                        ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                        : "0 1px 3px rgba(0, 0, 0, 0.05)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 10,
+                    padding: 4,
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#111" }}>{c.code}</div>
+                  <div style={{ fontSize: 6, color: "#6b7280", fontWeight: 600, textTransform: "uppercase" }}>{c.cell_type}</div>
+                  {c.units_count > 0 && (
+                    <div style={{
+                      marginTop: 4,
+                      background: "#374151",
+                      color: "#fff",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                    }}>
+                      {c.units_count}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedCell && (
         <div
           style={{
@@ -872,9 +1003,7 @@ export default function WarehouseMapPage() {
             top: 0,
             right: 0,
             height: "100vh",
-            width: "min(420px, 35vw)",
-            minWidth: 280,
-            maxWidth: 420,
+            width: 420,
             borderLeft: "1px solid #e5e7eb",
             background: "linear-gradient(to bottom, #f9fafb 0%, #ffffff 100%)",
             display: "flex",
