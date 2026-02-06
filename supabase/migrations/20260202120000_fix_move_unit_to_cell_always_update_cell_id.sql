@@ -93,6 +93,15 @@ BEGIN
     RETURN json_build_object('ok', false, 'error', 'Unit update failed');
   END IF;
 
+  -- 5b) Log move in unit_moves (audit; columns may vary by schema)
+  BEGIN
+    INSERT INTO unit_moves (warehouse_id, unit_id, from_cell_id, to_cell_id, moved_by, source, created_at)
+    VALUES (v_warehouse_id, p_unit_id, v_from_cell_id, p_to_cell_id, auth.uid(), 'api', now());
+  EXCEPTION
+    WHEN undefined_column OR undefined_table THEN
+      NULL;
+  END;
+
   -- 6) Return success (API expects ok, unitId, fromCellId, toCellId, toStatus)
   RETURN json_build_object(
     'ok', true,

@@ -19,9 +19,6 @@ export async function tryCreatePostponedTask(
   createdByName: string,
   supabaseAdmin: SupabaseClient
 ): Promise<TryCreatePostponedTaskResult> {
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "postponed-auto-task.ts:entry", message: "tryCreatePostponedTask called", data: { unitId }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
-  // #endregion
   try {
     const { data: unit, error: unitErr } = await supabaseAdmin
       .from("units")
@@ -149,9 +146,6 @@ export async function tryCreatePostponedTask(
       return { created: false, reason: "insert task_units failed" };
     }
 
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "postponed-auto-task.ts:created", message: "postponed task created", data: { unitId, taskId, unitCellId: unit.cell_id, createdByName }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
-    // #endregion
     return { created: true, taskId };
   } catch (e: any) {
     console.error("[postponed-auto-task] unexpected error:", e);

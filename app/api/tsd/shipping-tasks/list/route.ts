@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import fs from "fs";
-import path from "path";
 
 /**
  * GET /api/tsd/shipping-tasks/list
@@ -148,11 +146,6 @@ export async function GET(req: Request) {
 
   // По факту: перезапрашиваем текущий cell_id у units, чтобы отображать актуальную ячейку (не из join)
   const allUnitIds = [...new Set(Array.from(unitsMap.values()).flat().map((u: any) => u.id).filter(Boolean))];
-  // #region agent log
-  const joinCellByUnitId = new Map<string, string | null>();
-  unitsMap.forEach((units) => units.forEach((u: any) => { if (u.id) joinCellByUnitId.set(u.id, u.cell_id ?? null); }));
-  fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:before fresh", message: "cell_id from join", data: { unitCount: allUnitIds.length, sample: allUnitIds.slice(0, 3).map((id) => ({ unitId: id, cell_id_join: joinCellByUnitId.get(id) })) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "instrument" }) }).catch(() => {});
-  // #endregion
   let freshCellByUnitId = new Map<string, string | null>();
   if (allUnitIds.length > 0) {
     for (let i = 0; i < allUnitIds.length; i += 200) {
@@ -166,18 +159,6 @@ export async function GET(req: Request) {
         freshCellByUnitId.set(row.id, row.cell_id ?? null);
       });
     }
-    // #region agent log
-    const changes: { unitId: string; join_cell: string | null; fresh_cell: string | null }[] = [];
-    unitsMap.forEach((units) => {
-      units.forEach((u: any) => {
-        const joinCell = u.cell_id ?? null;
-        const freshCellId = u.id ? freshCellByUnitId.get(u.id) : undefined;
-        if (u.id && (freshCellId !== undefined && freshCellId !== joinCell)) changes.push({ unitId: u.id, join_cell: joinCell, fresh_cell: freshCellId ?? null });
-      });
-    });
-    const notInFresh = allUnitIds.filter((id) => !freshCellByUnitId.has(id)).length;
-    fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:after fresh", message: "fresh cell_id diff", data: { totalUnits: allUnitIds.length, freshRows: freshCellByUnitId.size, notInFresh, changesCount: changes.length, changesSample: changes.slice(0, 5) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "instrument" }) }).catch(() => {});
-    // #endregion
     unitsMap.forEach((units, taskId) => {
       units.forEach((u: any) => {
         const freshCellId = u.id ? freshCellByUnitId.get(u.id) : undefined;
@@ -272,11 +253,6 @@ export async function GET(req: Request) {
     });
   });
   const allUnitsRejectedOrFfIds = new Set(tasksAllUnitsInRejectedOrFf.map((t: any) => t.id));
-  // #region agent log
-  if (tasksAllUnitsInRejectedOrFf.length > 0) {
-    fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "tsd/shipping-tasks/list:filter", message: "tasks hidden: all units in rejected/ff", data: { count: tasksAllUnitsInRejectedOrFf.length, taskIds: tasksAllUnitsInRejectedOrFf.map((t: any) => t.id).slice(0, 5) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "post-fix" }) }).catch(() => {});
-  }
-  // #endregion
 
   const tasksAfterFilter = sortedTasks.filter(
     (task: any) =>
@@ -314,39 +290,6 @@ export async function GET(req: Request) {
     const fromCells = [...new Set(activeUnits.map((u: any) => getDisplayCellId(u)).filter(Boolean))]
       .map((cellId) => cellId && cellsMap.get(cellId))
       .filter(Boolean);
-
-    // #region agent log — отображение в ТСД Отгрузка (НОВАЯ): что уходит в ответ
-    if (activeUnits.length > 0) {
-      const u = activeUnits[0];
-      const cellInfo = u.cell_id ? cellsMap.get(u.cell_id) : null;
-      const fromCellInfo = u.from_cell_id ? cellsMap.get(u.from_cell_id) : null;
-      const firstFrom = fromCells[0];
-      const payload = {
-        taskId: task.id,
-        unitId: u.id,
-        barcode: u.barcode,
-        unitCellId: u.cell_id,
-        unitFromCellId: u.from_cell_id,
-        responseCellCode: cellInfo?.code,
-        responseCellType: cellInfo?.cell_type,
-        responseFromCellCode: fromCellInfo?.code,
-        responseFromCellType: fromCellInfo?.cell_type,
-        fromCellsDisplay: fromCells.map((c: any) => ({ code: c.code, cell_type: c.cell_type })),
-        mismatch: u.cell_id !== u.from_cell_id,
-      };
-      fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:formatted_tsd", message: "TSD response: unit cell for display", data: payload, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "tsd-display" }) }).catch(() => {});
-      if (u.barcode && (String(u.barcode).includes("2852483901") || String(u.barcode).replace(/\D/g, "").includes("2852483901"))) {
-        fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:example_barcode", message: "example 003102852483901", data: payload, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "example" }) }).catch(() => {});
-      }
-      try {
-        const logDir = path.join(process.cwd(), ".cursor");
-        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-        const logPath = path.join(logDir, "debug.log");
-        const logLine = JSON.stringify({ location: "list:formatted_tsd", message: "TSD response: unit cell for display", data: payload, timestamp: Date.now(), hypothesisId: "tsd-display" }) + "\n";
-        fs.appendFileSync(logPath, logLine);
-      } catch (_) {}
-    }
-    // #endregion
 
     const formatted = {
       id: task.id,

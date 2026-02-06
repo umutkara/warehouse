@@ -342,9 +342,6 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
               Создать задания
             </NavButton>
-            <NavButton href="/app/ops-shipping-beta" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
-              Создать задания BETA
-            </NavButton>
             <NavButton href="/app/ops/merchant-rejections" icon={<Icons.Alert />} isCollapsed={!shouldExpand}>
               Мерчант не принял
             </NavButton>
