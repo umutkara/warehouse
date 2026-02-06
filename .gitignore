@@ -84,7 +84,9 @@ coverage
 # DynamoDB Local files
 .dynamodb/
 
-# Migrations and docs (keep local, don't commit to GitHub)
-migrations/
+# Root-level migrations (legacy, keep local); Supabase migrations — коммитим
+/migrations/
 *.sql
+!supabase/migrations/*.sql
+# Docs (keep local)
 *.md
