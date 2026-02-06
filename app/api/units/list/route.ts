@@ -136,11 +136,41 @@ export async function GET(req: Request) {
       );
     }
 
+    // По факту: ячейку для отображения берём из warehouse_cells_map; при рассинхроне — по status (rejected/ff)
+    const cellIds = [...new Set((units || []).map((u: any) => u.cell_id).filter(Boolean))];
+    const cellsMap = new Map<string, { code: string; cell_type: string }>();
+    if (cellIds.length > 0) {
+      const { data: cells } = await supabaseAdmin
+        .from("warehouse_cells_map")
+        .select("id, code, cell_type")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("id", cellIds);
+      cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
+    }
+    let rejectedCell: { id: string; code: string; cell_type: string } | null = null;
+    let ffCell: { id: string; code: string; cell_type: string } | null = null;
+    const { data: statusCells } = await supabaseAdmin
+      .from("warehouse_cells_map")
+      .select("id, code, cell_type")
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("cell_type", ["rejected", "ff"]);
+    statusCells?.forEach((c: any) => {
+      cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type });
+      if (c.cell_type === "rejected") rejectedCell = rejectedCell ?? c;
+      if (c.cell_type === "ff") ffCell = ffCell ?? c;
+    });
+    function getDisplayCell(unit: any): { code: string; cell_type: string } | null {
+      const raw = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+      if (unit.status === "rejected" && (!raw || raw.cell_type !== "rejected") && rejectedCell) return rejectedCell;
+      if (unit.status === "ff" && (!raw || raw.cell_type !== "ff") && ffCell) return ffCell;
+      return raw ?? (unit.warehouse_cells ? { code: unit.warehouse_cells.code, cell_type: unit.warehouse_cells.cell_type } : null);
+    }
+
     // Calculate age for each unit
     const unitsWithAge = (units || []).map((unit: any) => {
       const createdAt = new Date(unit.created_at);
       const ageHours = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
-      
+      const cell = getDisplayCell(unit);
       return {
         id: unit.id,
         barcode: unit.barcode,
@@ -148,8 +178,8 @@ export async function GET(req: Request) {
         product_name: unit.product_name,
         partner_name: unit.partner_name,
         price: unit.price,
-        cell_code: unit.warehouse_cells?.code,
-        cell_type: unit.warehouse_cells?.cell_type,
+        cell_code: cell?.code ?? unit.warehouse_cells?.code,
+        cell_type: cell?.cell_type ?? unit.warehouse_cells?.cell_type,
         created_at: unit.created_at,
         age_hours: ageHours,
         meta: unit.meta,

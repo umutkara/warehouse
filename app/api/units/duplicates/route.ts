@@ -98,6 +98,18 @@ export async function GET() {
       from += pageSize;
     }
 
+    // По факту: ячейку для отображения берём из warehouse_cells_map
+    const cellIds = [...new Set(allUnits.map((u: any) => u.cell_id).filter(Boolean))];
+    const cellsMap = new Map<string, { code: string; cell_type: string }>();
+    if (cellIds.length > 0) {
+      const { data: cells } = await supabaseAdmin
+        .from("warehouse_cells_map")
+        .select("id, code, cell_type")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("id", cellIds);
+      cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
+    }
+
     const keyMap = new Map<string, { units: DuplicateUnit[]; unitIds: Set<string> }>();
 
     for (const unit of allUnits) {
@@ -105,12 +117,13 @@ export async function GET() {
       const keys = getElevenDigitKeys(digits);
       if (keys.length === 0) continue;
 
+      const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
       const item: DuplicateUnit = {
         id: unit.id,
         barcode: unit.barcode,
         status: unit.status ?? null,
-        cell_code: unit.warehouse_cells?.code ?? null,
-        cell_type: unit.warehouse_cells?.cell_type ?? null,
+        cell_code: cell?.code ?? unit.warehouse_cells?.code ?? null,
+        cell_type: cell?.cell_type ?? unit.warehouse_cells?.cell_type ?? null,
       };
 
       for (const key of keys) {

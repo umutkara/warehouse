@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import fs from "fs";
+import path from "path";
 
 /**
  * GET /api/tsd/shipping-tasks/list
@@ -144,6 +146,48 @@ export async function GET(req: Request) {
     }
   });
 
+  // По факту: перезапрашиваем текущий cell_id у units, чтобы отображать актуальную ячейку (не из join)
+  const allUnitIds = [...new Set(Array.from(unitsMap.values()).flat().map((u: any) => u.id).filter(Boolean))];
+  // #region agent log
+  const joinCellByUnitId = new Map<string, string | null>();
+  unitsMap.forEach((units) => units.forEach((u: any) => { if (u.id) joinCellByUnitId.set(u.id, u.cell_id ?? null); }));
+  fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:before fresh", message: "cell_id from join", data: { unitCount: allUnitIds.length, sample: allUnitIds.slice(0, 3).map((id) => ({ unitId: id, cell_id_join: joinCellByUnitId.get(id) })) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "instrument" }) }).catch(() => {});
+  // #endregion
+  let freshCellByUnitId = new Map<string, string | null>();
+  if (allUnitIds.length > 0) {
+    for (let i = 0; i < allUnitIds.length; i += 200) {
+      const chunk = allUnitIds.slice(i, i + 200);
+      const { data: freshUnits } = await supabaseAdmin
+        .from("units")
+        .select("id, cell_id")
+        .in("id", chunk)
+        .eq("warehouse_id", profile.warehouse_id);
+      freshUnits?.forEach((row: any) => {
+        freshCellByUnitId.set(row.id, row.cell_id ?? null);
+      });
+    }
+    // #region agent log
+    const changes: { unitId: string; join_cell: string | null; fresh_cell: string | null }[] = [];
+    unitsMap.forEach((units) => {
+      units.forEach((u: any) => {
+        const joinCell = u.cell_id ?? null;
+        const freshCellId = u.id ? freshCellByUnitId.get(u.id) : undefined;
+        if (u.id && (freshCellId !== undefined && freshCellId !== joinCell)) changes.push({ unitId: u.id, join_cell: joinCell, fresh_cell: freshCellId ?? null });
+      });
+    });
+    const notInFresh = allUnitIds.filter((id) => !freshCellByUnitId.has(id)).length;
+    fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:after fresh", message: "fresh cell_id diff", data: { totalUnits: allUnitIds.length, freshRows: freshCellByUnitId.size, notInFresh, changesCount: changes.length, changesSample: changes.slice(0, 5) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "instrument" }) }).catch(() => {});
+    // #endregion
+    unitsMap.forEach((units, taskId) => {
+      units.forEach((u: any) => {
+        const freshCellId = u.id ? freshCellByUnitId.get(u.id) : undefined;
+        if (freshCellId !== undefined) {
+          (u as any).cell_id = freshCellId;
+        }
+      });
+    });
+  }
+
   const tasksWithNoUnits = sortedTasks.filter((t: any) => (unitsMap.get(t.id) || []).length === 0);
   // Hide tasks where every unit has no cell_id or no id from join (match prod: only show tasks with valid unit data)
   const tasksAllUnitsMissingCells = sortedTasks.filter((t: any) => {
@@ -159,15 +203,15 @@ export async function GET(req: Request) {
     return units.every((u: any) => u.status === "picking" || (targetId && u.cell_id === targetId));
   });
 
-  // Get all cell IDs we need
+  // Get all cell IDs we need (из unitsMap — уже с актуальным cell_id по факту)
   const unitCellIds: string[] = [];
   const fromCellIds: string[] = [];
-  (taskUnits || []).forEach((tu: any) => {
-    const ud = tu.units ?? tu.unit;
-    if (ud?.cell_id) unitCellIds.push(ud.cell_id);
-    if (tu.from_cell_id) fromCellIds.push(tu.from_cell_id);
+  unitsMap.forEach((units) => {
+    units.forEach((u: any) => {
+      if (u.cell_id) unitCellIds.push(u.cell_id);
+      if (u.from_cell_id) fromCellIds.push(u.from_cell_id);
+    });
   });
-  
   const targetCellIds = sortedTasks
     .map((t: any) => t.target_picking_cell_id)
     .filter((id: any) => id) as string[];
@@ -175,7 +219,7 @@ export async function GET(req: Request) {
   const allCellIds = [...new Set([...unitCellIds, ...fromCellIds, ...targetCellIds])];
 
   // Fetch all cells via warehouse_cells_map (with warehouse_id = correct cell codes for this warehouse)
-  let cellsMap = new Map();
+  let cellsMap = new Map<string, { id: string; code: string; cell_type: string }>();
   if (allCellIds.length > 0) {
     const { data: cells } = await supabaseAdmin
       .from("warehouse_cells_map")
@@ -188,17 +232,58 @@ export async function GET(req: Request) {
     });
   }
 
+  // Ячейки rejected/ff для склада — для отображения по статусу, когда cell_id ещё не обновлён (рассинхрон)
+  let rejectedCellId: string | null = null;
+  let ffCellId: string | null = null;
+  const { data: statusCells } = await supabaseAdmin
+    .from("warehouse_cells_map")
+    .select("id, code, cell_type")
+    .eq("warehouse_id", profile.warehouse_id)
+    .in("cell_type", ["rejected", "ff"]);
+  statusCells?.forEach((c: any) => {
+    cellsMap.set(c.id, c);
+    if (c.cell_type === "rejected") rejectedCellId = rejectedCellId ?? c.id;
+    if (c.cell_type === "ff") ffCellId = ffCellId ?? c.id;
+  });
+
+  function getDisplayCellId(u: any): string | null {
+    const rawId = u.cell_id || u.from_cell_id;
+    const rawType = rawId ? cellsMap.get(rawId)?.cell_type : null;
+    if (u.status === "rejected" && rawType !== "rejected" && rejectedCellId) return rejectedCellId;
+    if (u.status === "ff" && rawType !== "ff" && ffCellId) return ffCellId;
+    return rawId ?? null;
+  }
+
   const fullyPickedIds = new Set(fullyPickedTasks.map((t: any) => t.id));
   const allUnitsMissingCellsIds = new Set(
     tasksAllUnitsMissingCells.map((t: any) => t.id)
   );
   const noUnitsTaskIds = new Set(tasksWithNoUnits.map((t: any) => t.id));
 
+  // Не показывать задачи, у которых все юниты в rejected/ff — по факту (в т.ч. по status при рассинхроне)
+  const NON_ACTIONABLE_CELL_TYPES = ["rejected", "ff"];
+  const tasksAllUnitsInRejectedOrFf = sortedTasks.filter((t: any) => {
+    const units = unitsMap.get(t.id) || [];
+    if (units.length === 0) return false;
+    return units.every((u: any) => {
+      const displayId = getDisplayCellId(u);
+      const cellType = displayId ? cellsMap.get(displayId)?.cell_type : null;
+      return cellType && NON_ACTIONABLE_CELL_TYPES.includes(cellType);
+    });
+  });
+  const allUnitsRejectedOrFfIds = new Set(tasksAllUnitsInRejectedOrFf.map((t: any) => t.id));
+  // #region agent log
+  if (tasksAllUnitsInRejectedOrFf.length > 0) {
+    fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "tsd/shipping-tasks/list:filter", message: "tasks hidden: all units in rejected/ff", data: { count: tasksAllUnitsInRejectedOrFf.length, taskIds: tasksAllUnitsInRejectedOrFf.map((t: any) => t.id).slice(0, 5) }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "post-fix" }) }).catch(() => {});
+  }
+  // #endregion
+
   const tasksAfterFilter = sortedTasks.filter(
     (task: any) =>
       !fullyPickedIds.has(task.id) &&
       !allUnitsMissingCellsIds.has(task.id) &&
-      !noUnitsTaskIds.has(task.id)
+      !noUnitsTaskIds.has(task.id) &&
+      !allUnitsRejectedOrFfIds.has(task.id)
   );
   // Deduplicate by unit: keep only one task per unit (the newest by created_at) so duplicates from repeated imports don't inflate the list
   const byCreatedDesc = [...tasksAfterFilter].sort(
@@ -225,10 +310,43 @@ export async function GET(req: Request) {
     const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;
 
-    // Unique cells for display: use current location (cell_id) first — "по факту" where the unit is now (same fix as TSD).
-    const fromCells = [...new Set(activeUnits.map((u: any) => u.cell_id || u.from_cell_id).filter(Boolean))]
-      .map((cellId) => cellsMap.get(cellId))
+    // Unique cells for display: use display cell (по статусу при рассинхроне cell_id), then cell_id/from_cell_id
+    const fromCells = [...new Set(activeUnits.map((u: any) => getDisplayCellId(u)).filter(Boolean))]
+      .map((cellId) => cellId && cellsMap.get(cellId))
       .filter(Boolean);
+
+    // #region agent log — отображение в ТСД Отгрузка (НОВАЯ): что уходит в ответ
+    if (activeUnits.length > 0) {
+      const u = activeUnits[0];
+      const cellInfo = u.cell_id ? cellsMap.get(u.cell_id) : null;
+      const fromCellInfo = u.from_cell_id ? cellsMap.get(u.from_cell_id) : null;
+      const firstFrom = fromCells[0];
+      const payload = {
+        taskId: task.id,
+        unitId: u.id,
+        barcode: u.barcode,
+        unitCellId: u.cell_id,
+        unitFromCellId: u.from_cell_id,
+        responseCellCode: cellInfo?.code,
+        responseCellType: cellInfo?.cell_type,
+        responseFromCellCode: fromCellInfo?.code,
+        responseFromCellType: fromCellInfo?.cell_type,
+        fromCellsDisplay: fromCells.map((c: any) => ({ code: c.code, cell_type: c.cell_type })),
+        mismatch: u.cell_id !== u.from_cell_id,
+      };
+      fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:formatted_tsd", message: "TSD response: unit cell for display", data: payload, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "tsd-display" }) }).catch(() => {});
+      if (u.barcode && (String(u.barcode).includes("2852483901") || String(u.barcode).replace(/\D/g, "").includes("2852483901"))) {
+        fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "list:example_barcode", message: "example 003102852483901", data: payload, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "example" }) }).catch(() => {});
+      }
+      try {
+        const logDir = path.join(process.cwd(), ".cursor");
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        const logPath = path.join(logDir, "debug.log");
+        const logLine = JSON.stringify({ location: "list:formatted_tsd", message: "TSD response: unit cell for display", data: payload, timestamp: Date.now(), hypothesisId: "tsd-display" }) + "\n";
+        fs.appendFileSync(logPath, logLine);
+      } catch (_) {}
+    }
+    // #endregion
 
     const formatted = {
       id: task.id,
@@ -239,15 +357,18 @@ export async function GET(req: Request) {
       picked_at: task.picked_at,
       completed_at: task.completed_at,
       unitCount: activeUnits.length,
-      units: activeUnits.map((u: any) => ({
-        id: u.id,
-        barcode: u.barcode,
-        cell_id: u.cell_id,
-        status: u.status,
-        from_cell_id: u.from_cell_id,
-        cell: u.cell_id ? cellsMap.get(u.cell_id) : null,
-        from_cell: u.from_cell_id ? cellsMap.get(u.from_cell_id) : null,
-      })),
+      units: activeUnits.map((u: any) => {
+        const displayCellId = getDisplayCellId(u);
+        return {
+          id: u.id,
+          barcode: u.barcode,
+          cell_id: u.cell_id,
+          status: u.status,
+          from_cell_id: u.from_cell_id,
+          cell: displayCellId ? cellsMap.get(displayCellId) : null,
+          from_cell: displayCellId ? cellsMap.get(displayCellId) : (u.from_cell_id ? cellsMap.get(u.from_cell_id) : null),
+        };
+      }),
       fromCells: fromCells.map((cell: any) => ({
         code: cell.code,
         cell_type: cell.cell_type,

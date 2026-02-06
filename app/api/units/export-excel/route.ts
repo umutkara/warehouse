@@ -108,6 +108,18 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Failed to load units" }, { status: 500 });
     }
 
+    // По факту: ячейку для отображения берём из warehouse_cells_map
+    const cellIds = [...new Set((units || []).map((u: any) => u.cell_id).filter(Boolean))];
+    const cellsMap = new Map<string, { code: string; cell_type: string }>();
+    if (cellIds.length > 0) {
+      const { data: cells } = await supabaseAdmin
+        .from("warehouse_cells_map")
+        .select("id, code, cell_type")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("id", cellIds);
+      cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
+    }
+
     // Get last action for each unit
     const unitIds = (units || []).map((u: any) => u.id);
     
@@ -157,14 +169,15 @@ export async function GET(req: Request) {
         }
       }
 
+      const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
       return [
         unit.barcode || "",
         unit.status || "",
         unit.product_name || "",
         unit.partner_name || "",
         unit.price ? unit.price.toFixed(2) : "",
-        unit.warehouse_cells?.code || "",
-        unit.warehouse_cells?.cell_type || "",
+        cell?.code ?? unit.warehouse_cells?.code ?? "",
+        cell?.cell_type ?? unit.warehouse_cells?.cell_type ?? "",
         createdAt.toLocaleString("ru-RU"),
         ageHours.toString(),
         lastActionText,

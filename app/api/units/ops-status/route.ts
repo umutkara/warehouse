@@ -139,6 +139,9 @@ export async function POST(req: Request) {
 
     // Автозадача «Перенос 1/2»: если статус = postponed_1 или postponed_2 и заказ уже в shipping/storage — создать задачу из последней задачи по unit
     if (status === "postponed_1" || status === "postponed_2") {
+      // #region agent log
+      fetch("http://127.0.0.1:7242/ingest/f5ccbc71-df7f-4deb-9f63-55a71444d072", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "ops-status:before tryCreatePostponedTask", message: "OPS set to postponed_1/2, calling tryCreatePostponedTask", data: { unitId, status }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H2" }) }).catch(() => {});
+      // #endregion
       try {
         await tryCreatePostponedTask(
           unitId,

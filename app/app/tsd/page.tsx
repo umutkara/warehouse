@@ -760,6 +760,16 @@ export default function TsdPage() {
     };
   }, [mode, supabase]);
 
+  // При возврате на вкладку — перезапросить список, чтобы видеть актуальные ячейки (по факту)
+  useEffect(() => {
+    if (mode !== "shipping_new") return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadShippingNewTasksRef.current();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [mode]);
+
   async function loadInventoryTasks() {
     setLoadingInventoryTasks(true);
     try {
