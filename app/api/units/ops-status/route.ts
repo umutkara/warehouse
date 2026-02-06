@@ -140,16 +140,13 @@ export async function POST(req: Request) {
     // Автозадача «Перенос 1/2»: если статус = postponed_1 или postponed_2 и заказ уже в shipping/storage — создать задачу из последней задачи по unit
     if (status === "postponed_1" || status === "postponed_2") {
       try {
-        const result = await tryCreatePostponedTask(
+        await tryCreatePostponedTask(
           unitId,
           profile.warehouse_id,
           userData.user.id,
           profile.full_name || userData.user.email || "Unknown",
           supabaseAdmin
         );
-        if (result.created) {
-          console.log("[ops-status] postponed auto-task created:", result.taskId, "for unit", unitId);
-        }
       } catch (e: any) {
         console.error("[ops-status] postponed auto-task error (non-blocking):", e?.message ?? e);
       }

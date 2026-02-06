@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
 
 const ALLOWED_STATUSES = ["bin", "stored", "picking", "shipping", "out", "rejected", "ff"] as const;
 type UnitStatus = typeof ALLOWED_STATUSES[number];
@@ -92,28 +90,6 @@ export async function POST(req: Request) {
         { error: errorMsg },
         { status: statusCode }
       );
-    }
-
-    try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("warehouse_id, full_name")
-        .eq("id", userData.user.id)
-        .single();
-      if (profile?.warehouse_id) {
-        const autoResult = await tryCreatePostponedTask(
-          unitId,
-          profile.warehouse_id,
-          userData.user.id,
-          profile.full_name || userData.user.email || "Unknown",
-          supabaseAdmin
-        );
-        if (autoResult.created) {
-          console.log("[units/move] postponed auto-task created:", autoResult.taskId, "for unit", unitId);
-        }
-      }
-    } catch (e: any) {
-      console.error("[units/move] postponed auto-task error (non-blocking):", e?.message ?? e);
     }
 
     return NextResponse.json({

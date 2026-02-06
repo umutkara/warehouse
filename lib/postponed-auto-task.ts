@@ -7,8 +7,9 @@ export type TryCreatePostponedTaskResult =
   | { created: false; reason?: string };
 
 /**
- * Если у unit OPS статус "Перенос 1" или "Перенос 2", он в ячейке shipping/storage и есть прошлая задача —
- * создаёт новую задачу ТСД с тем же сценарием и picking-ячейкой (на основе последней задачи по этому unit).
+ * Авто-задача «Перенос 1/2»: вызывается только при смене OPS на «Перенос 1» или «Перенос 2» (ops-status).
+ * Если unit в ячейке shipping/storage и есть прошлая задача с target_picking_cell_id —
+ * создаёт новую задачу ТСД с тем же сценарием и picking-ячейкой.
  * Не бросает исключения — при любой ошибке возвращает { created: false }.
  */
 export async function tryCreatePostponedTask(
@@ -26,9 +27,16 @@ export async function tryCreatePostponedTask(
       .eq("warehouse_id", warehouseId)
       .single();
 
-    if (unitErr || !unit) return { created: false, reason: "unit not found" };
-    if (!POSTPONED_OPS_STATUSES.includes((unit.meta as any)?.ops_status)) return { created: false, reason: "not postponed_1/2" };
-    if (!unit.cell_id) return { created: false, reason: "unit not in cell" };
+    if (unitErr || !unit) {
+      return { created: false, reason: "unit not found" };
+    }
+    const opsStatus = (unit.meta as any)?.ops_status;
+    if (!POSTPONED_OPS_STATUSES.includes(opsStatus)) {
+      return { created: false, reason: "not postponed_1/2" };
+    }
+    if (!unit.cell_id) {
+      return { created: false, reason: "unit not in cell" };
+    }
 
     const { data: cellRow, error: cellErr } = await supabaseAdmin
       .from("warehouse_cells_map")
@@ -37,9 +45,12 @@ export async function tryCreatePostponedTask(
       .eq("warehouse_id", warehouseId)
       .maybeSingle();
 
-    if (cellErr || !cellRow) return { created: false, reason: "cell not found" };
-    if (cellRow.cell_type !== "storage" && cellRow.cell_type !== "shipping")
+    if (cellErr || !cellRow) {
+      return { created: false, reason: "cell not found" };
+    }
+    if (cellRow.cell_type !== "storage" && cellRow.cell_type !== "shipping") {
       return { created: false, reason: "cell not storage/shipping" };
+    }
 
     const { data: ptuRows, error: ptuErr } = await supabaseAdmin
       .from("picking_task_units")
@@ -66,7 +77,9 @@ export async function tryCreatePostponedTask(
     const scenario = lastTask.scenario ?? null;
     const targetPickingCellId = lastTask.target_picking_cell_id ?? null;
 
-    if (!targetPickingCellId) return { created: false, reason: "no target cell in last task" };
+    if (!targetPickingCellId) {
+      return { created: false, reason: "no target cell in last task" };
+    }
 
     const { data: targetCell, error: targetCellErr } = await supabaseAdmin
       .from("warehouse_cells_map")
@@ -75,8 +88,9 @@ export async function tryCreatePostponedTask(
       .eq("warehouse_id", warehouseId)
       .maybeSingle();
 
-    if (targetCellErr || !targetCell || targetCell.cell_type !== "picking" || !targetCell.is_active)
+    if (targetCellErr || !targetCell || targetCell.cell_type !== "picking" || !targetCell.is_active) {
       return { created: false, reason: "target picking cell invalid" };
+    }
 
     const { data: openTasks } = await supabaseAdmin
       .from("picking_tasks")

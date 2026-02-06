@@ -233,21 +233,19 @@ export default function LeftNav({ role }: { role: string }) {
         background: "#ffffff",
         padding: "16px 12px",
         width: shouldExpand ? "240px" : "72px",
-        height: "100%",
         position: "fixed",
         left: 0,
         top: "60px", // Высота TopBar
         bottom: 0,
         zIndex: 100,
-        overflowY: "auto",
-        overflowX: "hidden",
+        overflow: "hidden",
         transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         display: "flex",
         flexDirection: "column",
         boxShadow: shouldExpand ? "4px 0 12px rgba(0,0,0,0.1)" : "none",
       }}
     >
-      {/* Header with hamburger */}
+      {/* Header with hamburger — не сжимается, прокручивается только nav */}
       <div
         style={{
           marginBottom: "24px",
@@ -255,6 +253,7 @@ export default function LeftNav({ role }: { role: string }) {
           alignItems: "center",
           gap: "12px",
           justifyContent: shouldExpand ? "space-between" : "center",
+          flexShrink: 0,
         }}
       >
         {shouldExpand && (
@@ -342,6 +341,9 @@ export default function LeftNav({ role }: { role: string }) {
             <SectionTitle isCollapsed={!shouldExpand}>OPS</SectionTitle>
             <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
               Создать задания
+            </NavButton>
+            <NavButton href="/app/ops-shipping-beta" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
+              Создать задания BETA
             </NavButton>
             <NavButton href="/app/ops/merchant-rejections" icon={<Icons.Alert />} isCollapsed={!shouldExpand}>
               Мерчант не принял

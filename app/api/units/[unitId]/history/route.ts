@@ -99,8 +99,6 @@ export async function GET(
           scenario,
           created_at,
           created_by_name,
-          canceled_at,
-          canceled_by,
           completed_at,
           completed_by,
           target_picking_cell_id,
