@@ -97,7 +97,10 @@ export async function POST(req: Request) {
     const { data: moveResult, error: moveError } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
       p_to_cell_id: cell.id,
-      p_to_status: "stored", // surplus units are stored
+      p_to_status: "stored",
+      p_note: null,
+      p_source: "surplus-receive",
+      p_meta: null,
     });
 
     if (moveError) {

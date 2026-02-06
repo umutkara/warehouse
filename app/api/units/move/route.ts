@@ -42,10 +42,13 @@ export async function POST(req: Request) {
     }
 
     // Call RPC function - single source of truth for cell-to-cell moves
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('move_unit_to_cell', {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
       p_to_cell_id: toCellId,
-      p_to_status: toStatus
+      p_to_status: toStatus,
+      p_note: null,
+      p_source: "move",
+      p_meta: null,
     });
 
     if (rpcError) {

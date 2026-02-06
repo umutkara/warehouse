@@ -168,6 +168,9 @@ export async function POST(req: Request) {
       p_unit_id: unit.id,
       p_to_cell_id: toCell.id,
       p_to_status: toStatus,
+      p_note: null,
+      p_source: "move-by-scan",
+      p_meta: null,
     });
 
     if (rpcError) {
@@ -245,7 +248,10 @@ export async function POST(req: Request) {
     const { data: rpcResult, error: rpcError } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unit.id,
       p_to_cell_id: cell.id,
-      p_to_status: toStatus, // НЕ null
+      p_to_status: toStatus,
+      p_note: null,
+      p_source: "move-by-scan-legacy",
+      p_meta: null,
     });
 
     if (rpcError) {

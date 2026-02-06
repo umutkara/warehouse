@@ -31,7 +31,10 @@ export async function POST(req: Request) {
     const { data, error } = await supabase.rpc("move_unit_to_cell", {
       p_unit_id: unitId,
       p_to_cell_id: cellId,
-      p_to_status: toStatus ?? "stored", // Default to "stored" for assignment
+      p_to_status: toStatus ?? "stored",
+      p_note: null,
+      p_source: "assign",
+      p_meta: null,
     });
 
     if (error) {

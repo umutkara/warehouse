@@ -1231,7 +1231,7 @@ export default function TsdPage() {
   // toCellOverride: используется при автоматическом вызове после setToCell для избежания race condition
   async function executeMove(toCellOverride?: CellInfo) {
     const effectiveToCell = toCellOverride || toCell;
-    
+
     if (!fromCell || units.length === 0 || !effectiveToCell) {
       setError("Не все данные заполнены");
       return;
@@ -1263,7 +1263,7 @@ export default function TsdPage() {
           try {
             json = rawText ? JSON.parse(rawText) : null;
           } catch {}
-          
+
           if (!res.ok) {
             // Проверка на ошибку инвентаризации (423 Locked)
             if (res.status === 423 && json?.error) {

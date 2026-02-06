@@ -192,6 +192,9 @@ export async function POST(req: Request) {
     p_unit_id: unit.id,
     p_to_cell_id: targetCell.id,
     p_to_status: "picking",
+    p_note: null,
+    p_source: "tsd-shipping-complete",
+    p_meta: null,
   });
 
   if (rpcError) {
