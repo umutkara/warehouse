@@ -75,8 +75,8 @@ export async function POST(req: Request) {
     }
   }
   
-  // If scenario not found via new format, try legacy format
-  if (!scenario) {
+  // If scenario or target cell not found via new format, try legacy format
+  if (!scenario || !targetPickingCellId) {
     const { data: legacyTask, error: legacyTaskError } = await supabaseAdmin
       .from("picking_tasks")
       .select("scenario, warehouse_id, target_picking_cell_id")
@@ -166,11 +166,10 @@ export async function POST(req: Request) {
         .eq("id", targetPickingCellId)
         .maybeSingle();
 
-      if (
-        targetCell &&
-        targetCell.warehouse_id === profile.warehouse_id &&
-        targetCell.code === HUB_PICKING_CELL_CODE
-      ) {
+      const codeMatches =
+        targetCell?.code?.toLowerCase?.() === HUB_PICKING_CELL_CODE.toLowerCase();
+
+      if (targetCell && targetCell.warehouse_id === profile.warehouse_id && codeMatches) {
         const { data: existingTransfer } = await supabaseAdmin
           .from("transfers")
           .select("id")
