@@ -145,7 +145,7 @@ export async function POST(req: Request) {
               unit_id: anyUnit.id,
               from_cell_id: anyUnit.cell_id,
               to_cell_id: targetCell.id,
-              moved_by: userData.user.id,
+              moved_by: user.id,
               source: "transfer.receive",
               created_at: new Date().toISOString(),
             });
