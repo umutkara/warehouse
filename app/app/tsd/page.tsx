@@ -54,6 +54,7 @@ export default function TsdPage() {
   const [warehouses, setWarehouses] = useState<Array<{ id: string; name?: string | null }>>([]);
   const [hubCourierName, setHubCourierName] = useState("");
   const [hubDestinationId, setHubDestinationId] = useState<string>("");
+  const [hubScannedUnits, setHubScannedUnits] = useState<UnitInfo[]>([]);
   const [lastHubSent, setLastHubSent] = useState<{ barcode: string; destination: string } | null>(null);
   
   // Для режима Приемка
@@ -995,16 +996,6 @@ export default function TsdPage() {
       return;
     }
 
-    if (!hubCourierName.trim()) {
-      setError("Введите имя курьера");
-      return;
-    }
-
-    if (!hubDestinationId) {
-      setError("Выберите склад назначения");
-      return;
-    }
-
     setBusy(true);
     try {
       const unitInfo = await loadUnitInfo(parsed.code);
@@ -1018,28 +1009,77 @@ export default function TsdPage() {
         return;
       }
 
-      const res = await fetch("/api/logistics/ship-out", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          unitId: unitInfo.id,
-          courierName: hubCourierName.trim(),
-          transferToWarehouseId: hubDestinationId,
-        }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.ok) {
-        setError(json?.error || "Ошибка отправки");
+      const alreadyAdded = hubScannedUnits.some((u) => u.id === unitInfo.id);
+      if (alreadyAdded) {
+        setError("Заказ уже добавлен в список");
         return;
       }
 
-      const destinationLabel =
-        warehouses.find((w) => w.id === hubDestinationId)?.name ||
-        `Склад ${hubDestinationId.slice(0, 6)}`;
-      setLastHubSent({ barcode: unitInfo.barcode, destination: destinationLabel });
-      setSuccess(`✓ Отправлено: ${unitInfo.barcode}`);
+      setHubScannedUnits((prev) => [...prev, unitInfo]);
+      setSuccess(`Добавлено: ${unitInfo.barcode}`);
       setScanValue("");
+    } catch (e: any) {
+      setError(e?.message || "Ошибка отправки");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleHubShippingBatchSend() {
+    if (busy) return;
+    setError(null);
+    setSuccess(null);
+
+    if (!hubCourierName.trim()) {
+      setError("Введите имя курьера");
+      return;
+    }
+
+    if (!hubDestinationId) {
+      setError("Выберите склад назначения");
+      return;
+    }
+
+    if (hubScannedUnits.length === 0) {
+      setError("Нет отсканированных заказов");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        hubScannedUnits.map((unit) =>
+          fetch("/api/logistics/ship-out", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              unitId: unit.id,
+              courierName: hubCourierName.trim(),
+              transferToWarehouseId: hubDestinationId,
+            }),
+          }).then((res) => res.json())
+        )
+      );
+
+      const successful = results.filter((r) => r.status === "fulfilled" && r.value?.ok).length;
+      const failed = results.length - successful;
+
+      if (successful > 0) {
+        const destinationLabel =
+          warehouses.find((w) => w.id === hubDestinationId)?.name ||
+          `Склад ${hubDestinationId.slice(0, 6)}`;
+        setLastHubSent({
+          barcode: `${successful} шт.`,
+          destination: destinationLabel,
+        });
+        setSuccess(`✓ Отправлено: ${successful}`);
+        setHubScannedUnits([]);
+        setScanValue("");
+      }
+
+      if (failed > 0) {
+        setError(`Не удалось отправить ${failed} из ${results.length}`);
+      }
     } catch (e: any) {
       setError(e?.message || "Ошибка отправки");
     } finally {
@@ -2760,6 +2800,45 @@ export default function TsdPage() {
             <div style={{ fontSize: 13, color: "#6b7280" }}>
               Сканируйте заказы из BIN — они будут отправлены в выбранный склад и появятся в его буфере.
             </div>
+
+            {hubScannedUnits.length > 0 && (
+              <div
+                style={{
+                  padding: 12,
+                  background: "#fff",
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+                  Список для отправки ({hubScannedUnits.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+                  {hubScannedUnits.map((u) => (
+                    <div key={u.id} style={{ fontSize: 14, color: "#374151" }}>
+                      {u.barcode}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleHubShippingBatchSend}
+                  disabled={busy}
+                  style={{
+                    marginTop: 10,
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: busy ? "#9ca3af" : "#16a34a",
+                    color: "#fff",
+                    fontWeight: 700,
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Отправить все
+                </button>
+              </div>
+            )}
 
             {lastHubSent && (
               <div

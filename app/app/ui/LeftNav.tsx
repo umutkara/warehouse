@@ -315,6 +315,9 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/receiving" icon={<Icons.Receiving />} isCollapsed={!shouldExpand}>
               Приемка
             </NavButton>
+            <NavButton href="/app/tsd" icon={<Icons.TSD />} isCollapsed={!shouldExpand}>
+              ТСД
+            </NavButton>
             <NavButton href="/app/buffer" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
               Буфер
             </NavButton>
@@ -324,28 +327,8 @@ export default function LeftNav({ role }: { role: string }) {
           </>
         )}
 
-        {/* Status-based pages (hidden for logistics-only and hub worker) */}
-        {canWork && !isLogisticsOnly && !isHubWorker && (
-          <>
-            <SectionTitle isCollapsed={!shouldExpand}>СТАТУСЫ ЗАКАЗОВ</SectionTitle>
-            <NavButton href="/app/status/bin" icon={<Icons.Receiving />} isCollapsed={!shouldExpand}>
-              BIN
-            </NavButton>
-            <NavButton href="/app/status/stored" icon={<Icons.Putaway />} isCollapsed={!shouldExpand}>
-              Stored
-            </NavButton>
-            <NavButton href="/app/status/shipping" icon={<Icons.Shipping />} isCollapsed={!shouldExpand}>
-              Shipping
-            </NavButton>
-            <NavButton href="/app/status/picking" icon={<Icons.Picking />} isCollapsed={!shouldExpand}>
-              Picking
-            </NavButton>
-            <NavButton href="/app/status/out" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
-              OUT
-            </NavButton>
-          </>
-        )}
-        
+        {/* Status-based pages removed from menu */}
+
         {canViewTasks && !isLogisticsOnly && !isHubWorker && (
           <NavButton href="/app/tsd" icon={<Icons.TSD />} isCollapsed={!shouldExpand}>
             ТСД
