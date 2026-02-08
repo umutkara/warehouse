@@ -33,12 +33,28 @@ type UnitInfo = {
   };
 };
 
-type Mode = "receiving" | "moving" | "inventory" | "shipping" | "shipping_new" | "shipping_fcutc" | "surplus" | "info";
+type Mode =
+  | "receiving"
+  | "moving"
+  | "inventory"
+  | "shipping"
+  | "shipping_new"
+  | "shipping_fcutc"
+  | "surplus"
+  | "info"
+  | "hub_shipping";
 
 export default function TsdPage() {
   const [mode, setMode] = useState<Mode>("receiving");
   const [scanValue, setScanValue] = useState("");
   const supabase = useMemo(() => supabaseBrowser(), []);
+  const [role, setRole] = useState<string>("guest");
+  const isHubWorker = role === "hub_worker";
+
+  const [warehouses, setWarehouses] = useState<Array<{ id: string; name?: string | null }>>([]);
+  const [hubCourierName, setHubCourierName] = useState("");
+  const [hubDestinationId, setHubDestinationId] = useState<string>("");
+  const [lastHubSent, setLastHubSent] = useState<{ barcode: string; destination: string } | null>(null);
   
   // Для режима Приемка
   const [binCell, setBinCell] = useState<CellInfo | null>(null);
@@ -140,6 +156,47 @@ export default function TsdPage() {
       playSuccessSound();
     }
   }, [success, playSuccessSound]);
+
+  useEffect(() => {
+    async function loadRole() {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.role) {
+          setRole(json.role);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadRole();
+  }, []);
+
+  useEffect(() => {
+    if (!isHubWorker) return;
+    async function loadWarehouses() {
+      try {
+        const res = await fetch("/api/warehouses/list", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok) {
+          const list = (json.warehouses || []) as Array<{ id: string; name?: string | null }>;
+          setWarehouses(list);
+          if (!hubDestinationId && list.length > 0) {
+            setHubDestinationId(list[0].id);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadWarehouses();
+  }, [isHubWorker, hubDestinationId]);
+
+  useEffect(() => {
+    if (isHubWorker && mode !== "receiving" && mode !== "hub_shipping") {
+      setMode("receiving");
+    }
+  }, [isHubWorker, mode]);
 
   // Проверка статуса инвентаризации и загрузка заданий
   useEffect(() => {
@@ -844,6 +901,8 @@ export default function TsdPage() {
         handleFcutcScan();
       } else if (mode === "surplus") {
         handleSurplusScan();
+      } else if (mode === "hub_shipping") {
+        handleHubShippingScan();
       } else if (mode === "info") {
         handleInfoScan();
       }
@@ -921,6 +980,70 @@ export default function TsdPage() {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  async function handleHubShippingScan() {
+    if (busy) return;
+    setError(null);
+    setSuccess(null);
+
+    const parsed = parseScan(scanValue);
+    if (!parsed || parsed.type !== "unit") {
+      setError("Сканируйте штрихкод заказа");
+      setScanValue("");
+      return;
+    }
+
+    if (!hubCourierName.trim()) {
+      setError("Введите имя курьера");
+      return;
+    }
+
+    if (!hubDestinationId) {
+      setError("Выберите склад назначения");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const unitInfo = await loadUnitInfo(parsed.code);
+      if (!unitInfo) {
+        setError("Заказ не найден");
+        return;
+      }
+
+      if (!unitInfo.cell || unitInfo.cell.cell_type !== "bin") {
+        setError("Отправка разрешена только из BIN");
+        return;
+      }
+
+      const res = await fetch("/api/logistics/ship-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitId: unitInfo.id,
+          courierName: hubCourierName.trim(),
+          transferToWarehouseId: hubDestinationId,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        setError(json?.error || "Ошибка отправки");
+        return;
+      }
+
+      const destinationLabel =
+        warehouses.find((w) => w.id === hubDestinationId)?.name ||
+        `Склад ${hubDestinationId.slice(0, 6)}`;
+      setLastHubSent({ barcode: unitInfo.barcode, destination: destinationLabel });
+      setSuccess(`✓ Отправлено: ${unitInfo.barcode}`);
+      setScanValue("");
+    } catch (e: any) {
+      setError(e?.message || "Ошибка отправки");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2377,60 +2500,75 @@ export default function TsdPage() {
           >
             Приемка
           </Button>
-          <Button
-            variant={mode === "moving" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("moving")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Перемещение
-          </Button>
-          <Button
-            variant={mode === "inventory" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("inventory")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Инвентаризация
-          </Button>
-          <Button
-            variant={mode === "shipping_new" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("shipping_new")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Отгрузка (НОВАЯ)
-          </Button>
-          <Button
-            variant={mode === "shipping_fcutc" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("shipping_fcutc")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Отгрузка (FCUTC)
-          </Button>
-          <Button
-            variant={mode === "surplus" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("surplus")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Излишки
-          </Button>
-          <Button
-            variant={mode === "info" ? "primary" : "secondary"}
-            size="lg"
-            onClick={() => handleModeChange("info")}
-            fullWidth
-            style={{ flex: 1, minWidth: 100 }}
-          >
-            Информация
-          </Button>
+
+          {isHubWorker ? (
+            <Button
+              variant={mode === "hub_shipping" ? "primary" : "secondary"}
+              size="lg"
+              onClick={() => handleModeChange("hub_shipping")}
+              fullWidth
+              style={{ flex: 1, minWidth: 140 }}
+            >
+              Отправка (Хаб)
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant={mode === "moving" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("moving")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Перемещение
+              </Button>
+              <Button
+                variant={mode === "inventory" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("inventory")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Инвентаризация
+              </Button>
+              <Button
+                variant={mode === "shipping_new" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("shipping_new")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Отгрузка (НОВАЯ)
+              </Button>
+              <Button
+                variant={mode === "shipping_fcutc" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("shipping_fcutc")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Отгрузка (FCUTC)
+              </Button>
+              <Button
+                variant={mode === "surplus" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("surplus")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Излишки
+              </Button>
+              <Button
+                variant={mode === "info" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("info")}
+                fullWidth
+                style={{ flex: 1, minWidth: 100 }}
+              >
+                Информация
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Главный input для сканирования */}
@@ -2556,6 +2694,85 @@ export default function TsdPage() {
                 <div style={{ fontSize: "14px", color: "#666", marginBottom: 4 }}>Последний принятый:</div>
                 <div style={{ fontSize: "18px", fontWeight: 700 }}>
                   {lastReceivedUnit.barcode} → {lastReceivedUnit.binCode}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Режим ОТПРАВКА (ХАБ) */}
+        {mode === "hub_shipping" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            <div
+              style={{
+                padding: 16,
+                background: "#f8fafc",
+                borderRadius: 8,
+                border: "2px solid #e2e8f0",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Курьер</div>
+              <input
+                type="text"
+                placeholder="Имя курьера"
+                value={hubCourierName}
+                onChange={(e) => setHubCourierName(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 16,
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                padding: 16,
+                background: "#f8fafc",
+                borderRadius: 8,
+                border: "2px solid #e2e8f0",
+              }}
+            >
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>Склад назначения</div>
+              <select
+                value={hubDestinationId}
+                onChange={(e) => setHubDestinationId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  fontSize: 16,
+                  background: "#fff",
+                }}
+              >
+                <option value="">Выберите склад</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name && w.name.trim() ? w.name : `Склад ${w.id.slice(0, 6)}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              Сканируйте заказы из BIN — они будут отправлены в выбранный склад и появятся в его буфере.
+            </div>
+
+            {lastHubSent && (
+              <div
+                style={{
+                  padding: 16,
+                  background: "#e8f5e9",
+                  borderRadius: 8,
+                  border: "2px solid #4caf50",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#666", marginBottom: 4 }}>Последний отправленный:</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {lastHubSent.barcode} → {lastHubSent.destination}
                 </div>
               </div>
             )}

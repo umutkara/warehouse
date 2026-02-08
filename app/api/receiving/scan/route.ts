@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-const allowed = new Set(["worker", "manager", "head", "admin"]);
+const allowed = new Set(["worker", "manager", "head", "admin", "hub_worker"]);
 
 function normalizeCellCode(v: any): string {
   // Убрать "CELL:" если есть, trim, upper
@@ -98,6 +98,79 @@ export async function POST(req: Request) {
         { error: `Ячейка "${cellCode}" заблокирована`, ok: false },
         { status: 400 }
       );
+    }
+
+    // Auto-accept transfer if unit is in transit to this warehouse
+    const { data: anyUnit, error: anyUnitError } = await supabaseAdmin
+      .from("units")
+      .select("id, barcode, cell_id, warehouse_id, status")
+      .eq("barcode", digits)
+      .maybeSingle();
+
+    if (anyUnitError && anyUnitError.code !== "PGRST116") {
+      console.error("Error loading unit for transfer check:", anyUnitError);
+      return NextResponse.json({ error: "Ошибка проверки transfer", ok: false }, { status: 500 });
+    }
+
+    if (anyUnit) {
+      const { data: transfer } = await supabaseAdmin
+        .from("transfers")
+        .select("id, unit_id, status, to_warehouse_id")
+        .eq("unit_id", anyUnit.id)
+        .eq("to_warehouse_id", profile.warehouse_id)
+        .eq("status", "in_transit")
+        .maybeSingle();
+
+      if (transfer) {
+        const newStatus = targetCell.cell_type === "rejected" ? "rejected" : "bin";
+
+        const { error: unitUpdateError } = await supabaseAdmin
+          .from("units")
+          .update({
+            warehouse_id: profile.warehouse_id,
+            cell_id: targetCell.id,
+            status: newStatus,
+          })
+          .eq("id", anyUnit.id);
+
+        if (unitUpdateError) {
+          return NextResponse.json({ error: unitUpdateError.message, ok: false }, { status: 400 });
+        }
+
+        try {
+          await supabaseAdmin
+            .from("unit_moves")
+            .insert({
+              warehouse_id: profile.warehouse_id,
+              unit_id: anyUnit.id,
+              from_cell_id: anyUnit.cell_id,
+              to_cell_id: targetCell.id,
+              moved_by: userData.user.id,
+              source: "transfer.receive",
+              created_at: new Date().toISOString(),
+            });
+        } catch (e) {
+          console.error("Failed to insert unit_moves (non-blocking):", e);
+        }
+
+        const { error: transferUpdateError } = await supabaseAdmin
+          .from("transfers")
+          .update({ status: "received", received_at: new Date().toISOString() })
+          .eq("id", transfer.id);
+
+        if (transferUpdateError) {
+          console.error("Failed to update transfer status:", transferUpdateError);
+        }
+
+        return NextResponse.json({
+          ok: true,
+          unitId: anyUnit.id,
+          barcode: digits,
+          cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
+          status: newStatus,
+          message: `Принято по transfer в ${targetCell.code}`,
+        });
+      }
     }
 
     // Check if unit exists

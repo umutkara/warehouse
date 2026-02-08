@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+const HUB_PICKING_CELL_CODE = "shirvanhub-1";
+const HUB_WAREHOUSE_ID = "b48c495b-62db-42f5-8968-07e4fab80a82";
+
 /**
  * POST /api/logistics/ship-out
  * Ships a unit from picking to OUT status
@@ -25,13 +28,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  // Only logistics, admin, head can ship
-  if (!["logistics", "admin", "head"].includes(profile.role)) {
+  // Only logistics, admin, head, hub worker can ship
+  if (!["logistics", "admin", "head", "hub_worker"].includes(profile.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
-  const { unitId, courierName } = body ?? {};
+  const { unitId, courierName, transferToWarehouseId } = body ?? {};
 
   if (!unitId || !courierName) {
     return NextResponse.json(
@@ -50,19 +53,25 @@ export async function POST(req: Request) {
     .limit(1);
 
   let scenario: string | null = null;
+  let targetPickingCellId: string | null = null;
   
   // Try new format first (picking_task_units)
   if (taskUnits && taskUnits.length > 0) {
     const taskId = taskUnits[0].picking_task_id;
     const { data: task, error: taskError } = await supabaseAdmin
       .from("picking_tasks")
-      .select("scenario, warehouse_id")
+      .select("scenario, warehouse_id, target_picking_cell_id")
       .eq("id", taskId)
       .single();
 
     // Only use scenario if warehouse matches and scenario exists (not null/empty)
-    if (task && task.warehouse_id === profile.warehouse_id && task.scenario && task.scenario.trim().length > 0) {
-      scenario = task.scenario.trim();
+    if (task && task.warehouse_id === profile.warehouse_id) {
+      if (task.scenario && task.scenario.trim().length > 0) {
+        scenario = task.scenario.trim();
+      }
+      if (task.target_picking_cell_id) {
+        targetPickingCellId = task.target_picking_cell_id;
+      }
     }
   }
   
@@ -70,7 +79,7 @@ export async function POST(req: Request) {
   if (!scenario) {
     const { data: legacyTask, error: legacyTaskError } = await supabaseAdmin
       .from("picking_tasks")
-      .select("scenario, warehouse_id")
+      .select("scenario, warehouse_id, target_picking_cell_id")
       .eq("unit_id", unitId)
       .not("unit_id", "is", null)
       .eq("warehouse_id", profile.warehouse_id)
@@ -80,6 +89,9 @@ export async function POST(req: Request) {
 
     if (legacyTask?.scenario && legacyTask.scenario.trim().length > 0) {
       scenario = legacyTask.scenario.trim();
+    }
+    if (legacyTask?.target_picking_cell_id) {
+      targetPickingCellId = legacyTask.target_picking_cell_id;
     }
   }
 
@@ -143,6 +155,82 @@ export async function POST(req: Request) {
         },
       });
     }
+  }
+
+  // If shipped from hub picking cell, create transfer record for hub buffer
+  try {
+    if (targetPickingCellId) {
+      const { data: targetCell } = await supabaseAdmin
+        .from("warehouse_cells")
+        .select("id, code, warehouse_id")
+        .eq("id", targetPickingCellId)
+        .maybeSingle();
+
+      if (
+        targetCell &&
+        targetCell.warehouse_id === profile.warehouse_id &&
+        targetCell.code === HUB_PICKING_CELL_CODE
+      ) {
+        const { data: existingTransfer } = await supabaseAdmin
+          .from("transfers")
+          .select("id")
+          .eq("unit_id", unitId)
+          .eq("status", "in_transit")
+          .maybeSingle();
+
+        if (!existingTransfer) {
+          const transferMeta = {
+            source: "logistics.ship_out",
+            picking_cell_code: HUB_PICKING_CELL_CODE,
+            scenario: scenario ?? null,
+          };
+
+          await supabaseAdmin
+            .from("transfers")
+            .insert({
+              unit_id: unitId,
+              from_warehouse_id: profile.warehouse_id,
+              to_warehouse_id: HUB_WAREHOUSE_ID,
+              status: "in_transit",
+              meta: transferMeta,
+            });
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Transfer creation failed (non-blocking):", e);
+  }
+
+  // Optional: create transfer when destination warehouse is explicitly provided
+  try {
+    if (transferToWarehouseId && transferToWarehouseId !== profile.warehouse_id) {
+      const { data: existingTransfer } = await supabaseAdmin
+        .from("transfers")
+        .select("id")
+        .eq("unit_id", unitId)
+        .eq("status", "in_transit")
+        .maybeSingle();
+
+      if (!existingTransfer) {
+        const transferMeta = {
+          source: "logistics.ship_out",
+          scenario: scenario ?? null,
+          note: "explicit_transfer",
+        };
+
+        await supabaseAdmin
+          .from("transfers")
+          .insert({
+            unit_id: unitId,
+            from_warehouse_id: profile.warehouse_id,
+            to_warehouse_id: transferToWarehouseId,
+            status: "in_transit",
+            meta: transferMeta,
+          });
+      }
+    }
+  } catch (e) {
+    console.error("Explicit transfer creation failed (non-blocking):", e);
   }
 
   // Audit log

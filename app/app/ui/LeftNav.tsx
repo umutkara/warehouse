@@ -221,6 +221,7 @@ export default function LeftNav({ role }: { role: string }) {
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
   const canLogistics = ["logistics", "admin", "head"].includes(role);
   const isLogisticsOnly = role === "logistics";
+  const isHubWorker = role === "hub_worker";
 
   const shouldExpand = !isCollapsed || isHovering;
 
@@ -307,8 +308,24 @@ export default function LeftNav({ role }: { role: string }) {
 
       {/* Navigation: minHeight 0 allows flex child to shrink; overflowY auto scrolls long list */}
       <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {/* Status-based pages (hidden for logistics-only) */}
-        {canWork && !isLogisticsOnly && (
+        {/* Hub worker minimal menu */}
+        {isHubWorker && (
+          <>
+            <SectionTitle isCollapsed={!shouldExpand}>ХАБ</SectionTitle>
+            <NavButton href="/app/receiving" icon={<Icons.Receiving />} isCollapsed={!shouldExpand}>
+              Приемка
+            </NavButton>
+            <NavButton href="/app/buffer" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+              Буфер
+            </NavButton>
+            <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
+              Отправка
+            </NavButton>
+          </>
+        )}
+
+        {/* Status-based pages (hidden for logistics-only and hub worker) */}
+        {canWork && !isLogisticsOnly && !isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>СТАТУСЫ ЗАКАЗОВ</SectionTitle>
             <NavButton href="/app/status/bin" icon={<Icons.Receiving />} isCollapsed={!shouldExpand}>
@@ -329,14 +346,14 @@ export default function LeftNav({ role }: { role: string }) {
           </>
         )}
         
-        {canViewTasks && !isLogisticsOnly && (
+        {canViewTasks && !isLogisticsOnly && !isHubWorker && (
           <NavButton href="/app/tsd" icon={<Icons.TSD />} isCollapsed={!shouldExpand}>
             ТСД
           </NavButton>
         )}
 
         {/* Ops section (ops, logistics, manager, head, admin) */}
-        {(canOps || canLogistics) && (
+        {(canOps || canLogistics) && !isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>OPS</SectionTitle>
             <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
@@ -349,7 +366,7 @@ export default function LeftNav({ role }: { role: string }) {
         )}
 
         {/* Logistics section (only for logistics, admin, head) */}
-        {canLogistics && (
+        {canLogistics && !isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>ЛОГИСТИКА</SectionTitle>
             <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
@@ -362,26 +379,41 @@ export default function LeftNav({ role }: { role: string }) {
         )}
 
         {/* Common section */}
-        <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>
-        <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
-          Дубли
-        </NavButton>
-        {canWork && !isLogisticsOnly && (
+        {!isHubWorker && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
+        {!isHubWorker && (
+          <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
+            Дубли
+          </NavButton>
+        )}
+        {!isHubWorker && (
+          <NavButton href="/app/buffer" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+            Буфер
+          </NavButton>
+        )}
+        {canWork && !isLogisticsOnly && !isHubWorker && (
           <NavButton href="/app/cells/labels" icon={<Icons.Label />} isCollapsed={!shouldExpand}>
             Этикетки ячеек
           </NavButton>
         )}
-        <NavButton href="/app/inventory" icon={<Icons.Inventory />} isCollapsed={!shouldExpand}>
-          Инвентаризация
-        </NavButton>
-        <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
-          Излишки
-        </NavButton>
+        {!isHubWorker && (
+          <NavButton href="/app/inventory" icon={<Icons.Inventory />} isCollapsed={!shouldExpand}>
+            Инвентаризация
+          </NavButton>
+        )}
+        {!isHubWorker && (
+          <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
+            Излишки
+          </NavButton>
+        )}
 
-        <SectionTitle isCollapsed={!shouldExpand}>Демо</SectionTitle>
-        <NavButton href="/app/demo-hubs" icon={<Icons.Hub />} isCollapsed={!shouldExpand}>
-          Хабы
-        </NavButton>
+        {!isHubWorker && (
+          <>
+            <SectionTitle isCollapsed={!shouldExpand}>Демо</SectionTitle>
+            <NavButton href="/app/demo-hubs" icon={<Icons.Hub />} isCollapsed={!shouldExpand}>
+              Хабы
+            </NavButton>
+          </>
+        )}
       </nav>
     </aside>
   );

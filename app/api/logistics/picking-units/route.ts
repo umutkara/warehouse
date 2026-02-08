@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   }
 
   // Only logistics, admin, head can access
-  if (!["logistics", "admin", "head"].includes(profile.role)) {
+  if (!["logistics", "admin", "head", "hub_worker"].includes(profile.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
