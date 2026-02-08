@@ -137,7 +137,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // Auto-set OPS status to "in_progress" only if not set yet
+  // Auto-set OPS status to "in_progress" on every ship-out
   const { data: currentUnit } = await supabaseAdmin
     .from("units")
     .select("id, barcode, meta")
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
     .eq("warehouse_id", profile.warehouse_id)
     .single();
 
-  if (currentUnit && !currentUnit.meta?.ops_status) {
+  if (currentUnit) {
     const comment = `Авто: отправлен в OUT, курьер ${courierName}`;
     const updatedMeta = {
       ...(currentUnit.meta || {}),
@@ -166,12 +166,12 @@ export async function POST(req: Request) {
         p_entity_id: unitId,
         p_summary: `OPS статус изменён: не назначен → В работе | Комментарий: ${comment}`,
         p_meta: {
-          old_status: null,
+          old_status: currentUnit.meta?.ops_status ?? null,
           new_status: "in_progress",
-          old_status_text: "не назначен",
+          old_status_text: currentUnit.meta?.ops_status ?? "не назначен",
           new_status_text: "В работе",
           comment,
-          old_comment: null,
+          old_comment: currentUnit.meta?.ops_status_comment ?? null,
           actor_role: profile.role,
           unit_barcode: currentUnit.barcode,
           source: "logistics.ship_out",
