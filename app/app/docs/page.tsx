@@ -2,12 +2,26 @@
 
 import { useState } from "react";
 
-type Section = "statuses" | "cells" | "tasks" | "tsd" | "tsd_move" | "ops" | "logistics" | "inventory" | "meta" | "moves" | "tickets" | "shipments";
+type Section =
+  | "hub_flow"
+  | "statuses"
+  | "cells"
+  | "tasks"
+  | "tsd"
+  | "tsd_move"
+  | "ops"
+  | "logistics"
+  | "inventory"
+  | "meta"
+  | "moves"
+  | "tickets"
+  | "shipments";
 
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState<Section>("statuses");
 
   const sections = [
+    { id: "hub_flow" as Section, title: "🔁 Основной склад ↔ Хаб", icon: "🔁" },
     { id: "statuses" as Section, title: "📦 Статусы заказов", icon: "📦" },
     { id: "cells" as Section, title: "🗄️ Типы ячеек", icon: "🗄️" },
     { id: "tasks" as Section, title: "✅ Статусы задач", icon: "✅" },
@@ -74,6 +88,7 @@ export default function DocsPage() {
       {/* Content */}
       <main style={{ flex: 1, padding: 32, overflowY: "auto" }}>
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          {activeSection === "hub_flow" && <HubFlowSection />}
           {activeSection === "statuses" && <StatusesSection />}
           {activeSection === "cells" && <CellsSection />}
           {activeSection === "tasks" && <TasksSection />}
@@ -255,6 +270,113 @@ function StatusesSection() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function HubFlowSection() {
+  return (
+    <div>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>🔁 Основной склад ↔ Хаб</h2>
+      <p style={{ color: "#6b7280", marginBottom: 24, lineHeight: 1.6 }}>
+        Простая схема: <strong>отправили → попало в буфер → приняли → исчезло из буфера</strong>.
+        Буфер — это список передач со статусом <code>in_transit</code>.
+      </p>
+
+      {/* Diagram */}
+      <div
+        style={{
+          background: "#fff",
+          border: "2px solid #e5e7eb",
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, alignItems: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Основной склад</div>
+            <div style={{ marginTop: 8, color: "#6b7280" }}>OUT → Буфер</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div
+              style={{
+                display: "inline-block",
+                padding: "8px 16px",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: 8,
+                fontWeight: 700,
+              }}
+            >
+              Буфер (in_transit)
+            </div>
+            <div style={{ marginTop: 8, color: "#6b7280" }}>Входящие / Исходящие</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Хаб</div>
+            <div style={{ marginTop: 8, color: "#6b7280" }}>Приняли (BIN)</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16, textAlign: "center", color: "#2563eb", fontWeight: 600 }}>
+          Основной склад → Буфер → Хаб
+        </div>
+        <div style={{ marginTop: 8, textAlign: "center", color: "#2563eb", fontWeight: 600 }}>
+          Хаб → Буфер → Основной склад
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 16 }}>
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 16,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Основной склад → Хаб</div>
+          <ol style={{ margin: 0, paddingLeft: 18, color: "#374151" }}>
+            <li>Логист назначает курьера, заказ уходит в <strong>OUT</strong>.</li>
+            <li>Система создаёт передачу <strong>transfer</strong> в буфере хаба.</li>
+            <li>Хаб принимает заказ через приёмку (BIN).</li>
+            <li>Передача закрывается, заказ исчезает из буфера.</li>
+          </ol>
+        </div>
+
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 16,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Хаб → Основной склад</div>
+          <ol style={{ margin: 0, paddingLeft: 18, color: "#374151" }}>
+            <li>Хаб отправляет заказ через TSD «Отправка (Хаб)» из BIN.</li>
+            <li>Система создаёт передачу <strong>transfer</strong> на основной склад.</li>
+            <li>Основной склад принимает заказ через приёмку (BIN).</li>
+            <li>Передача закрывается, заказ исчезает из буфера.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 20,
+          padding: 12,
+          background: "#f8fafc",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          color: "#6b7280",
+          fontSize: 13,
+        }}
+      >
+        Буфер показывает только передачи <strong>in_transit</strong>. Как только приёмка прошла — запись
+        закрывается и исчезает.
       </div>
     </div>
   );
