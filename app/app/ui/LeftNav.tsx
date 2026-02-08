@@ -87,6 +87,13 @@ const Icons = {
       <path d="M3 8h14M8 11h4" />
     </svg>
   ),
+  Buffer: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="14" height="4" rx="1" />
+      <rect x="3" y="12" width="14" height="4" rx="1" />
+      <path d="M7 8v4M13 8v4" />
+    </svg>
+  ),
   Units: () => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="4" y="6" width="12" height="10" rx="1" />
@@ -312,17 +319,11 @@ export default function LeftNav({ role }: { role: string }) {
         {isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>ХАБ</SectionTitle>
-            <NavButton href="/app/receiving" icon={<Icons.Receiving />} isCollapsed={!shouldExpand}>
-              Приемка
-            </NavButton>
             <NavButton href="/app/tsd" icon={<Icons.TSD />} isCollapsed={!shouldExpand}>
               ТСД
             </NavButton>
-            <NavButton href="/app/buffer" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+            <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
               Буфер
-            </NavButton>
-            <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
-              Отправка
             </NavButton>
           </>
         )}
@@ -369,7 +370,7 @@ export default function LeftNav({ role }: { role: string }) {
           </NavButton>
         )}
         {!isHubWorker && (
-          <NavButton href="/app/buffer" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+          <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
             Буфер
           </NavButton>
         )}
@@ -389,14 +390,7 @@ export default function LeftNav({ role }: { role: string }) {
           </NavButton>
         )}
 
-        {!isHubWorker && (
-          <>
-            <SectionTitle isCollapsed={!shouldExpand}>Демо</SectionTitle>
-            <NavButton href="/app/demo-hubs" icon={<Icons.Hub />} isCollapsed={!shouldExpand}>
-              Хабы
-            </NavButton>
-          </>
-        )}
+        {/* Demo hubs removed */}
       </nav>
     </aside>
   );

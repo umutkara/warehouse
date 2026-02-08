@@ -1057,7 +1057,13 @@ export default function TsdPage() {
               courierName: hubCourierName.trim(),
               transferToWarehouseId: hubDestinationId,
             }),
-          }).then((res) => res.json())
+          }).then(async (res) => {
+            let json: any = {};
+            try {
+              json = await res.json();
+            } catch {}
+            return { ok: res.ok, json };
+          })
         )
       );
 

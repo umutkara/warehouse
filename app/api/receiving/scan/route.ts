@@ -162,6 +162,33 @@ export async function POST(req: Request) {
           console.error("Failed to update transfer status:", transferUpdateError);
         }
 
+        // Close active OUT shipment so unit can be shipped again
+        try {
+          const { data: outShipment } = await supabaseAdmin
+            .from("outbound_shipments")
+            .select("id")
+            .eq("unit_id", anyUnit.id)
+            .eq("status", "out")
+            .order("out_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (outShipment?.id) {
+            const { error: outUpdateError } = await supabaseAdmin
+              .from("outbound_shipments")
+              .update({
+                status: "returned",
+                returned_by: user.id,
+                returned_at: new Date().toISOString(),
+                return_reason: "Transfer received",
+              })
+              .eq("id", outShipment.id);
+
+          }
+        } catch (e) {
+          console.error("Failed to close outbound shipment (non-blocking):", e);
+        }
+
         return NextResponse.json({
           ok: true,
           unitId: anyUnit.id,
@@ -192,6 +219,33 @@ export async function POST(req: Request) {
 
     // SCENARIO B: unit найден и уже в этой ячейке
     if (existingUnit && existingUnit.cell_id === targetCell.id) {
+      // Close active OUT shipment if any (e.g., after transfer without record)
+      try {
+        const { data: outShipment } = await supabaseAdmin
+          .from("outbound_shipments")
+          .select("id, status")
+          .eq("unit_id", existingUnit.id)
+          .eq("status", "out")
+          .order("out_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (outShipment?.id) {
+          const { error: outUpdateError } = await supabaseAdmin
+            .from("outbound_shipments")
+            .update({
+              status: "returned",
+              returned_by: user.id,
+              returned_at: new Date().toISOString(),
+              return_reason: "Transfer received (same cell)",
+            })
+            .eq("id", outShipment.id);
+
+        }
+      } catch (e) {
+        console.error("Failed to close outbound shipment for same-cell scan:", e);
+      }
+
       return NextResponse.json({
         ok: true,
         unitId: existingUnit.id,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Input, Alert, Card, Badge } from "@/lib/ui/components";
 
 type Unit = {
@@ -19,12 +20,17 @@ type Cell = {
 };
 
 export default function ReceivingPage() {
+  const router = useRouter();
   const [digits, setDigits] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [cells, setCells] = useState<Cell[]>([]);
   const [selectedCellIds, setSelectedCellIds] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    router.replace("/app/tsd");
+  }, [router]);
 
   const sanitized = useMemo(() => digits.replace(/[^\d]/g, ""), [digits]);
 

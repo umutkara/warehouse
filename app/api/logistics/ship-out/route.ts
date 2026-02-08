@@ -105,13 +105,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rpcError.message }, { status: 500 });
   }
 
-  const parsedResult = typeof result === "string" ? JSON.parse(result) : result;
+  let parsedResult = typeof result === "string" ? JSON.parse(result) : result;
 
   if (!parsedResult?.ok) {
-    return NextResponse.json(
-      { error: parsedResult?.error || "Failed to ship unit" },
-      { status: 400 }
-    );
+    const forbidden = typeof parsedResult?.error === "string" && parsedResult.error.includes("Forbidden");
+    if (forbidden && profile.role === "hub_worker") {
+      const { data: adminResult, error: adminError } = await supabaseAdmin.rpc("ship_unit_out", {
+        p_unit_id: unitId,
+        p_courier_name: courierName.trim(),
+      });
+
+      if (adminError) {
+        return NextResponse.json({ error: adminError.message }, { status: 500 });
+      }
+
+      const parsedAdminResult = typeof adminResult === "string" ? JSON.parse(adminResult) : adminResult;
+      if (!parsedAdminResult?.ok) {
+        return NextResponse.json(
+          { error: parsedAdminResult?.error || "Failed to ship unit" },
+          { status: 400 }
+        );
+      }
+
+      // Use admin result for subsequent flow
+      parsedResult = parsedAdminResult;
+    } else {
+      return NextResponse.json(
+        { error: parsedResult?.error || "Failed to ship unit" },
+        { status: 400 }
+      );
+    }
   }
 
   // Auto-set OPS status to "in_progress" only if not set yet
@@ -184,7 +207,7 @@ export async function POST(req: Request) {
             scenario: scenario ?? null,
           };
 
-          await supabaseAdmin
+          const { error: hubTransferError } = await supabaseAdmin
             .from("transfers")
             .insert({
               unit_id: unitId,
@@ -193,6 +216,7 @@ export async function POST(req: Request) {
               status: "in_transit",
               meta: transferMeta,
             });
+
         }
       }
     }
@@ -217,7 +241,7 @@ export async function POST(req: Request) {
           note: "explicit_transfer",
         };
 
-        await supabaseAdmin
+        const { error: explicitTransferError } = await supabaseAdmin
           .from("transfers")
           .insert({
             unit_id: unitId,
@@ -226,6 +250,7 @@ export async function POST(req: Request) {
             status: "in_transit",
             meta: transferMeta,
           });
+
       }
     }
   } catch (e) {
