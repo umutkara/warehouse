@@ -143,11 +143,20 @@ export async function POST(req: Request) {
       .from("picking_task_units")
       .select("picking_task_id")
       .eq("unit_id", unitId);
-    const taskIdsToComplete = (unitsInTasks ?? []).map((r: { picking_task_id: string }) => r.picking_task_id).filter(Boolean);
+    let taskIdsToComplete = (unitsInTasks ?? []).map((r: { picking_task_id: string }) => r.picking_task_id).filter(Boolean);
+    // Legacy: задачи с unit_id на picking_tasks (без строки в picking_task_units)
+    const { data: legacyTasks } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("id")
+      .eq("unit_id", unitId)
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("status", ["open", "in_progress"]);
+    const legacyIds = (legacyTasks ?? []).map((t: { id: string }) => t.id).filter(Boolean);
+    taskIdsToComplete = [...new Set([...taskIdsToComplete, ...legacyIds])];
     if (taskIdsToComplete.length > 0) {
-      const { data: tasksToComplete } = await supabaseAdmin
+      const { data: tasksToComplete, error: tasksErr } = await supabaseAdmin
         .from("picking_tasks")
-        .select("id")
+        .select("id, status, warehouse_id")
         .in("id", taskIdsToComplete)
         .eq("warehouse_id", profile.warehouse_id)
         .in("status", ["open", "in_progress"]);
