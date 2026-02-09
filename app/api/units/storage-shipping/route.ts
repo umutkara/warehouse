@@ -138,7 +138,7 @@ async function getStorageShippingUnits(_req: Request) {
     ...unitsFromMultiUnitTasks,
   ]);
 
-  // Filter units that are in storage or shipping cells AND not in picking tasks.
+  // Filter units that are in storage, shipping, or rejected cells AND not in picking tasks.
   // Cell from warehouse_cells_map (with warehouse_id) = actual cell for this warehouse.
   const unitsInStorageOrShipping = units
     .map((unit) => {
@@ -154,11 +154,13 @@ async function getStorageShippingUnits(_req: Request) {
       };
     })
     .filter((unit) => {
-      const isInStorageOrShipping = unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping");
+      const isInStorageOrShipping =
+        unit.cell &&
+        (unit.cell.cell_type === "storage" ||
+          unit.cell.cell_type === "shipping" ||
+          unit.cell.cell_type === "rejected");
       const isNotInTasks = !unitIdsInTasks.has(unit.id);
-      // Не показывать заказы со статусом rejected (даже если cell_id указывает на storage/shipping из‑за рассинхрона)
-      const isNotRejectedStatus = unit.status !== "rejected";
-      return isInStorageOrShipping && isNotInTasks && isNotRejectedStatus;
+      return isInStorageOrShipping && isNotInTasks;
     });
 
   return NextResponse.json({

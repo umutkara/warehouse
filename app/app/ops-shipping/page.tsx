@@ -165,6 +165,7 @@ export default function OpsShippingPage() {
   const [selectedPickingCellId, setSelectedPickingCellId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [opsStatusFilter, setOpsStatusFilter] = useState<string>("");
+  const [includeRejected, setIncludeRejected] = useState(false);
   
   // Scenario state
   const [scenarioCategory, setScenarioCategory] = useState<ScenarioCategory | "">("");
@@ -496,6 +497,11 @@ export default function OpsShippingPage() {
 
   // Filter units by OPS статус и поиску
   const filteredAvailableUnits = availableUnits.filter((unit) => {
+    // Rejected cell filter (optional)
+    if (!includeRejected && unit.cell?.cell_type === "rejected") {
+      return false;
+    }
+
     // OPS status filter
     if (opsStatusFilter === "no_status") {
       if (unit.ops_status) return false;
@@ -1054,7 +1060,7 @@ export default function OpsShippingPage() {
           </div>
         </div>
         <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-          Заказы из ячеек storage/shipping, которые еще не добавлены в задачи
+          Заказы из ячеек storage/shipping (и rejected при включении), которые еще не добавлены в задачи
         </div>
 
         <div style={{ padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px dashed #d1d5db", marginBottom: 12 }}>
@@ -1080,8 +1086,8 @@ export default function OpsShippingPage() {
           />
         </div>
         
-        {/* Фильтры: OPS статус + поиск */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        {/* Фильтры: OPS статус + rejected + поиск */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ minWidth: 220, flex: "0 0 auto" }}>
             <select
               value={opsStatusFilter}
@@ -1106,6 +1112,15 @@ export default function OpsShippingPage() {
               ))}
             </select>
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#444" }}>
+            <input
+              type="checkbox"
+              checked={includeRejected}
+              onChange={(e) => setIncludeRejected(e.target.checked)}
+              style={{ cursor: "pointer", width: 16, height: 16 }}
+            />
+            Показывать rejected
+          </label>
           <div style={{ flex: "1 1 200px" }}>
             <input
               type="text"
