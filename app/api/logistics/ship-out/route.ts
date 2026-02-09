@@ -137,6 +137,46 @@ export async function POST(req: Request) {
     }
   }
 
+  // Автозавершение задачи на отгрузку при ship-out: задача не остаётся in_progress и не падает в ТСД после возврата заказа
+  try {
+    const { data: unitsInTasks } = await supabaseAdmin
+      .from("picking_task_units")
+      .select("picking_task_id")
+      .eq("unit_id", unitId);
+    const taskIdsToComplete = (unitsInTasks ?? []).map((r: { picking_task_id: string }) => r.picking_task_id).filter(Boolean);
+    if (taskIdsToComplete.length > 0) {
+      const { data: tasksToComplete } = await supabaseAdmin
+        .from("picking_tasks")
+        .select("id")
+        .in("id", taskIdsToComplete)
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("status", ["open", "in_progress"]);
+      for (const t of tasksToComplete ?? []) {
+        const { error: updateErr } = await supabaseAdmin
+          .from("picking_tasks")
+          .update({
+            status: "done",
+            completed_at: new Date().toISOString(),
+            completed_by: userData.user.id,
+          })
+          .eq("id", t.id);
+        if (updateErr) {
+          console.error("[ship-out] auto-complete task failed:", t.id, updateErr);
+          continue;
+        }
+        await supabase.rpc("audit_log_event", {
+          p_action: "picking_task_complete",
+          p_entity_type: "picking_task",
+          p_entity_id: t.id,
+          p_summary: `Задача завершена при отгрузке (ship out): заказ ${parsedResult?.unit_barcode ?? unitId} отправлен курьером ${courierName}`,
+          p_meta: { source: "logistics.ship_out", unit_id: unitId, courier_name: courierName },
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[ship-out] auto-complete picking tasks (non-blocking):", e);
+  }
+
   // Auto-set OPS status to "in_progress" on every ship-out
   const { data: currentUnit } = await supabaseAdmin
     .from("units")
