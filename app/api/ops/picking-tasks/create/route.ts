@@ -150,16 +150,16 @@ export async function POST(req: Request) {
     });
   }
 
-  // Validate: units must be in storage or shipping cells ONLY
+  // Validate: units must be in storage, shipping, or rejected cells ONLY
   const invalidUnits: string[] = [];
   allUnits.forEach((unit) => {
     if (!unit.cell_id) {
       invalidUnits.push(unit.barcode + " (не размещен)");
     } else {
       const cellType = cellTypesMap.get(unit.cell_id);
-      if (!cellType || (cellType !== "storage" && cellType !== "shipping")) {
+      if (!cellType || (cellType !== "storage" && cellType !== "shipping" && cellType !== "rejected")) {
         invalidUnits.push(
-          unit.barcode + (cellType ? ` (находится в ${cellType}, должен быть в storage/shipping)` : " (ячейка не найдена)")
+          unit.barcode + (cellType ? ` (находится в ${cellType}, должен быть в storage/shipping/rejected)` : " (ячейка не найдена)")
         );
       }
     }
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
   if (invalidUnits.length > 0) {
     return NextResponse.json(
       {
-        error: "Нельзя создать задачу для заказов вне storage/shipping",
+        error: "Нельзя создать задачу для заказов вне storage/shipping/rejected",
         invalidUnits,
       },
       { status: 400 }
