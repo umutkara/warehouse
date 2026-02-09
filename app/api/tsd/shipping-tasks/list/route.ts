@@ -241,8 +241,8 @@ export async function GET(req: Request) {
   );
   const noUnitsTaskIds = new Set(tasksWithNoUnits.map((t: any) => t.id));
 
-  // Не показывать задачи, у которых все юниты в rejected/ff — по факту (в т.ч. по status при рассинхроне)
-  const NON_ACTIONABLE_CELL_TYPES = ["rejected", "ff"];
+  // Не показывать задачи, у которых все юниты в ff — по факту (в т.ч. по status при рассинхроне)
+  const NON_ACTIONABLE_CELL_TYPES = ["ff"];
   const tasksAllUnitsInRejectedOrFf = sortedTasks.filter((t: any) => {
     const units = unitsMap.get(t.id) || [];
     if (units.length === 0) return false;
