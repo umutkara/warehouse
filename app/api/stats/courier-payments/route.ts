@@ -53,6 +53,24 @@ type OpsAuditEvent = {
   } | null;
 };
 
+type CourierPaymentRow = {
+  unit_id: string;
+  barcode: string;
+  courier_name: string;
+  out_at: string;
+  shipment_status: string;
+  final_ops_status: string | null;
+  final_ops_status_label: string;
+  final_ops_status_at: string | null;
+  ops_comment: string | null;
+  is_payable: boolean;
+  payment_amount: number;
+};
+
+type FinalizedCourierPaymentRow = Omit<CourierPaymentRow, "final_ops_status_at"> & {
+  final_ops_status_at: string;
+};
+
 function toLabel(status: string | null | undefined): string {
   if (!status) return "Не назначен";
   return OPS_STATUS_LABELS[status] || status;
@@ -211,10 +229,10 @@ export async function GET(req: Request) {
         ops_comment: finalComment,
         is_payable: payable,
         payment_amount: payable ? 1 : 0,
-      };
+      } satisfies CourierPaymentRow;
     })
     .filter(
-      (row): row is NonNullable<typeof row> =>
+      (row): row is FinalizedCourierPaymentRow =>
         Boolean(row && row.final_ops_status_at)
     )
     .filter((row) => row.final_ops_status_at >= fromIso && row.final_ops_status_at <= toIso)
