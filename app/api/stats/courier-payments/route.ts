@@ -163,6 +163,23 @@ export async function GET(req: Request) {
   }
 
   const unitIds = Array.from(latestShipmentByUnit.keys());
+  if (unitIds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      filters: { from: fromDate, to: toDate, courier, status: statusFilter },
+      payable_statuses: Array.from(PAYABLE_STATUSES),
+      couriers: courierOptions,
+      summary: {
+        total_finalized: 0,
+        payable_count: 0,
+        non_payable_count: 0,
+        total_amount: 0,
+        rate_per_order: 1,
+      },
+      by_courier: [],
+      rows: [],
+    });
+  }
 
   const { data: unitsData, error: unitsError } = await supabaseAdmin
     .from("units")
