@@ -225,6 +225,7 @@ export default function LeftNav({ role }: { role: string }) {
 
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
   const canOps = ["ops", "manager", "head", "admin"].includes(role);
+  const canCourierStats = ["ops", "head", "admin"].includes(role);
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
   const canLogistics = ["logistics", "admin", "head"].includes(role);
   const isLogisticsOnly = role === "logistics";
@@ -346,6 +347,11 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/ops/merchant-rejections" icon={<Icons.Alert />} isCollapsed={!shouldExpand}>
               Мерчант не принял
             </NavButton>
+            {canCourierStats && (
+              <NavButton href="/app/courier-stats" icon={<Icons.SLA />} isCollapsed={!shouldExpand}>
+                Статистика курьеров
+              </NavButton>
+            )}
           </>
         )}
 
