@@ -94,6 +94,8 @@ export default function CourierStatsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 50;
 
   useEffect(() => {
     loadStats();
@@ -128,6 +130,7 @@ export default function CourierStatsPage() {
         return;
       }
       setData(json);
+      setCurrentPage(1);
     } catch (e: any) {
       setError(e.message || "Ошибка загрузки статистики");
     } finally {
@@ -140,6 +143,7 @@ export default function CourierStatsPage() {
     setToDate(toDateInputValue(today));
     setCourier("");
     setStatus("all");
+    setCurrentPage(1);
   }
 
   function handleExportXlsx() {
@@ -196,6 +200,21 @@ export default function CourierStatsPage() {
     const filename = `courier_payments_${fromDate}_${toDate}.xlsx`;
     XLSX.writeFile(wb, filename);
   }
+
+  const totalRows = data?.rows.length || 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const paginatedRows = useMemo(() => {
+    if (!data?.rows?.length) return [];
+    const safePage = Math.min(Math.max(1, currentPage), totalPages);
+    const start = (safePage - 1) * pageSize;
+    return data.rows.slice(start, start + pageSize);
+  }, [data, currentPage, totalPages]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)" }}>
@@ -422,50 +441,105 @@ export default function CourierStatsPage() {
         }}
       >
         <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>
-          Детализация заказов ({data?.rows.length || 0})
+          Детализация заказов ({totalRows})
         </h2>
 
-        {!data || data.rows.length === 0 ? (
+        {!data || totalRows === 0 ? (
           <div style={{ color: "#6b7280", fontSize: 14 }}>Нет данных по выбранным фильтрам</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ textAlign: "left", padding: 8 }}>Курьер</th>
-                  <th style={{ textAlign: "left", padding: 8 }}>Заказ</th>
-                  <th style={{ textAlign: "left", padding: 8 }}>Дата OUT</th>
-                  <th style={{ textAlign: "left", padding: 8 }}>Финальный OPS статус</th>
-                  <th style={{ textAlign: "left", padding: 8 }}>Дата финального OPS</th>
-                  <th style={{ textAlign: "left", padding: 8 }}>Комментарий OPS</th>
-                  <th style={{ textAlign: "center", padding: 8 }}>Оплата</th>
-                  <th style={{ textAlign: "right", padding: 8 }}>Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row) => (
-                  <tr key={row.unit_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: 8, fontWeight: 600 }}>{row.courier_name}</td>
-                    <td style={{ padding: 8 }}>{row.barcode}</td>
-                    <td style={{ padding: 8 }}>{formatDate(row.out_at)}</td>
-                    <td style={{ padding: 8 }}>{row.final_ops_status_label}</td>
-                    <td style={{ padding: 8 }}>{formatDate(row.final_ops_status_at)}</td>
-                    <td style={{ padding: 8, color: "#475569" }}>{row.ops_comment || "—"}</td>
-                    <td
-                      style={{
-                        padding: 8,
-                        textAlign: "center",
-                        color: row.is_payable ? "#15803d" : "#b91c1c",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {row.is_payable ? "Да" : "Нет"}
-                    </td>
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{row.payment_amount}</td>
+          <div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ textAlign: "left", padding: 8 }}>Курьер</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Заказ</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Дата OUT</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Финальный OPS статус</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Дата финального OPS</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Комментарий OPS</th>
+                    <th style={{ textAlign: "center", padding: 8 }}>Оплата</th>
+                    <th style={{ textAlign: "right", padding: 8 }}>Сумма</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {paginatedRows.map((row) => (
+                    <tr key={row.unit_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: 8, fontWeight: 600 }}>{row.courier_name}</td>
+                      <td style={{ padding: 8 }}>{row.barcode}</td>
+                      <td style={{ padding: 8 }}>{formatDate(row.out_at)}</td>
+                      <td style={{ padding: 8 }}>{row.final_ops_status_label}</td>
+                      <td style={{ padding: 8 }}>{formatDate(row.final_ops_status_at)}</td>
+                      <td style={{ padding: 8, color: "#475569" }}>{row.ops_comment || "—"}</td>
+                      <td
+                        style={{
+                          padding: 8,
+                          textAlign: "center",
+                          color: row.is_payable ? "#15803d" : "#b91c1c",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {row.is_payable ? "Да" : "Нет"}
+                      </td>
+                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{row.payment_amount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>
+                Страница {currentPage} из {totalPages} • Показано {paginatedRows.length} из {totalRows}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #d1d5db",
+                    background: currentPage === 1 ? "#f1f5f9" : "#fff",
+                    color: currentPage === 1 ? "#94a3b8" : "#0f172a",
+                    cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Назад
+                </button>
+                {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      minWidth: 36,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: "1px solid #d1d5db",
+                      background: page === currentPage ? "#2563eb" : "#fff",
+                      color: page === currentPage ? "#fff" : "#0f172a",
+                      cursor: "pointer",
+                      fontWeight: page === currentPage ? 700 : 500,
+                    }}
+                  >
+                    {page}
+                  </button>
                 ))}
-              </tbody>
-            </table>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #d1d5db",
+                    background: currentPage === totalPages ? "#f1f5f9" : "#fff",
+                    color: currentPage === totalPages ? "#94a3b8" : "#0f172a",
+                    cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Вперед
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

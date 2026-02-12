@@ -431,7 +431,75 @@ export default function LogisticsPage() {
           )}
 
           {loading ? (
-            <div style={{ fontSize: 14, color: "#666" }}>Загрузка...</div>
+            <div style={{ display: "grid", gap: "var(--spacing-md)" }}>
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div
+                  key={`skeleton-${idx}`}
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #ddd",
+                    borderRadius: "var(--radius-md)",
+                    padding: "var(--spacing-md)",
+                    display: "flex",
+                    gap: "var(--spacing-sm)",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 18,
+                      height: 18,
+                      marginTop: 2,
+                      borderRadius: 4,
+                      background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                      backgroundSize: "200% 100%",
+                      animation: "logisticsSkeleton 1.2s ease-in-out infinite",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        height: 16,
+                        width: "50%",
+                        borderRadius: 6,
+                        marginBottom: 10,
+                        background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                        backgroundSize: "200% 100%",
+                        animation: "logisticsSkeleton 1.2s ease-in-out infinite",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: 12,
+                        width: "75%",
+                        borderRadius: 6,
+                        marginBottom: 8,
+                        background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                        backgroundSize: "200% 100%",
+                        animation: "logisticsSkeleton 1.2s ease-in-out infinite",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: 12,
+                        width: "38%",
+                        borderRadius: 6,
+                        background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                        backgroundSize: "200% 100%",
+                        animation: "logisticsSkeleton 1.2s ease-in-out infinite",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <style>{`
+                @keyframes logisticsSkeleton {
+                  0% { background-position: 200% 0; }
+                  100% { background-position: -200% 0; }
+                }
+              `}</style>
+            </div>
           ) : filteredUnits.length === 0 ? (
             <div
               style={{

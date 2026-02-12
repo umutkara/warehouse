@@ -373,7 +373,71 @@ export default function UnitsListPage() {
   if (loading) {
     return (
       <div style={styles.container}>
-        <div style={{ textAlign: "center", padding: 40 }}>Загрузка...</div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div
+              style={{
+                width: 240,
+                height: 24,
+                borderRadius: 8,
+                background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                backgroundSize: "200% 100%",
+                animation: "unitsSkeleton 1.2s ease-in-out infinite",
+              }}
+            />
+            <div
+              style={{
+                width: 120,
+                height: 34,
+                borderRadius: 8,
+                background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                backgroundSize: "200% 100%",
+                animation: "unitsSkeleton 1.2s ease-in-out infinite",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 16,
+              display: "grid",
+              gap: 10,
+            }}
+          >
+            {Array.from({ length: 10 }).map((_, idx) => (
+              <div
+                key={`units-loading-row-${idx}`}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.2fr 1fr 1fr 0.6fr 0.7fr 1fr 0.8fr 0.8fr 0.8fr 0.3fr",
+                  gap: 10,
+                  alignItems: "center",
+                }}
+              >
+                {Array.from({ length: 10 }).map((__, cellIdx) => (
+                  <div
+                    key={`units-loading-cell-${idx}-${cellIdx}`}
+                    style={{
+                      height: 14,
+                      borderRadius: 6,
+                      background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                      backgroundSize: "200% 100%",
+                      animation: "unitsSkeleton 1.2s ease-in-out infinite",
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <style>{`
+            @keyframes unitsSkeleton {
+              0% { background-position: 200% 0; }
+              100% { background-position: -200% 0; }
+            }
+          `}</style>
+        </div>
       </div>
     );
   }
@@ -823,7 +887,20 @@ export default function UnitsListPage() {
             </div>
 
             {loadingUnit ? (
-              <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>Загрузка...</div>
+              <div style={{ padding: 20, display: "grid", gap: 10 }}>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div
+                    key={`unit-modal-loading-${idx}`}
+                    style={{
+                      height: 14,
+                      borderRadius: 6,
+                      background: "linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%)",
+                      backgroundSize: "200% 100%",
+                      animation: "unitsSkeleton 1.2s ease-in-out infinite",
+                    }}
+                  />
+                ))}
+              </div>
             ) : (
               <div style={{ padding: 20, display: "grid", gap: 12 }}>
                 <div style={{ fontSize: 13, color: "#6b7280" }}>

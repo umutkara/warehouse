@@ -181,22 +181,30 @@ export async function GET(req: Request) {
     });
   }
 
-  const { data: unitsData, error: unitsError } = await supabaseAdmin
-    .from("units")
-    .select("id, barcode, meta")
-    .in("id", unitIds);
+  const chunkSize = 100;
+  const unitsData: UnitRecord[] = [];
+  for (let i = 0; i < unitIds.length; i += chunkSize) {
+    const chunk = unitIds.slice(i, i + chunkSize);
+    const { data: unitsChunk, error: unitsError } = await supabaseAdmin
+      .from("units")
+      .select("id, barcode, meta")
+      .in("id", chunk);
 
-  if (unitsError) {
-    return NextResponse.json({ error: unitsError.message }, { status: 400 });
+    if (unitsError) {
+      return NextResponse.json({ error: unitsError.message }, { status: 400 });
+    }
+
+    if (unitsChunk?.length) {
+      unitsData.push(...(unitsChunk as UnitRecord[]));
+    }
   }
 
   const unitsMap = new Map<string, UnitRecord>();
-  for (const unit of (unitsData || []) as UnitRecord[]) {
+  for (const unit of unitsData) {
     unitsMap.set(unit.id, unit);
   }
 
   const latestOpsByUnit = new Map<string, OpsAuditEvent>();
-  const chunkSize = 500;
   for (let i = 0; i < unitIds.length; i += chunkSize) {
     const chunk = unitIds.slice(i, i + chunkSize);
     const { data: events, error: eventsError } = await supabaseAdmin
