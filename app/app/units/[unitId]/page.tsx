@@ -139,12 +139,6 @@ export default function UnitDetailPage() {
 
       if (res.ok) {
         const historyList = json.history || [];
-
-        // Count task events
-        const taskEvents = historyList.filter((e: any) => 
-          e.event_type?.includes("picking_task")
-        );
-        
         setHistory(historyList);
       } else {
         console.error("Failed to load history:", json.error);
@@ -338,6 +332,36 @@ export default function UnitDetailPage() {
 
   const canEditOpsStatus = userRole && ["ops", "logistics", "admin", "head"].includes(userRole);
 
+  function resolveScenarioForLogisticsAuditEvent(event: HistoryEvent): string | null {
+    if (event?.event_type !== "audit") return null;
+    const action = String(event?.details?.action || "");
+    if (!action.startsWith("logistics.")) return null;
+
+    const eventTs = Date.parse(event.created_at || "");
+    if (!Number.isFinite(eventTs)) return null;
+
+    const latestRelatedTaskEvent = history.find((candidate) => {
+      if (!candidate) return false;
+      const isTaskEvent =
+        candidate.event_type === "picking_task_created" ||
+        candidate.event_type === "picking_task_canceled" ||
+        candidate.event_type === "picking_task_completed";
+      if (!isTaskEvent) return false;
+
+      const scenario = String(candidate?.details?.scenario || "").trim();
+      if (!scenario) return false;
+
+      const candidateTs = Date.parse(candidate.created_at || "");
+      return Number.isFinite(candidateTs) && candidateTs <= eventTs;
+    });
+
+    const normalizedResolved = String(latestRelatedTaskEvent?.details?.scenario || "").trim();
+    if (normalizedResolved) return normalizedResolved;
+
+    const normalizedMeta = String(event?.details?.meta?.scenario || "").trim();
+    return normalizedMeta || null;
+  }
+
   function renderHistoryEvent(event: HistoryEvent, idx: number) {
     const date = new Date(event.created_at).toLocaleString("ru-RU");
     const uniqueKey = `${event.event_type}-${event.created_at}-${idx}`;
@@ -472,6 +496,12 @@ export default function UnitDetailPage() {
         let icon = "📝";
         let bgColor = "#f9fafb";
         let borderColor = "#e5e7eb";
+        const resolvedLogisticsScenario = resolveScenarioForLogisticsAuditEvent(event);
+        const showAuditScenario =
+          Boolean(resolvedLogisticsScenario || meta?.scenario) &&
+          (action === "picking_task_create" ||
+            String(action || "").startsWith("logistics.") ||
+            Boolean(meta?.courier_name));
 
         // Special handling for picking_task_create (from audit log)
         if (action === "picking_task_create") {
@@ -583,10 +613,9 @@ export default function UnitDetailPage() {
             <div style={styles.historyIcon}>{icon}</div>
             <div style={{ flex: 1 }}>
               <div style={styles.historyTitle}>{summary || action}</div>
-              {/* Show scenario if present */}
-              {meta?.scenario && (
+              {showAuditScenario && (
                 <div style={styles.historyScenario}>
-                  Сценарий: {meta.scenario}
+                  Сценарий: {resolvedLogisticsScenario || meta?.scenario}
                 </div>
               )}
               {/* Show courier if present */}
