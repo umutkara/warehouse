@@ -92,7 +92,7 @@ export async function GET(req: Request) {
   // Also check legacy unit_id field for old tasks (any status - unit is already in picking)
   const { data: legacyTasks, error: legacyTasksError } = await supabaseAdmin
     .from("picking_tasks")
-    .select("unit_id, scenario, status")
+    .select("id, unit_id, scenario, status, created_at")
     .in("unit_id", filteredUnits.map(u => u.id))
     .eq("warehouse_id", profile.warehouse_id);
   
@@ -102,7 +102,7 @@ export async function GET(req: Request) {
   // Get tasks with scenario (any status - unit is already in picking, so task exists)
   const { data: tasks, error: tasksError } = await supabaseAdmin
     .from("picking_tasks")
-    .select("id, scenario, status")
+    .select("id, scenario, status, created_at")
     .in("id", taskIds)
     .eq("warehouse_id", profile.warehouse_id);
 
@@ -153,18 +153,50 @@ export async function GET(req: Request) {
     });
   }
 
-  // Create maps: unit_id -> scenario
+  // Create maps: task_id -> task and unit_id -> latest task
   const tasksMap = new Map(tasks?.map(t => [t.id, t]) || []);
-  const taskUnitsMap = new Map(taskUnits?.map(tu => [tu.unit_id, tu.picking_task_id]) || []);
-  const legacyTasksMap = new Map(legacyTasks?.map(t => [t.unit_id, t]) || []);
+  const latestTaskByUnitId = new Map<string, any>();
+  (taskUnits || []).forEach((tu: any) => {
+    if (!tu.unit_id || !tu.picking_task_id) return;
+    const candidateTask = tasksMap.get(tu.picking_task_id);
+    if (!candidateTask) return;
+    const current = latestTaskByUnitId.get(tu.unit_id);
+    if (!current) {
+      latestTaskByUnitId.set(tu.unit_id, candidateTask);
+      return;
+    }
+    const currentTs = new Date(current.created_at || 0).getTime();
+    const candidateTs = new Date(candidateTask.created_at || 0).getTime();
+    if (candidateTs >= currentTs) {
+      latestTaskByUnitId.set(tu.unit_id, candidateTask);
+    }
+  });
+  const latestLegacyTaskByUnitId = new Map<string, any>();
+  (legacyTasks || []).forEach((task: any) => {
+    if (!task?.unit_id) return;
+    const current = latestLegacyTaskByUnitId.get(task.unit_id);
+    if (!current) {
+      latestLegacyTaskByUnitId.set(task.unit_id, task);
+      return;
+    }
+    const currentTs = new Date(current.created_at || 0).getTime();
+    const candidateTs = new Date(task.created_at || 0).getTime();
+    if (candidateTs >= currentTs) {
+      latestLegacyTaskByUnitId.set(task.unit_id, task);
+    }
+  });
 
   // Enrich units with cell and scenario info
   const enrichedUnits = (filteredUnits || []).map((u, idx) => {
-    // Try new format first (via picking_task_units)
-    const taskId = taskUnitsMap.get(u.id);
-    const task = taskId ? tasksMap.get(taskId) : null;
-    const scenarioFromTask = task?.scenario?.trim() || legacyTasksMap.get(u.id)?.scenario?.trim() || null;
-    const scenario = scenarioFromTask || (taskId ? auditScenarioByTaskId.get(taskId) || null : null);
+    // Choose scenario from latest linked task first; fallback to latest legacy task.
+    const latestTask = latestTaskByUnitId.get(u.id) || null;
+    const latestLegacyTask = latestLegacyTaskByUnitId.get(u.id) || null;
+    const effectiveTaskId = latestTask?.id || latestLegacyTask?.id || null;
+    const scenarioFromTask =
+      latestTask?.scenario?.trim() ||
+      latestLegacyTask?.scenario?.trim() ||
+      null;
+    const scenario = scenarioFromTask || (effectiveTaskId ? auditScenarioByTaskId.get(effectiveTaskId) || null : null);
     return {
       ...u,
       cell: cellsMap.get(u.cell_id) || null,

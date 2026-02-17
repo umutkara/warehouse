@@ -189,6 +189,9 @@ export default function OpsShippingPage() {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [importTasksCountAfter, setImportTasksCountAfter] = useState<number | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingScenarioValue, setEditingScenarioValue] = useState<string>("");
+  const [savingScenario, setSavingScenario] = useState(false);
   
   // Modal state
   const [modalUnitId, setModalUnitId] = useState<string | null>(null);
@@ -479,6 +482,47 @@ export default function OpsShippingPage() {
     if (done > 0) {
       loadTasks(undefined, true, true).then(() => {});
       loadAvailableUnits(undefined, true, true).catch(() => {});
+    }
+  }
+
+  function openEditScenario(task: Task) {
+    setEditingTask(task);
+    setEditingScenarioValue(task.scenario || "");
+  }
+
+  function closeEditScenario() {
+    if (savingScenario) return;
+    setEditingTask(null);
+    setEditingScenarioValue("");
+  }
+
+  async function handleSaveScenario() {
+    if (!editingTask) return;
+    setSavingScenario(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const normalized = editingScenarioValue.trim();
+      const res = await fetch(`/api/ops/picking-tasks/${editingTask.id}/scenario`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: normalized || null }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Не удалось обновить сценарий");
+      }
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === editingTask.id ? { ...t, scenario: json.task?.scenario || null } : t
+        )
+      );
+      setSuccess("Сценарий задачи обновлен");
+      closeEditScenario();
+    } catch (e: any) {
+      setError(e.message || "Ошибка обновления сценария");
+    } finally {
+      setSavingScenario(false);
     }
   }
 
@@ -989,7 +1033,7 @@ export default function OpsShippingPage() {
   }
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", padding: 24 }}>
+    <div style={{ maxWidth: 1440, margin: "0 auto", padding: 24 }}>
       <h1 style={{ marginBottom: 24 }}>Создание заданий на отгрузку</h1>
 
       {error && (
@@ -1568,8 +1612,8 @@ export default function OpsShippingPage() {
             Нет задач по выбранным фильтрам
           </div>
         ) : (
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ border: "1px solid #ddd", borderRadius: 8, overflowX: "auto", overflowY: "hidden" }}>
+            <table style={{ width: "100%", minWidth: 1200, borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f5f5f5" }}>
                   <th style={{ padding: "12px", width: 40, borderBottom: "1px solid #ddd", fontWeight: 600, fontSize: 12 }}>
@@ -1656,36 +1700,56 @@ export default function OpsShippingPage() {
                     </td>
                     <td style={{ padding: "12px" }}>
                       {(task.status === "open" || task.status === "in_progress") && (
-                        <button
-                          onClick={() => handleCancelTask(task.id)}
-                          disabled={bulkCanceling || cancelingTaskId === task.id}
-                          style={{
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#dc2626",
-                            background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#fef2f2",
-                            border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#fecaca"}`,
-                            borderRadius: 6,
-                            cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
-                            transition: "all 0.2s",
-                            opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!bulkCanceling && cancelingTaskId !== task.id) {
-                              e.currentTarget.style.background = "#fee2e2";
-                              e.currentTarget.style.borderColor = "#fca5a5";
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!bulkCanceling && cancelingTaskId !== task.id) {
-                              e.currentTarget.style.background = "#fef2f2";
-                              e.currentTarget.style.borderColor = "#fecaca";
-                            }
-                          }}
-                        >
-                          {cancelingTaskId === task.id ? "Отмена..." : "Отменить"}
-                        </button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => openEditScenario(task)}
+                            disabled={bulkCanceling || cancelingTaskId === task.id}
+                            style={{
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#0369a1",
+                              background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#f0f9ff",
+                              border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#bae6fd"}`,
+                              borderRadius: 6,
+                              cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
+                              transition: "all 0.2s",
+                              opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
+                            }}
+                          >
+                            Сценарий
+                          </button>
+                          <button
+                            onClick={() => handleCancelTask(task.id)}
+                            disabled={bulkCanceling || cancelingTaskId === task.id}
+                            style={{
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#dc2626",
+                              background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#fef2f2",
+                              border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#fecaca"}`,
+                              borderRadius: 6,
+                              cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
+                              transition: "all 0.2s",
+                              opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!bulkCanceling && cancelingTaskId !== task.id) {
+                                e.currentTarget.style.background = "#fee2e2";
+                                e.currentTarget.style.borderColor = "#fca5a5";
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!bulkCanceling && cancelingTaskId !== task.id) {
+                                e.currentTarget.style.background = "#fef2f2";
+                                e.currentTarget.style.borderColor = "#fecaca";
+                              }
+                            }}
+                          >
+                            {cancelingTaskId === task.id ? "Отмена..." : "Отменить"}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -1864,6 +1928,97 @@ export default function OpsShippingPage() {
                   Не удалось загрузить данные
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingTask && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+          }}
+          onClick={closeEditScenario}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              width: "min(640px, 92vw)",
+              padding: 20,
+              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
+              Редактировать сценарий
+            </div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
+              Задача: {editingTask.id}
+            </div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
+              Текущее значение: {editingTask.scenario || "—"}
+            </div>
+            <textarea
+              rows={4}
+              value={editingScenarioValue}
+              onChange={(e) => setEditingScenarioValue(e.target.value)}
+              placeholder="Сценарий (например: Склад Возвратов → Мерчант → Название)"
+              disabled={savingScenario}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 10,
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                fontSize: 14,
+                fontFamily: "inherit",
+                resize: "vertical",
+              }}
+            />
+            <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>
+              Оставьте пустым, чтобы очистить сценарий.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={closeEditScenario}
+                disabled={savingScenario}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  color: "#374151",
+                  cursor: savingScenario ? "not-allowed" : "pointer",
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveScenario}
+                disabled={savingScenario}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #2563eb",
+                  background: "#2563eb",
+                  color: "#fff",
+                  cursor: savingScenario ? "not-allowed" : "pointer",
+                }}
+              >
+                {savingScenario ? "Сохранение..." : "Сохранить"}
+              </button>
             </div>
           </div>
         </div>
