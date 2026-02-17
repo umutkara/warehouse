@@ -174,7 +174,6 @@ export default function OpsShippingPage() {
   const [loading, setLoading] = useState(false);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
-  const [cancelingTaskId, setCancelingTaskId] = useState<string | null>(null);
   const [bulkCanceling, setBulkCanceling] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [taskFilterStatus, setTaskFilterStatus] = useState<string>("");
@@ -349,45 +348,6 @@ export default function OpsShippingPage() {
       return 0;
     } finally {
       if (!silent && !abortSignal?.aborted) setLoadingTasks(false);
-    }
-  }
-
-  async function handleCancelTask(taskId: string) {
-    if (!confirm("Вы уверены? Все заказы в задаче вернутся в исходные ячейки, а задача исчезнет из ТСД.")) {
-      return;
-    }
-
-    setCancelingTaskId(taskId);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const res = await fetch(`/api/picking-tasks/${taskId}/cancel`, {
-        method: "POST",
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || "Failed to cancel task");
-      }
-
-      setSuccess(`Задача отменена. Возвращено ${json.units_returned} заказов в исходные ячейки.`);
-      // Оптимистично убираем задачу из списка — страница не перезагружается
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
-      setSelectedTaskIds((prev) => {
-        const next = new Set(prev);
-        next.delete(taskId);
-        return next;
-      });
-      // Тихий подгруз данных в фоне (без "Загрузка...")
-      loadTasks(undefined, true, true).then(() => {});
-      loadAvailableUnits(undefined, true, true).catch(() => {});
-
-    } catch (e: any) {
-      setError(`Ошибка отмены задачи: ${e.message}`);
-    } finally {
-      setCancelingTaskId(null);
     }
   }
 
@@ -1612,7 +1572,7 @@ export default function OpsShippingPage() {
             Нет задач по выбранным фильтрам
           </div>
         ) : (
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, overflowX: "auto", overflowY: "hidden" }}>
+          <div style={{ border: "1px solid #ddd", borderRadius: 8, overflowX: "auto", overflowY: "auto", maxHeight: "70vh" }}>
             <table style={{ width: "100%", minWidth: 1200, borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "#f5f5f5" }}>
@@ -1703,51 +1663,21 @@ export default function OpsShippingPage() {
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             onClick={() => openEditScenario(task)}
-                            disabled={bulkCanceling || cancelingTaskId === task.id}
+                            disabled={bulkCanceling}
                             style={{
                               padding: "6px 12px",
                               fontSize: 12,
                               fontWeight: 600,
-                              color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#0369a1",
-                              background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#f0f9ff",
-                              border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#bae6fd"}`,
+                              color: bulkCanceling ? "#9ca3af" : "#0369a1",
+                              background: bulkCanceling ? "#f3f4f6" : "#f0f9ff",
+                              border: `1px solid ${bulkCanceling ? "#d1d5db" : "#bae6fd"}`,
                               borderRadius: 6,
-                              cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
+                              cursor: bulkCanceling ? "not-allowed" : "pointer",
                               transition: "all 0.2s",
-                              opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
+                              opacity: bulkCanceling ? 0.6 : 1,
                             }}
                           >
                             Сценарий
-                          </button>
-                          <button
-                            onClick={() => handleCancelTask(task.id)}
-                            disabled={bulkCanceling || cancelingTaskId === task.id}
-                            style={{
-                              padding: "6px 12px",
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: (bulkCanceling || cancelingTaskId === task.id) ? "#9ca3af" : "#dc2626",
-                              background: (bulkCanceling || cancelingTaskId === task.id) ? "#f3f4f6" : "#fef2f2",
-                              border: `1px solid ${(bulkCanceling || cancelingTaskId === task.id) ? "#d1d5db" : "#fecaca"}`,
-                              borderRadius: 6,
-                              cursor: (bulkCanceling || cancelingTaskId === task.id) ? "not-allowed" : "pointer",
-                              transition: "all 0.2s",
-                              opacity: (bulkCanceling || cancelingTaskId === task.id) ? 0.6 : 1,
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!bulkCanceling && cancelingTaskId !== task.id) {
-                                e.currentTarget.style.background = "#fee2e2";
-                                e.currentTarget.style.borderColor = "#fca5a5";
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!bulkCanceling && cancelingTaskId !== task.id) {
-                                e.currentTarget.style.background = "#fef2f2";
-                                e.currentTarget.style.borderColor = "#fecaca";
-                              }
-                            }}
-                          >
-                            {cancelingTaskId === task.id ? "Отмена..." : "Отменить"}
                           </button>
                         </div>
                       )}
