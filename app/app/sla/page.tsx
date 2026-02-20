@@ -73,16 +73,6 @@ type ShippingSLAMetrics = {
   hourly_distribution: Record<number, { count: number; avgTime: number }> | null;
 };
 
-type MerchantRejectionMetrics = {
-  total_units: number;
-  avg_bin_to_ticket_hours: number;
-  avg_bin_to_ticket_minutes: number;
-  avg_ticket_resolution_hours: number;
-  avg_ticket_resolution_minutes: number;
-  units_with_tickets: number;
-  units_resolved: number;
-};
-
 type PartnerRejectedUnit = {
   id: string;
   barcode: string;
@@ -352,19 +342,16 @@ export default function SLAPage() {
     sla_compliance_percent: 0,
     hourly_distribution: null,
   });
-  const [rejectionMetrics, setRejectionMetrics] = useState<MerchantRejectionMetrics | null>(null);
   const [partnerRejectedUnits, setPartnerRejectedUnits] = useState<PartnerRejectedUnit[]>([]);
   const [loadingPartnerRejected, setLoadingPartnerRejected] = useState(false);
 
   useEffect(() => {
     loadMetrics();
     loadShippingSLAMetrics();
-    loadRejectionMetrics();
     loadPartnerRejectedUnits();
     const interval = setInterval(() => {
       loadMetrics();
       loadShippingSLAMetrics();
-      loadRejectionMetrics();
       loadPartnerRejectedUnits();
     }, 60000); // Refresh every minute
     return () => clearInterval(interval);
@@ -508,18 +495,6 @@ export default function SLAPage() {
     }
   }
 
-  async function loadRejectionMetrics() {
-    try {
-      const res = await fetch("/api/stats/merchant-rejection-metrics?rejection_count=all", { cache: "no-store" });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.ok) setRejectionMetrics(json.metrics);
-      }
-    } catch (e) {
-      console.error("Failed to load rejection metrics:", e);
-    }
-  }
-
   async function loadPartnerRejectedUnits() {
     setLoadingPartnerRejected(true);
     try {
@@ -637,7 +612,6 @@ export default function SLAPage() {
           onClick={() => {
             loadMetrics();
             loadShippingSLAMetrics();
-            loadRejectionMetrics();
             loadPartnerRejectedUnits();
           }}
           style={{
@@ -679,18 +653,6 @@ export default function SLAPage() {
     transfer: "#06b6d4",
     ff: "#facc15",
   };
-
-  const statusBarData = Object.entries(metrics.units_by_status).map(([status, count]) => ({
-    label: status,
-    value: count,
-    color: statusColors[status] || "#6b7280",
-  }));
-
-  const oldStatusBarData = Object.entries(metrics.old_units_by_status).map(([status, count]) => ({
-    label: `${status} (>24h)`,
-    value: count,
-    color: statusColors[status] || "#6b7280",
-  }));
 
   return (
     <div style={{ 
@@ -738,7 +700,6 @@ export default function SLAPage() {
           onClick={() => {
             loadMetrics();
             loadShippingSLAMetrics();
-            loadRejectionMetrics();
             loadPartnerRejectedUnits();
           }}
           disabled={loading}
@@ -779,86 +740,39 @@ export default function SLAPage() {
         </button>
       </div>
 
-      {/* Key Metrics Cards */}
+      {/* Key Metrics Cards — дневное окно 00:00–00:00 UTC */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "var(--spacing-lg)", marginBottom: "var(--spacing-xl)" }}>
         <MetricCard
           title="Всего заказов"
           value={metrics.total_units}
-          subtitle="В системе"
+          subtitle="Во всех ячейках, кроме picking • обнуление каждые 24ч"
           color="#2563eb"
-          info="📊 Источник: таблица units. Подсчитываются все заказы вашего склада независимо от статуса."
+          info="📊 Действительное кол-во units (исключая статус picking). Обновление по дневному окну 00:00–00:00."
         />
         <MetricCard
           title="Залежалые заказы"
           value={metrics.units_over_24h}
-          subtitle="> 24 часов на складе"
+          subtitle="&gt; 24ч, без rejected и picking • обнуление каждые 24ч"
           color={metrics.units_over_24h > 0 ? "#ef4444" : "#10b981"}
-          info="⏰ Источник: units где created_at старше 24 часов. Исключаются shipped и out. Красный цвет — есть проблемы, зелёный — всё ОК."
+          info="⏰ Units старше 24ч. Исключаются rejected, picking, shipped, out. Дневное окно 00:00–00:00."
         />
         <MetricCard
           title="Среднее время обработки"
           value={`${metrics.avg_processing_time_hours}ч`}
-          subtitle="От приемки до отгрузки"
+          subtitle="От приемки до отгрузки • обнуление каждые 24ч"
           color="#f59e0b"
-          info="⚡ Источник: audit_events (действия unit.create → logistics.ship_out). Среднее время за последние 7 дней."
+          info="⚡ От unit.created_at до outbound_shipments.out_at за текущий день (00:00–00:00)."
         />
         <MetricCard
           title="Процент возвратов"
           value={`${metrics.out_return_rate_percent}%`}
-          subtitle="Из OUT обратно на склад"
+          subtitle="Из OUT обратно на склад • обнуление каждые 24ч"
           color={metrics.out_return_rate_percent > 20 ? "#ef4444" : "#10b981"}
-          info="📦 Источник: outbound_shipments (status='returned' / total). Данные за 7 дней. Если >20% — красный, иначе зелёный."
+          info="📦 outbound_shipments: returned / total за текущий день (00:00–00:00)."
         />
       </div>
 
-      {/* Charts Row 1 */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--spacing-lg)", marginBottom: "var(--spacing-lg)" }}>
-        {/* Current Status Distribution */}
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--spacing-lg)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
-            Распределение заказов по статусам
-          </h2>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
-            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units.status</code> — текущий снимок всех заказов на складе
-          </div>
-          <BarChart data={statusBarData} />
-        </div>
-
-        {/* Old Units Distribution */}
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--spacing-lg)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
-            Залежалые заказы (&gt;24ч) по статусам
-          </h2>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
-            ⏰ Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units</code> где created_at &lt; now() - 24h, исключая shipped/out
-          </div>
-          {oldStatusBarData.length > 0 ? (
-            <BarChart data={oldStatusBarData} />
-          ) : (
-            <div style={{ textAlign: "center", padding: "var(--spacing-xl)", color: "#9ca3af" }}>
-              Нет залежалых заказов 🎉
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Charts Row 2 */}
+      {/* Charts Row: Производительность + Топ-10 */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "var(--spacing-lg)", marginBottom: "var(--spacing-lg)" }}>
         {/* Donut Charts */}
         <div
@@ -874,10 +788,9 @@ export default function SLAPage() {
             Производительность
           </h2>
           <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
-            📈 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code> (задачи на отгрузку) и 
-            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>outbound_shipments</code> (отправленные заказы) за последние 7 дней. 
-            <strong style={{ color: "#6b7280" }}>Задачи выполнены:</strong> процент завершенных задач от общего числа созданных (done/total). 
-            <strong style={{ color: "#6b7280" }}>Успешно доставлено:</strong> процент отправок без возврата (отправлено - возвращено) / всего отправок.
+            📈 За день (00:00–00:00). <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>picking_tasks</code> и 
+            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>outbound_shipments</code>. 
+            Задачи выполнены: done / total. Успешно доставлено: без возврата / всего отправок.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--spacing-md)" }}>
             <DonutChart
@@ -909,7 +822,7 @@ export default function SLAPage() {
             🚨 Топ-10 самых долгих заказов
           </h2>
           <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: "var(--spacing-md)", lineHeight: 1.4 }}>
-            📦 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units</code> старше 24ч, сортировка по created_at (старые сверху)
+            📦 Units старше 24ч, без rejected; сортировка по created_at (старые сверху)
           </div>
           {metrics.top_oldest_units.length > 0 ? (
             <div style={{ maxHeight: 300, overflow: "auto" }}>
@@ -980,13 +893,13 @@ export default function SLAPage() {
             ⏱️ Среднее время picking
           </h3>
           <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 8, lineHeight: 1.3 }}>
-            Источник: picking_tasks (разница created_at → completed_at)
+            picking_tasks за день (00:00–00:00)
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, color: "#2563eb" }}>
             {metrics.picking_avg_time_hours}ч
           </div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            {metrics.picking_total_tasks} задач за 7 дней
+            {metrics.picking_total_tasks} задач за день
           </div>
         </div>
 
@@ -1003,13 +916,13 @@ export default function SLAPage() {
             📦 OUT отправки
           </h3>
           <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 8, lineHeight: 1.3 }}>
-            Источник: outbound_shipments (все + с status='returned')
+            Общее кол-во за день (00:00–00:00)
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, color: "#8b5cf6" }}>
             {metrics.out_total_shipments}
           </div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            {metrics.out_returned_shipments} возвращено за 7 дней
+            {metrics.out_returned_shipments} возвращено за день
           </div>
         </div>
 
@@ -1321,61 +1234,7 @@ export default function SLAPage() {
         )}
       </div>
 
-      {/* Merchant Rejection Metrics */}
-      {rejectionMetrics && rejectionMetrics.total_units > 0 && (
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--spacing-lg)",
-            boxShadow: "var(--shadow-sm)",
-            marginTop: "var(--spacing-lg)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: "#111827" }}>
-            🚫 Мерчант не принял
-          </h2>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
-            📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units.meta</code> (merchant_rejections) + 
-            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>unit_moves</code> (bin) + 
-            <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>merchant_rejection_ticket</code>. 
-            "BIN → Тикет" — время от попадания в BIN до создания тикета. "Тикет → Решение" — время работы над проблемой. Критичные метрики для контроля качества возвратов.
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-            <MetricCard
-              title="Всего проблемных"
-              value={rejectionMetrics.total_units}
-              color="#dc2626"
-              subtitle="Требуют внимания"
-              info="⚠️ Общее количество заказов с проблемами (брак, повреждения, несоответствия). Находятся в зоне BIN или на рассмотрении."
-            />
-            <MetricCard
-              title="BIN → Тикет"
-              value={`${rejectionMetrics.avg_bin_to_ticket_hours}ч ${rejectionMetrics.avg_bin_to_ticket_minutes}м`}
-              color="#ea580c"
-              subtitle="Время реакции"
-              info="⏱️ Среднее время от помещения заказа в BIN до создания тикета для решения проблемы. Чем быстрее, тем лучше."
-            />
-            <MetricCard
-              title="Тикет → Решение"
-              value={`${rejectionMetrics.avg_ticket_resolution_hours}ч ${rejectionMetrics.avg_ticket_resolution_minutes}м`}
-              color="#f59e0b"
-              subtitle="Время решения"
-              info="🔧 Среднее время от создания тикета до решения проблемы. Показывает эффективность работы с проблемными заказами."
-            />
-            <MetricCard
-              title="Решено"
-              value={rejectionMetrics.units_resolved}
-              color="#10b981"
-              subtitle="Проблемы устранены"
-              info="✅ Количество проблемных заказов, по которым проблема была успешно решена и они могут продолжить обработку."
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Partner Rejected - Missing from Warehouse */}
+      {/* Partner Rejected - Missing from Warehouse (общее число, не ежедневное) */}
       <div
         style={{
           background: "#fff",
@@ -1390,11 +1249,7 @@ export default function SLAPage() {
           ⚠️ Партнер не принял — заказы отсутствуют на складе
         </h2>
         <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16, lineHeight: 1.4 }}>
-          📊 Источник: <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3 }}>units</code> с OPS статусом 
-          <code style={{ background: "#f3f4f6", padding: "2px 4px", borderRadius: 3, marginLeft: 4 }}>"partner_rejected_return"</code>, 
-          которые <strong style={{ color: "#dc2626" }}>не находятся на складе</strong> (cell_id IS NULL или status не в warehouse статусах). 
-          Эти заказы требуют особого внимания — они были отклонены партнером, но физически отсутствуют на складе. 
-          Возможно, они были отправлены, потеряны или находятся в процессе обработки.
+          📊 <strong>Общее число</strong> (всего, не ежедневное): заказы с OPS статусом «партнер не принял», не размещённые в ячейке (cell_id пусто или status не на складе).
         </div>
 
         {loadingPartnerRejected ? (

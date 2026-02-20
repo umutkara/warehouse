@@ -26,43 +26,37 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    // Get units with OPS status "partner_rejected_return"
-    // That are NOT on warehouse (cell_id IS NULL OR status not in warehouse statuses)
-    // First, get all units with the OPS status, then filter in code
-    const { data: allUnits, error: allUnitsError } = await supabaseAdmin
-      .from("units")
-      .select(`
-        id,
-        barcode,
-        status,
-        product_name,
-        partner_name,
-        price,
-        cell_id,
-        created_at,
-        meta
-      `)
-      .eq("warehouse_id", profile.warehouse_id)
-      .order("created_at", { ascending: false });
-
-    if (allUnitsError) {
-      console.error("Partner rejected missing units error:", allUnitsError);
-      return NextResponse.json(
-        { error: "Failed to load units" },
-        { status: 500 }
-      );
-    }
-
-    // Filter: OPS status = "partner_rejected_return" AND (cell_id IS NULL OR status not in warehouse statuses)
+    // Paginate to get real total (all-time): partner_rejected_return and not placed in cell
     const warehouseStatuses = ["stored", "bin", "picking", "shipping"];
-    const units = (allUnits || []).filter((unit: any) => {
-      const opsStatus = unit.meta?.ops_status;
-      if (opsStatus !== "partner_rejected_return") return false;
-      
-      // Not on warehouse if: cell_id is null OR status is not in warehouse statuses
-      const notOnWarehouse = !unit.cell_id || !warehouseStatuses.includes(unit.status);
-      return notOnWarehouse;
-    });
+    const pageSize = 1000;
+    let offset = 0;
+    const units: any[] = [];
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: page, error: pageError } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, product_name, partner_name, price, cell_id, created_at, meta")
+        .eq("warehouse_id", profile.warehouse_id)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (pageError) {
+        console.error("Partner rejected missing units error:", pageError);
+        return NextResponse.json({ error: "Failed to load units" }, { status: 500 });
+      }
+      if (!page?.length) break;
+
+      page.forEach((unit: any) => {
+        const opsStatus = unit.meta?.ops_status;
+        if (opsStatus !== "partner_rejected_return") return;
+        const notOnWarehouse = !unit.cell_id || !warehouseStatuses.includes(unit.status);
+        if (notOnWarehouse) units.push(unit);
+      });
+
+      hasMore = page.length === pageSize;
+      offset += pageSize;
+    }
     let shipmentCourierByUnit = new Map<string, string>();
     if (units.length > 0) {
       const unitIds = units.map((u: any) => u.id);
