@@ -16,10 +16,12 @@ These invariants are mandatory for the critical warehouse process. Any code chan
 10. **INV-10 (Error contract):** Validation and permission failures return stable HTTP status codes.
 11. **INV-11 (Task lifecycle):** Picking task transitions are constrained to `open -> in_progress -> done/canceled`.
 12. **INV-12 (Cancel rollback):** Task cancel returns units to snapshot source cells and marks task as `canceled`.
+13. **INV-13 (BIN ingress policy, scan flow):** `/api/units/move-by-scan` forbids moving to `bin` from non-`bin` cells (including `rejected`/`ff`); re-processing goes via `storage`/`shipping`.
 
 ## Required test mapping
 
 - `INV-01..INV-05` -> `/api/units/move` contract tests.
 - `INV-01, INV-06..INV-10` -> `/api/logistics/ship-out` contract tests.
 - `INV-11..INV-12` -> `/api/picking-tasks/[id]/cancel` contract tests.
+- `INV-13` -> `/api/units/move-by-scan` contract tests.
 - Return flow invariants -> return/move integration tests.

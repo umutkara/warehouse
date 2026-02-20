@@ -31,19 +31,29 @@ export async function GET(req: Request) {
 
     // 1 & 2. Execute independent queries in parallel
     const [
-      { data: oldUnits },
+      { data: oldUnitsForStats, count: oldUnitsCount },
+      { data: topOldUnits },
       { data: allUnits }
     ] = await Promise.all([
-      // 1. Units older than 24 hours (залежалые заказы)
+      // 1. Units older than 24 hours (залежалые заказы) for accurate counts/distribution
       supabaseAdmin
         .from("units")
-        .select("id, barcode, status, created_at, cell_id")
+        .select("status, created_at", { count: "exact" })
+        .eq("warehouse_id", profile.warehouse_id)
+        .lt("created_at", twentyFourHoursAgo.toISOString())
+        .neq("status", "shipped")
+        .neq("status", "out"),
+
+      // 1a. Top-10 oldest units for table
+      supabaseAdmin
+        .from("units")
+        .select("barcode, status, created_at")
         .eq("warehouse_id", profile.warehouse_id)
         .lt("created_at", twentyFourHoursAgo.toISOString())
         .neq("status", "shipped")
         .neq("status", "out")
         .order("created_at", { ascending: true })
-        .limit(100),
+        .limit(10),
       
       // 2. Total units by status (current snapshot)
       supabaseAdmin
@@ -54,7 +64,7 @@ export async function GET(req: Request) {
 
     // Group by status
     const oldUnitsByStatus: Record<string, number> = {};
-    (oldUnits || []).forEach(u => {
+    (oldUnitsForStats || []).forEach(u => {
       oldUnitsByStatus[u.status] = (oldUnitsByStatus[u.status] || 0) + 1;
     });
 
@@ -136,7 +146,7 @@ export async function GET(req: Request) {
       : 0;
 
     // 6. Top 10 oldest units
-    const topOldestUnits = (oldUnits || []).slice(0, 10).map(u => ({
+    const topOldestUnits = (topOldUnits || []).map(u => ({
       barcode: u.barcode,
       status: u.status,
       age_hours: Math.floor((now.getTime() - new Date(u.created_at).getTime()) / (1000 * 60 * 60)),
@@ -159,7 +169,7 @@ export async function GET(req: Request) {
     });
 
     // Actually, let's get age distribution from oldUnits
-    (oldUnits || []).forEach(u => {
+    (oldUnitsForStats || []).forEach(u => {
       const ageHours = (now.getTime() - new Date(u.created_at).getTime()) / (1000 * 60 * 60);
       if (ageHours < 24) ageDistribution["12_24h"]++;
       else if (ageHours < 48) ageDistribution["24_48h"]++;
@@ -272,7 +282,7 @@ export async function GET(req: Request) {
       metrics: {
         // Summary
         total_units: allUnits?.length || 0,
-        units_over_24h: oldUnits?.length || 0,
+        units_over_24h: oldUnitsCount || 0,
         avg_processing_time_hours: Math.round(avgProcessingTime * 10) / 10,
         
         // Current state

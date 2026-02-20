@@ -63,7 +63,12 @@ export async function GET(req: Request) {
       .lte("created_at", endDate.toISOString())
       .order("created_at", { ascending: false });
 
-    if (!allTasks || allTasks.length === 0) {
+    // Exclude canceled tasks from SLA to keep totals aligned with active/completed flows.
+    const slaRelevantTasks = (allTasks || []).filter(
+      (task) => task.status !== "canceled" && task.status !== "cancelled"
+    );
+
+    if (slaRelevantTasks.length === 0) {
       return NextResponse.json({
         ok: true,
         metrics: {
@@ -77,14 +82,29 @@ export async function GET(req: Request) {
           avg_current_wait_time_hours: 0,
           avg_current_wait_time_minutes: 0,
           min_time_hours: 0,
+          min_time_minutes: 0,
           max_time_hours: 0,
+          max_time_minutes: 0,
+          p50_hours: 0,
+          p50_minutes: 0,
+          p90_hours: 0,
+          p90_minutes: 0,
+          p95_hours: 0,
+          p95_minutes: 0,
+          sla_target_hours: 2,
+          sla_critical_hours: 4,
+          tasks_within_sla: 0,
+          tasks_exceeding_sla: 0,
+          tasks_critical: 0,
+          sla_compliance_percent: 0,
+          hourly_distribution: null,
         },
         tasks: [],
       });
     }
 
     // Get task units from new structure (picking_task_units)
-    const taskIds = allTasks.map(t => t.id);
+    const taskIds = slaRelevantTasks.map(t => t.id);
     const { data: taskUnitsData } = await supabaseAdmin
       .from("picking_task_units")
       .select("picking_task_id, unit_id")
@@ -101,7 +121,7 @@ export async function GET(req: Request) {
 
     // Collect all unit_ids (from old structure and new structure)
     const allUnitIds = new Set<string>();
-    allTasks.forEach(t => {
+    slaRelevantTasks.forEach(t => {
       // Old structure: unit_id field
       if (t.unit_id) {
         allUnitIds.add(t.unit_id);
@@ -116,10 +136,12 @@ export async function GET(req: Request) {
     const unitIds = Array.from(allUnitIds);
 
     // Get units data for barcodes
-    const { data: unitsData } = await supabaseAdmin
-      .from("units")
-      .select("id, barcode")
-      .in("id", unitIds);
+    const { data: unitsData } = unitIds.length > 0
+      ? await supabaseAdmin
+          .from("units")
+          .select("id, barcode")
+          .in("id", unitIds)
+      : { data: [] };
 
     const unitBarcodeMap = new Map<string, string>();
     (unitsData || []).forEach((u: any) => {
@@ -133,7 +155,7 @@ export async function GET(req: Request) {
     const completionTimes: number[] = [];
     const currentWaitTimes: number[] = [];
 
-    for (const task of allTasks) {
+    for (const task of slaRelevantTasks) {
       const createdTime = new Date(task.created_at).getTime();
       const nowTime = now.getTime();
       
@@ -235,7 +257,7 @@ export async function GET(req: Request) {
       metrics: {
         period,
         // Общие метрики
-        total_tasks: allTasks.length,
+        total_tasks: slaRelevantTasks.length,
         open_tasks: openTasks.length,
         in_progress_tasks: inProgressTasks.length,
         completed_tasks: completedTasks.length,

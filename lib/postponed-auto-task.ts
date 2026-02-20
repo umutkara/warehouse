@@ -57,25 +57,51 @@ export async function tryCreatePostponedTask(
       .select("picking_task_id")
       .eq("unit_id", unitId);
 
-    if (ptuErr || !ptuRows?.length) {
-      return { created: false, reason: "no previous task" };
-    }
-
-    const taskIds = ptuRows.map((r: any) => r.picking_task_id).filter(Boolean);
-    const { data: lastTasks, error: tasksErr } = await supabaseAdmin
+    // Also include legacy single-unit tasks where linkage is in picking_tasks.unit_id.
+    const { data: legacyRows, error: legacyErr } = await supabaseAdmin
       .from("picking_tasks")
-      .select("id, scenario, target_picking_cell_id")
-      .in("id", taskIds)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .select("id")
+      .eq("warehouse_id", warehouseId)
+      .eq("unit_id", unitId)
+      .not("unit_id", "is", null);
 
-    if (tasksErr || !lastTasks?.[0]) {
+    if (ptuErr && legacyErr) {
       return { created: false, reason: "no previous task" };
     }
 
-    const lastTask = lastTasks[0];
-    const scenario = lastTask.scenario ?? null;
-    const targetPickingCellId = lastTask.target_picking_cell_id ?? null;
+    const taskIds = [
+      ...(ptuRows ?? []).map((r: any) => r.picking_task_id),
+      ...(legacyRows ?? []).map((r: any) => r.id),
+    ].filter(Boolean);
+    const uniqueTaskIds = [...new Set(taskIds)];
+
+    if (uniqueTaskIds.length === 0) {
+      return { created: false, reason: "no previous task" };
+    }
+
+    const { data: recentTasks, error: tasksErr } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("id, scenario, target_picking_cell_id, created_at")
+      .in("id", uniqueTaskIds)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (tasksErr || !recentTasks?.[0]) {
+      return { created: false, reason: "no previous task" };
+    }
+
+    const lastTask = recentTasks[0];
+    const lastTaskWithScenario = recentTasks.find(
+      (t: any) => typeof t.scenario === "string" && t.scenario.trim().length > 0
+    );
+    const scenario =
+      (typeof lastTask.scenario === "string" && lastTask.scenario.trim()) ||
+      (typeof lastTaskWithScenario?.scenario === "string" && lastTaskWithScenario.scenario.trim()) ||
+      null;
+    const targetPickingCellId =
+      lastTask.target_picking_cell_id ??
+      lastTaskWithScenario?.target_picking_cell_id ??
+      null;
 
     if (!targetPickingCellId) {
       return { created: false, reason: "no target cell in last task" };

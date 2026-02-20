@@ -99,8 +99,10 @@ stateDiagram-v2
 
   out --> bin: Returned back from delivery/service
 
-  rejected --> bin: Re-processed
-  ff --> bin: Re-processed
+  rejected --> storage: Re-processed
+  rejected --> shipping: Re-processed
+  ff --> storage: Re-processed
+  ff --> shipping: Re-processed
 ```
 
 ## Picking Task State Diagram

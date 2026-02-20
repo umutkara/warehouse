@@ -1706,7 +1706,18 @@ export default function OpsShippingPage() {
             justifyContent: "center",
             zIndex: 1000,
           }}
-          onClick={handleCloseModal}
+          role="button"
+          tabIndex={0}
+          aria-label="Закрыть модальное окно"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCloseModal();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleCloseModal();
+            }
+          }}
         >
           <div
             style={{
@@ -1718,7 +1729,6 @@ export default function OpsShippingPage() {
               overflow: "auto",
               boxShadow: "0 8px 32px rgba(0, 0, 0, 0.2)",
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div
@@ -1877,7 +1887,18 @@ export default function OpsShippingPage() {
             justifyContent: "center",
             zIndex: 1100,
           }}
-          onClick={closeEditScenario}
+          role="button"
+          tabIndex={0}
+          aria-label="Закрыть окно редактирования сценария"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeEditScenario();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              closeEditScenario();
+            }
+          }}
         >
           <div
             style={{
@@ -1887,7 +1908,6 @@ export default function OpsShippingPage() {
               padding: 20,
               boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
               Редактировать сценарий

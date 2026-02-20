@@ -634,7 +634,12 @@ export default function SLAPage() {
           {error}
         </div>
         <button
-          onClick={loadMetrics}
+          onClick={() => {
+            loadMetrics();
+            loadShippingSLAMetrics();
+            loadRejectionMetrics();
+            loadPartnerRejectedUnits();
+          }}
           style={{
             padding: "12px 24px",
             background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -730,7 +735,12 @@ export default function SLAPage() {
           </p>
         </div>
         <button
-          onClick={loadMetrics}
+          onClick={() => {
+            loadMetrics();
+            loadShippingSLAMetrics();
+            loadRejectionMetrics();
+            loadPartnerRejectedUnits();
+          }}
           disabled={loading}
           style={{
             padding: "12px 20px",

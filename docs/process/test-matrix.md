@@ -21,6 +21,7 @@ This matrix maps process invariants to automated checks and CI gates.
 | INV-11 Task lifecycle      | `/api/picking-tasks/[id]/cancel` | Contract      | `tests/api/picking-task-cancel.contract.test.ts` | done |
 | INV-12 Cancel rollback     | `/api/picking-tasks/[id]/cancel` | Contract/Integration | `tests/api/picking-task-cancel.contract.test.ts` | done |
 | INV-12a Cancel partial-failure tolerance | `/api/picking-tasks/[id]/cancel` | Contract | `tests/api/picking-task-cancel.contract.test.ts` | done |
+| INV-13 BIN ingress policy (scan) | `/api/units/move-by-scan` | Contract | `tests/api/units-move-by-scan.contract.test.ts` | done |
 | Return flow state          | `out -> bin`              | Integration          | `tests/integration/return-flow.test.ts` | done        |
 
 
