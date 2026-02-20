@@ -1607,7 +1607,7 @@ export default function OpsShippingPage() {
                           type="checkbox"
                           checked={selectedTaskIds.has(task.id)}
                           onChange={() => handleToggleTaskSelection(task.id)}
-                          disabled={bulkCanceling || cancelingTaskId === task.id}
+                          disabled={bulkCanceling}
                           style={{ cursor: "pointer" }}
                         />
                       )}
