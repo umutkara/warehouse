@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAdminFromMock, createQueryChain } from "../helpers/supabase-mocks";
+import { callShipOut } from "../helpers/api-callers";
+import { mockServerUnauthorized, mockServerWithProfile } from "../helpers/server-auth";
 
 const supabaseServerMock = vi.fn();
 
@@ -21,69 +23,24 @@ describe("POST /api/logistics/ship-out contract", () => {
   });
 
   it("returns 401 for unauthorized user", async () => {
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }),
-      },
-    });
-
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    mockServerUnauthorized(supabaseServerMock);
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toMatchObject({ error: "Unauthorized" });
   });
 
   it("returns 403 for unsupported role", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "ops" },
-      error: null,
-    });
-
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
-    });
-
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    mockServerWithProfile({ supabaseServerMock, role: "ops", userId: "user-1" });
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("returns 400 when required body fields are missing", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
-    });
-
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1" }),
-      }),
-    );
+    mockServerWithProfile({ supabaseServerMock, role: "logistics", userId: "user-1" });
+    const res = await callShipOut({ unitId: "u1" });
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
@@ -92,20 +49,14 @@ describe("POST /api/logistics/ship-out contract", () => {
   });
 
   it("returns 500 when ship_unit_out RPC fails", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({ data: null, error: { message: "rpc failed" } });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "logistics",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -113,24 +64,13 @@ describe("POST /api/logistics/ship-out contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(() => createQueryChain({ data: [], error: null }) as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toMatchObject({ error: "rpc failed" });
   });
 
   it("uses admin RPC fallback for hub_worker when primary RPC returns Forbidden", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "hub_worker" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -139,11 +79,10 @@ describe("POST /api/logistics/ship-out contract", () => {
       })
       .mockResolvedValue({ data: { ok: true }, error: null });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "hub_worker",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -154,13 +93,7 @@ describe("POST /api/logistics/ship-out contract", () => {
       error: null,
     } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u-hub", courierName: "Hub Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u-hub", courierName: "Hub Courier" });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
@@ -178,21 +111,15 @@ describe("POST /api/logistics/ship-out contract", () => {
   });
 
   it("returns 500 when hub_worker fallback admin RPC fails", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "hub_worker" },
-      error: null,
-    });
-
     const supabaseRpc = vi.fn().mockResolvedValueOnce({
       data: { ok: false, error: "Forbidden: requires elevated privileges" },
       error: null,
     });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "hub_worker",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -203,24 +130,13 @@ describe("POST /api/logistics/ship-out contract", () => {
       error: { message: "admin rpc failed" },
     } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u-hub", courierName: "Hub Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u-hub", courierName: "Hub Courier" });
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toMatchObject({ error: "admin rpc failed" });
   });
 
   it("returns shipment on success and writes final audit event", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -229,11 +145,10 @@ describe("POST /api/logistics/ship-out contract", () => {
       })
       .mockResolvedValue({ data: { ok: true }, error: null });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "logistics",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -241,13 +156,7 @@ describe("POST /api/logistics/ship-out contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(() => createQueryChain({ data: [], error: null }) as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
@@ -266,11 +175,6 @@ describe("POST /api/logistics/ship-out contract", () => {
   });
 
   it("completes picking task, updates ops meta and skips duplicate transfer", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -279,11 +183,10 @@ describe("POST /api/logistics/ship-out contract", () => {
       })
       .mockResolvedValue({ data: { ok: true }, error: null });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "logistics",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -314,13 +217,7 @@ describe("POST /api/logistics/ship-out contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(200);
 

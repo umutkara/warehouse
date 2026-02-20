@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireUserProfile } from "@/app/api/_shared/user-profile";
+import { resolvePeriodRange } from "@/app/api/stats/_shared";
 
 export const dynamic = "force-dynamic";
 
@@ -14,45 +16,18 @@ export async function GET(req: Request) {
   const supabase = await supabaseServer();
 
   try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = await requireUserProfile(supabase);
+    if (!auth.ok) {
+      return auth.response;
     }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("warehouse_id, role")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile?.warehouse_id) {
-      return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
-    }
+    const { profile } = auth;
 
     // Get period from query params
     const url = new URL(req.url);
     const period = url.searchParams.get("period") || "today"; // today, yesterday, all
 
     const now = new Date();
-    let startDate: Date;
-    let endDate: Date;
-
-    if (period === "today") {
-      // Use UTC to avoid timezone issues
-      startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-      endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-    } else if (period === "yesterday") {
-      // Use UTC for yesterday
-      const yesterdayUTC = new Date(now);
-      yesterdayUTC.setUTCDate(yesterdayUTC.getUTCDate() - 1);
-      startDate = new Date(Date.UTC(yesterdayUTC.getUTCFullYear(), yesterdayUTC.getUTCMonth(), yesterdayUTC.getUTCDate(), 0, 0, 0));
-      endDate = new Date(Date.UTC(yesterdayUTC.getUTCFullYear(), yesterdayUTC.getUTCMonth(), yesterdayUTC.getUTCDate(), 23, 59, 59));
-    } else {
-      // all - last 30 days
-      startDate = new Date(now);
-      startDate.setDate(startDate.getDate() - 30);
-      endDate = now;
-    }
+    const { startDate, endDate } = resolvePeriodRange(period, now);
 
     // Get all shipping/picking tasks created in the period
     const { data: allTasks } = await supabaseAdmin

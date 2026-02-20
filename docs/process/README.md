@@ -2,11 +2,13 @@
 
 This folder defines the source-of-truth process contract for critical warehouse flows.
 
-## Scope
+## Scope (current working process)
 
-- Move unit between cells (`/api/units/move`)
+- Move unit by direct API (`/api/units/move`)
+- Move unit by scan flow (`/api/units/move-by-scan`)
 - Ship unit out (`/api/logistics/ship-out`)
-- Return unit back from out flow
+- Cancel picking task with rollback (`/api/picking-tasks/[id]/cancel`)
+- Return from `out` back to `bin` via move API
 
 ## Related Documents
 
@@ -19,7 +21,7 @@ This folder defines the source-of-truth process contract for critical warehouse 
 ## How to use
 
 - Treat invariants as non-negotiable business rules.
-- Update sequence diagrams when behavior changes.
+- Update sequence/state diagrams when behavior changes.
 - Add or update tests for every changed invariant.
 
 ## Sequences
@@ -34,86 +36,141 @@ sequenceDiagram
   participant DB as DB units + unit_moves
 
   Operator->>API: POST { unitId, toCellId, toStatus? }
-  API->>API: Validate auth + payload
-  API->>RPC: move_unit_to_cell(...)
+  API->>API: Validate auth + required fields + toStatus enum
+  API->>RPC: move_unit_to_cell(p_source=move)
   RPC->>DB: Validate warehouse/cell/inventory lock
-  RPC->>DB: Update units (cell_id, optional status)
-  RPC->>DB: Insert unit_moves audit trail
-  RPC-->>API: { ok, fromCellId, toCellId, toStatus }
-  API-->>Operator: 200 if ok, mapped error codes if not
+  RPC->>DB: Update unit location/status + write movement
+  RPC-->>API: { ok, unitId, fromCellId, toCellId, toStatus } or error
+  API-->>Operator: 200 on success, mapped 4xx/5xx on error
 ```
 
-### 2) Ship Out (`/api/logistics/ship-out`)
+### 2) Move by Scan (`/api/units/move-by-scan`)
+
+```mermaid
+sequenceDiagram
+  actor Scanner
+  participant API as API /api/units/move-by-scan
+  participant DB as DB units + warehouse_cells_map
+  participant RPC as RPC move_unit_to_cell
+
+  Scanner->>API: POST { unitBarcode, fromCellCode, toCellCode }
+  API->>API: Validate auth + normalize inputs
+  API->>DB: Load unit and FROM/TO cells by warehouse
+  API->>API: Validate active/not blocked + unit in FROM
+  API->>API: Enforce allowed moves (no non-bin -> bin)
+  API->>RPC: move_unit_to_cell(p_source=move-by-scan, toStatus from cell_type)
+  RPC-->>API: { ok, ... } or error
+  API-->>Scanner: 200 with normalized payload or 4xx/5xx
+```
+
+### 3) Ship Out (`/api/logistics/ship-out`)
 
 ```mermaid
 sequenceDiagram
   actor Logistic
   participant API as API /api/logistics/ship-out
   participant RPC as RPC ship_unit_out
-  participant DB as DB picking_tasks + transfers + units
+  participant Admin as Admin RPC fallback
+  participant DB as DB picking_tasks + units + transfers
   participant Audit as audit_log_event
 
-  Logistic->>API: POST { unitId, courierName }
-  API->>API: Validate auth + role + warehouse
-  API->>RPC: ship_unit_out(unitId, courierName)
-  RPC-->>API: shipment result
-  API->>DB: Auto-complete related picking tasks
-  API->>DB: Update units.meta.ops_status=in_progress
-  API->>DB: Create transfer if hub/explicit flow
-  API->>Audit: logistics.ship_out + related events
+  Logistic->>API: POST { unitId, courierName, transferToWarehouseId? }
+  API->>API: Validate auth + role + warehouse + payload
+  API->>DB: Resolve scenario/target cell (new + legacy task links)
+  API->>RPC: ship_unit_out(...)
+  alt hub_worker forbidden on primary RPC
+    API->>Admin: ship_unit_out(...) via supabaseAdmin
+    Admin-->>API: fallback result
+  end
+  API->>DB: Auto-complete related open/in_progress picking tasks
+  API->>DB: Set units.meta.ops_status=in_progress (+ comment)
+  API->>DB: Create transfer (hub/explicit branch) with dedupe
+  API->>Audit: picking_task_complete + ops.unit_status_update + logistics.ship_out
   API-->>Logistic: { ok: true, shipment }
 ```
 
-### 3) Return Unit From Out
+### 4) Cancel Picking Task (`/api/picking-tasks/[id]/cancel`)
+
+```mermaid
+sequenceDiagram
+  actor OPS as OPS/Admin
+  participant API as API /api/picking-tasks/[id]/cancel
+  participant DB as DB picking_tasks + picking_task_units + units + unit_moves
+  participant Audit as audit_log_event
+
+  OPS->>API: POST cancel task
+  API->>API: Validate auth + role
+  API->>DB: Load task (admin can cross-warehouse)
+  API->>API: Reject if status is done/canceled
+  API->>DB: Load task units with from_cell snapshot
+  loop each task unit
+    API->>DB: Update unit.cell_id -> from_cell_id (best effort)
+    API->>DB: Insert unit_moves for successful returns
+  end
+  API->>DB: Update task.status=canceled
+  API->>Audit: picking_task_canceled
+  API-->>OPS: { ok: true, units_returned }
+```
+
+### 5) Return from OUT to BIN
 
 ```mermaid
 sequenceDiagram
   actor Operator
-  participant API as Return/Move API
-  participant RPC as move_unit_to_cell
-  participant DB as DB units + unit_moves
+  participant API as API /api/units/move
+  participant RPC as RPC move_unit_to_cell
 
-  Operator->>API: Return unit to target cell (usually bin)
+  Operator->>API: POST { unitId, toCellId(bin), toStatus=bin }
   API->>RPC: move_unit_to_cell(...)
-  RPC->>DB: Validate target cell
-  RPC->>DB: Set unit cell and resulting status
-  RPC->>DB: Append unit_moves record
-  API-->>Operator: Updated status and location
+  RPC-->>API: move result
+  API-->>Operator: updated status/location
 ```
 
-## Status State Diagram
+## Unit Status State Diagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> bin: Unit accepted
+  [*] --> bin: Initial placement
 
-  bin --> stored: Approved for merchant return
-  bin --> shipping: Sent to diagnostics
-  bin --> rejected: Put to rejected cell
-  bin --> ff: Put to FF cell
+  bin --> stored: Move to storage cell
+  bin --> shipping: Move to shipping cell
+  bin --> rejected: Move to rejected cell
+  bin --> ff: Move to ff cell
 
-  stored --> picking: OPS creates picking task
-  shipping --> picking: OPS creates picking task
+  stored --> shipping: Re-route
+  shipping --> stored: Re-route
 
-  picking --> out: Logistics ship-out
+  stored --> picking: TSD move to picking
+  shipping --> picking: TSD move to picking
 
-  out --> bin: Returned back from delivery/service
+  stored --> rejected: Exception flow
+  shipping --> rejected: Exception flow
+  stored --> ff: Exception flow
+  shipping --> ff: Exception flow
 
-  rejected --> storage: Re-processed
-  rejected --> shipping: Re-processed
-  ff --> storage: Re-processed
-  ff --> shipping: Re-processed
+  rejected --> rejected: Internal move
+  rejected --> ff: Re-process
+  rejected --> stored: Re-process
+  rejected --> shipping: Re-process
+
+  ff --> ff: Internal move
+  ff --> stored: Re-process
+  ff --> shipping: Re-process
+
+  picking --> out: Ship-out
+  out --> bin: Return flow
 ```
 
 ## Picking Task State Diagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> open: Task created (OPS/Admin/Manager/Logistics)
+  [*] --> open: OPS/Admin/Manager/Logistics create task
   open --> in_progress: TSD starts task
-  in_progress --> done: Units moved to picking / ship-out completes
-  open --> canceled: OPS/Admin cancel task
-  in_progress --> canceled: OPS/Admin cancel task
+  open --> done: Ship-out auto-completes related task
+  in_progress --> done: TSD completes move / ship-out auto-complete
+  open --> canceled: OPS/Admin cancel
+  in_progress --> canceled: OPS/Admin cancel
 
   done --> [*]
   canceled --> [*]

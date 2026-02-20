@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireUserProfile } from "@/app/api/_shared/user-profile";
 
 const PAYABLE_STATUSES = new Set([
   "partner_accepted_return",
@@ -80,27 +81,34 @@ function isDateOnly(value: string | null): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
+function buildEmptyResponse(fromDate: string, toDate: string, courier: string, statusFilter: string, couriers: string[]) {
+  return {
+    ok: true,
+    filters: { from: fromDate, to: toDate, courier, status: statusFilter },
+    payable_statuses: Array.from(PAYABLE_STATUSES),
+    couriers,
+    summary: {
+      total_finalized: 0,
+      payable_count: 0,
+      non_payable_count: 0,
+      total_amount: 0,
+      rate_per_order: 1,
+    },
+    by_courier: [],
+    rows: [],
+  };
+}
+
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserProfile(supabase, {
+    allowedRoles: ["ops", "admin", "head"],
+  });
+  if (!auth.ok) {
+    return auth.response;
   }
-
-  const { data: profile, error: profError } = await supabase
-    .from("profiles")
-    .select("warehouse_id, role")
-    .eq("id", userData.user.id)
-    .single();
-
-  if (profError || !profile?.warehouse_id) {
-    return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
-  }
-
-  if (!["ops", "admin", "head"].includes(profile.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { profile } = auth;
 
   const url = new URL(req.url);
   const from = url.searchParams.get("from");
@@ -139,21 +147,7 @@ export async function GET(req: Request) {
   ).sort((a, b) => a.localeCompare(b, "ru"));
 
   if (shipmentList.length === 0) {
-    return NextResponse.json({
-      ok: true,
-      filters: { from: fromDate, to: toDate, courier, status: statusFilter },
-      payable_statuses: Array.from(PAYABLE_STATUSES),
-      couriers: courierOptions,
-      summary: {
-        total_finalized: 0,
-        payable_count: 0,
-        non_payable_count: 0,
-        total_amount: 0,
-        rate_per_order: 1,
-      },
-      by_courier: [],
-      rows: [],
-    });
+    return NextResponse.json(buildEmptyResponse(fromDate, toDate, courier, statusFilter, courierOptions));
   }
 
   const latestShipmentByUnit = new Map<string, Shipment>();
@@ -164,21 +158,7 @@ export async function GET(req: Request) {
 
   const unitIds = Array.from(latestShipmentByUnit.keys());
   if (unitIds.length === 0) {
-    return NextResponse.json({
-      ok: true,
-      filters: { from: fromDate, to: toDate, courier, status: statusFilter },
-      payable_statuses: Array.from(PAYABLE_STATUSES),
-      couriers: courierOptions,
-      summary: {
-        total_finalized: 0,
-        payable_count: 0,
-        non_payable_count: 0,
-        total_amount: 0,
-        rate_per_order: 1,
-      },
-      by_courier: [],
-      rows: [],
-    });
+    return NextResponse.json(buildEmptyResponse(fromDate, toDate, courier, statusFilter, courierOptions));
   }
 
   const chunkSize = 100;

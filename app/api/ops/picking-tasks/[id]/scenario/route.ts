@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireUserProfile } from "@/app/api/_shared/user-profile";
 
 /**
  * PATCH /api/ops/picking-tasks/[id]/scenario
@@ -14,24 +15,14 @@ export async function PATCH(
   const supabase = await supabaseServer();
   const { id: taskId } = await params;
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserProfile(supabase, {
+    profileSelect: "warehouse_id, role, full_name",
+    allowedRoles: ["admin", "head", "manager", "ops", "logistics"],
+  });
+  if (!auth.ok) {
+    return auth.response;
   }
-
-  const { data: profile, error: profError } = await supabase
-    .from("profiles")
-    .select("warehouse_id, role, full_name")
-    .eq("id", userData.user.id)
-    .single();
-
-  if (profError || !profile?.warehouse_id) {
-    return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
-  }
-
-  if (!["admin", "head", "manager", "ops", "logistics"].includes(profile.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { user, profile } = auth;
 
   const body = await req.json().catch(() => null);
   if (!body || !Object.prototype.hasOwnProperty.call(body, "scenario")) {
@@ -80,7 +71,7 @@ export async function PATCH(
     return NextResponse.json({ error: updateError?.message || "Failed to update scenario" }, { status: 500 });
   }
 
-  const actorName = profile.full_name || userData.user.email || "Unknown";
+  const actorName = profile.full_name || user.email || "Unknown";
   const oldScenario = (task.scenario || "").trim() || null;
   const newScenario = (scenario || "").trim() || null;
 

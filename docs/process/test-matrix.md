@@ -1,28 +1,25 @@
 # Invariant to Test Matrix
 
-This matrix maps process invariants to automated checks and CI gates.
+This matrix maps current invariants to automated checks and CI gates.
 
-
-| Invariant                  | Endpoint/Flow             | Test Type            | File                                    | Status      |
-| -------------------------- | ------------------------- | -------------------- | --------------------------------------- | ----------- |
-| INV-01 Auth                | `/api/units/move`         | Contract             | `tests/api/units-move.contract.test.ts` | done        |
-| INV-01 Auth                | `/api/logistics/ship-out` | Contract             | `tests/api/ship-out.contract.test.ts`   | done        |
-| INV-02 Warehouse boundary  | `/api/units/move`         | Contract             | `tests/api/units-move.contract.test.ts` | done        |
-| INV-03 Inventory lock      | `/api/units/move`         | Contract             | `tests/api/units-move.contract.test.ts` | done        |
-| INV-04 Cell validity       | `/api/units/move`         | Contract             | `tests/api/units-move.contract.test.ts` | done        |
-| INV-10 Error contract      | `move + ship-out`         | Contract             | `tests/api/*.contract.test.ts`          | done        |
-| INV-06 Ship out transition | `/api/logistics/ship-out` | Contract             | `tests/api/ship-out.contract.test.ts`   | done        |
-| INV-06a Ship out fallback (`hub_worker`) | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts` | done |
-| INV-07 Task completion     | `/api/logistics/ship-out` | Contract/Integration | `tests/api/ship-out.contract.test.ts`   | done        |
-| INV-08 Ops meta update     | `/api/logistics/ship-out` | Contract/Integration | `tests/api/ship-out.contract.test.ts`   | done        |
-| INV-09 Transfer dedupe     | `/api/logistics/ship-out` | Contract/Integration | `tests/api/ship-out.contract.test.ts`   | done        |
-| INV-09a Hub transfer create branch | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.transfer.contract.test.ts` | done |
-| INV-09b Explicit transfer create branch | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.transfer.contract.test.ts` | done |
-| INV-11 Task lifecycle      | `/api/picking-tasks/[id]/cancel` | Contract      | `tests/api/picking-task-cancel.contract.test.ts` | done |
-| INV-12 Cancel rollback     | `/api/picking-tasks/[id]/cancel` | Contract/Integration | `tests/api/picking-task-cancel.contract.test.ts` | done |
-| INV-12a Cancel partial-failure tolerance | `/api/picking-tasks/[id]/cancel` | Contract | `tests/api/picking-task-cancel.contract.test.ts` | done |
+| Invariant | Endpoint/Flow | Test Type | File | Status |
+| --- | --- | --- | --- | --- |
+| INV-01 Auth | `/api/units/move` | Contract | `tests/api/units-move.contract.test.ts` | done |
+| INV-01 Auth | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts` | done |
+| INV-01 Auth | `/api/picking-tasks/[id]/cancel` | Contract | `tests/api/picking-task-cancel.contract.test.ts` | done |
+| INV-02 Role gates | `ship-out + cancel` | Contract | `tests/api/ship-out.contract.test.ts`, `tests/api/picking-task-cancel.contract.test.ts` | done |
+| INV-03 Move input contract | `/api/units/move` | Contract | `tests/api/units-move.contract.test.ts` | done |
+| INV-04 Inventory lock mapping | `/api/units/move` | Contract | `tests/api/units-move.contract.test.ts` | done |
+| INV-05 Move RPC delegation | `/api/units/move` | Contract | `tests/api/units-move.contract.test.ts` | done |
+| INV-06 Move error mapping | `/api/units/move` | Contract | `tests/api/units-move.contract.test.ts` | done |
+| INV-07 Ship-out success contract | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts` | done |
+| INV-08 Hub worker fallback | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts` | done |
+| INV-09 Ship-out side effects | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts` | done |
+| INV-10 Transfer dedupe + branch creation | `/api/logistics/ship-out` | Contract | `tests/api/ship-out.contract.test.ts`, `tests/api/ship-out.transfer.contract.test.ts` | done |
+| INV-11 Cancel terminal guard | `/api/picking-tasks/[id]/cancel` | Contract | `tests/api/picking-task-cancel.contract.test.ts` | done |
+| INV-12 Cancel rollback + tolerance | `/api/picking-tasks/[id]/cancel` | Contract | `tests/api/picking-task-cancel.contract.test.ts` | done |
 | INV-13 BIN ingress policy (scan) | `/api/units/move-by-scan` | Contract | `tests/api/units-move-by-scan.contract.test.ts` | done |
-| Return flow state          | `out -> bin`              | Integration          | `tests/integration/return-flow.test.ts` | done        |
+| INV-14 Return `out -> bin` | `return flow` | Integration | `tests/integration/return-flow.test.ts` | done |
 
 
 ## CI Gate Mapping

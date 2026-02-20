@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { callUnitsMove } from "../helpers/api-callers";
+import { mockServerAuthOnly } from "../helpers/server-auth";
 
 const supabaseServerMock = vi.fn();
 
@@ -22,23 +24,12 @@ describe("Return flow out -> bin (integration-style contract)", () => {
       },
       error: null,
     });
-
-    supabaseServerMock.mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "operator-1" } } }) },
-      rpc: rpcMock,
+    mockServerAuthOnly({ supabaseServerMock, userId: "operator-1", rpc: rpcMock });
+    const res = await callUnitsMove({
+      unitId: "unit-out-1",
+      toCellId: "bin-cell",
+      toStatus: "bin",
     });
-
-    const { POST } = await import("../../app/api/units/move/route");
-    const res = await POST(
-      new Request("http://localhost/api/units/move", {
-        method: "POST",
-        body: JSON.stringify({
-          unitId: "unit-out-1",
-          toCellId: "bin-cell",
-          toStatus: "bin",
-        }),
-      }),
-    );
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({

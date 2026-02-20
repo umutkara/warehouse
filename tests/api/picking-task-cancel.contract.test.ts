@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAdminFromMock, createQueryChain } from "../helpers/supabase-mocks";
+import { createAdminFromMock } from "../helpers/supabase-mocks";
+import { callPickingTaskCancel } from "../helpers/api-callers";
+import { mockServerUnauthorized, mockServerWithProfile } from "../helpers/server-auth";
 
 const supabaseServerMock = vi.fn();
 
@@ -20,43 +22,17 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
     vi.clearAllMocks();
   });
 
-  function mockServerRole(role: "ops" | "admin" | "logistics", userId = "u1") {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role },
-      error: null,
-    });
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: userId } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
-    });
-  }
-
-  async function callCancel(taskId = "t1") {
-    const { POST } = await import("../../app/api/picking-tasks/[id]/cancel/route");
-    return POST(
-      new Request(`http://localhost/api/picking-tasks/${taskId}/cancel`, { method: "POST" }),
-      { params: Promise.resolve({ id: taskId }) },
-    );
-  }
-
   it("returns 401 for unauthorized user", async () => {
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }),
-      },
-    });
-
-    const res = await callCancel("t1");
+    mockServerUnauthorized(supabaseServerMock);
+    const res = await callPickingTaskCancel("t1");
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toMatchObject({ error: "Unauthorized" });
   });
 
   it("returns 403 for unsupported role", async () => {
-    mockServerRole("logistics");
-    const res = await callCancel("t1");
+    mockServerWithProfile({ supabaseServerMock, role: "logistics", userId: "u1" });
+    const res = await callPickingTaskCancel("t1");
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({
@@ -65,7 +41,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
   });
 
   it("returns 400 when task already done", async () => {
-    mockServerRole("ops");
+    mockServerWithProfile({ supabaseServerMock, role: "ops", userId: "u1" });
 
     const { supabaseAdmin } = await import("../../lib/supabase/admin");
     const adminMock = createAdminFromMock({
@@ -74,7 +50,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const res = await callCancel("t1");
+    const res = await callPickingTaskCancel("t1");
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
@@ -83,7 +59,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
   });
 
   it("cancels task, returns units and writes audit event", async () => {
-    mockServerRole("ops");
+    mockServerWithProfile({ supabaseServerMock, role: "ops", userId: "u1" });
 
     const { supabaseAdmin } = await import("../../lib/supabase/admin");
     const adminMock = createAdminFromMock({
@@ -112,7 +88,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const res = await callCancel("t1");
+    const res = await callPickingTaskCancel("t1");
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
@@ -141,7 +117,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
   });
 
   it("keeps cancel flow running when one unit move fails", async () => {
-    mockServerRole("ops");
+    mockServerWithProfile({ supabaseServerMock, role: "ops", userId: "u1" });
 
     const { supabaseAdmin } = await import("../../lib/supabase/admin");
     const adminMock = createAdminFromMock({
@@ -169,7 +145,7 @@ describe("POST /api/picking-tasks/[id]/cancel contract", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const res = await callCancel("t1");
+    const res = await callPickingTaskCancel("t1");
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({

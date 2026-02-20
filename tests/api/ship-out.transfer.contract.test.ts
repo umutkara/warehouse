@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAdminFromMock, createQueryChain } from "../helpers/supabase-mocks";
+import { createAdminFromMock } from "../helpers/supabase-mocks";
+import { callShipOut } from "../helpers/api-callers";
+import { mockServerWithProfile } from "../helpers/server-auth";
 
 const supabaseServerMock = vi.fn();
 
@@ -21,11 +23,6 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
   });
 
   it("creates hub transfer when shipped from hub picking cell and no existing transfer", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -34,11 +31,10 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
       })
       .mockResolvedValue({ data: { ok: true }, error: null });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "logistics",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -66,13 +62,7 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({ unitId: "u1", courierName: "Courier" }),
-      }),
-    );
+    const res = await callShipOut({ unitId: "u1", courierName: "Courier" });
 
     expect(res.status).toBe(200);
     expect(adminMock.inserts).toEqual(
@@ -91,11 +81,6 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
   });
 
   it("creates explicit transfer when transferToWarehouseId is provided and no existing transfer", async () => {
-    const profileChain = createQueryChain({
-      data: { warehouse_id: "w1", role: "logistics" },
-      error: null,
-    });
-
     const supabaseRpc = vi
       .fn()
       .mockResolvedValueOnce({
@@ -104,11 +89,10 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
       })
       .mockResolvedValue({ data: { ok: true }, error: null });
 
-    supabaseServerMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
-      },
-      from: vi.fn(() => profileChain),
+    mockServerWithProfile({
+      supabaseServerMock,
+      role: "logistics",
+      userId: "user-1",
       rpc: supabaseRpc,
     });
 
@@ -133,17 +117,11 @@ describe("POST /api/logistics/ship-out transfer branches", () => {
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
 
-    const { POST } = await import("../../app/api/logistics/ship-out/route");
-    const res = await POST(
-      new Request("http://localhost/api/logistics/ship-out", {
-        method: "POST",
-        body: JSON.stringify({
-          unitId: "u1",
-          courierName: "Courier",
-          transferToWarehouseId: "w2",
-        }),
-      }),
-    );
+    const res = await callShipOut({
+      unitId: "u1",
+      courierName: "Courier",
+      transferToWarehouseId: "w2",
+    });
 
     expect(res.status).toBe(200);
     expect(adminMock.inserts).toEqual(
