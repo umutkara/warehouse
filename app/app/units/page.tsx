@@ -85,6 +85,16 @@ const AGE_LABELS: Record<string, string> = {
   "7d": "> 7 д",
 };
 
+const CELL_TYPE_LABELS: Record<string, string> = {
+  all: "Все типы",
+  bin: "BIN",
+  storage: "Storage",
+  picking: "Picking",
+  shipping: "Shipping",
+  rejected: "Rejected",
+  ff: "FF",
+};
+
 function getInitialFilters(searchParams: URLSearchParams) {
   return {
     age: searchParams.get("age") || "all",
@@ -114,6 +124,15 @@ export default function UnitsListPage() {
   const [opsStatusComment, setOpsStatusComment] = useState<string>("");
   const [savingOpsStatus, setSavingOpsStatus] = useState(false);
   const [totalUnits, setTotalUnits] = useState<number | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string>(initial.status);
+  const [exportAge, setExportAge] = useState<string>(initial.age);
+  const [exportOps, setExportOps] = useState<string>(initial.ops);
+  const [exportSearch, setExportSearch] = useState<string>(initial.search);
+  const [exportCellType, setExportCellType] = useState<string>("all");
+  const [exportAllUnits, setExportAllUnits] = useState(false);
+  const [exportWithHistory, setExportWithHistory] = useState(false);
 
   // Sync filters from URL when URL changes (e.g. back/forward, shared link)
   useEffect(() => {
@@ -260,21 +279,43 @@ export default function UnitsListPage() {
     ageFilter !== "all" ||
     opsStatusFilter !== "all";
 
+  const canExportAllUnits = ["admin", "head"].includes(userRole);
+
+  const openExportModal = useCallback(() => {
+    setExportStatus(statusFilter);
+    setExportAge(ageFilter);
+    setExportOps(opsStatusFilter);
+    setExportSearch(searchQuery);
+    setExportCellType("all");
+    setExportAllUnits(false);
+    setExportWithHistory(false);
+    setIsExportModalOpen(true);
+  }, [statusFilter, ageFilter, opsStatusFilter, searchQuery]);
+
   const handleExportToExcel = useCallback(async () => {
+    setIsExporting(true);
     try {
       const params = new URLSearchParams({
-        age: ageFilter,
-        status: statusFilter,
+        age: exportAge,
+        status: exportStatus,
       });
-      if (searchQuery.trim()) params.set("search", searchQuery.trim());
-      if (opsStatusFilter !== "all") params.set("ops", opsStatusFilter);
+      if (exportSearch.trim()) params.set("search", exportSearch.trim());
+      if (exportOps !== "all") params.set("ops", exportOps);
+      if (exportCellType !== "all") params.set("cellType", exportCellType);
+      if (exportAllUnits) params.set("scope", "all");
+      if (exportWithHistory) params.set("includeHistory", "1");
 
       const res = await fetch(`/api/units/export-excel?${params.toString()}`, {
         cache: "no-store",
       });
 
       if (!res.ok) {
-        setError("Ошибка экспорта");
+        try {
+          const json = await res.json();
+          setError(json.error || "Ошибка экспорта");
+        } catch {
+          setError("Ошибка экспорта");
+        }
         return;
       }
 
@@ -282,15 +323,20 @@ export default function UnitsListPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `units_on_warehouse_${new Date().toISOString().split("T")[0]}.csv`;
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      a.download = match?.[1] || `units_export_${new Date().toISOString().split("T")[0]}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      setIsExportModalOpen(false);
     } catch (e: any) {
       setError("Ошибка экспорта");
+    } finally {
+      setIsExporting(false);
     }
-  }, [ageFilter, statusFilter, searchQuery, opsStatusFilter]);
+  }, [exportAge, exportStatus, exportSearch, exportOps, exportCellType, exportAllUnits, exportWithHistory]);
 
   const canEditOpsStatus = ["ops", "logistics", "admin", "head"].includes(userRole);
 
@@ -480,7 +526,7 @@ export default function UnitsListPage() {
           )}
         </form>
 
-        <button onClick={handleExportToExcel} style={styles.exportButton}>
+        <button onClick={openExportModal} style={styles.exportButton}>
           📊 Экспорт в Excel
         </button>
       </div>
@@ -873,6 +919,146 @@ export default function UnitsListPage() {
         </table>
       </div>
 
+      {isExportModalOpen && (
+        <div
+          style={styles.modalOverlay}
+          onClick={() => {
+            if (!isExporting) setIsExportModalOpen(false);
+          }}
+        >
+          <div style={styles.exportModal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div>
+                <div style={styles.modalTitle}>Экспорт заказов</div>
+                <div style={styles.modalSubtitle}>Гибкие параметры выгрузки</div>
+              </div>
+              <button
+                style={styles.modalClose}
+                onClick={() => {
+                  if (!isExporting) setIsExportModalOpen(false);
+                }}
+                disabled={isExporting}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={styles.exportModalBody}>
+              <div style={styles.exportInfoBanner}>
+                Выберите фильтры для Excel-выгрузки. Можно экспортировать только текущий склад или все units в системе (для admin/head).
+              </div>
+
+              <div style={styles.exportFormGrid}>
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>Статус заказа</span>
+                  <select value={exportStatus} onChange={(e) => setExportStatus(e.target.value)} style={styles.modalSelect}>
+                    <option value="all">Все</option>
+                    {Object.entries(STATUS_LABELS)
+                      .filter(([code]) => code !== "all")
+                      .map(([code, label]) => (
+                        <option key={`export-status-${code}`} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>Время на складе</span>
+                  <select value={exportAge} onChange={(e) => setExportAge(e.target.value)} style={styles.modalSelect}>
+                    {Object.entries(AGE_LABELS).map(([code, label]) => (
+                      <option key={`export-age-${code}`} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>OPS статус</span>
+                  <select value={exportOps} onChange={(e) => setExportOps(e.target.value)} style={styles.modalSelect}>
+                    <option value="all">Все</option>
+                    <option value="no_status">Без статуса</option>
+                    {Object.entries(OPS_STATUS_LABELS).map(([code, label]) => (
+                      <option key={`export-ops-${code}`} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>Тип ячейки</span>
+                  <select
+                    value={exportCellType}
+                    onChange={(e) => setExportCellType(e.target.value)}
+                    style={styles.modalSelect}
+                  >
+                    {Object.entries(CELL_TYPE_LABELS).map(([code, label]) => (
+                      <option key={`export-cell-type-${code}`} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ ...styles.exportField, gridColumn: "1 / -1" }}>
+                  <span style={styles.exportLabel}>Поиск по номеру заказа</span>
+                  <input
+                    value={exportSearch}
+                    onChange={(e) => setExportSearch(e.target.value)}
+                    placeholder="Например: 003102929781901"
+                    style={styles.exportInput}
+                  />
+                </label>
+              </div>
+
+              <label style={styles.exportCheckboxRow}>
+                <input
+                  type="checkbox"
+                  checked={exportWithHistory}
+                  onChange={(e) => setExportWithHistory(e.target.checked)}
+                />
+                <span>Добавить историю изменений (перемещения из журнала unit_moves)</span>
+              </label>
+
+              <label
+                style={{
+                  ...styles.exportCheckboxRow,
+                  opacity: canExportAllUnits ? 1 : 0.6,
+                  cursor: canExportAllUnits ? "pointer" : "not-allowed",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={exportAllUnits}
+                  onChange={(e) => setExportAllUnits(e.target.checked)}
+                  disabled={!canExportAllUnits}
+                />
+                <span>Экспортировать все units в системе (не только текущий склад)</span>
+              </label>
+              {!canExportAllUnits && (
+                <div style={styles.exportMutedText}>Опция доступна только ролям admin/head.</div>
+              )}
+
+              <div style={styles.exportActions}>
+                <button
+                  type="button"
+                  style={styles.exportCancelButton}
+                  onClick={() => setIsExportModalOpen(false)}
+                  disabled={isExporting}
+                >
+                  Отмена
+                </button>
+                <button type="button" style={styles.exportSubmitButton} onClick={handleExportToExcel} disabled={isExporting}>
+                  {isExporting ? "Подготовка выгрузки..." : "Скачать Excel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedUnit && (
         <div style={styles.modalOverlay} onClick={() => setSelectedUnit(null)}>
           <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -1065,6 +1251,92 @@ const styles = {
     boxShadow: "0 2px 4px rgba(16, 185, 129, 0.3)",
     transition: "all 0.2s",
     whiteSpace: "nowrap",
+  } as React.CSSProperties,
+  exportModal: {
+    background: "#fff",
+    borderRadius: 16,
+    width: "100%",
+    maxWidth: 760,
+    boxShadow: "0 24px 48px rgba(15, 23, 42, 0.24)",
+    overflow: "hidden",
+  } as React.CSSProperties,
+  exportModalBody: {
+    padding: "20px 22px",
+    display: "grid",
+    gap: 14,
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  } as React.CSSProperties,
+  exportInfoBanner: {
+    background: "#ecfeff",
+    border: "1px solid #a5f3fc",
+    color: "#0f766e",
+    borderRadius: 10,
+    padding: "10px 12px",
+    fontSize: 12,
+    lineHeight: 1.45,
+  } as React.CSSProperties,
+  exportFormGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+  } as React.CSSProperties,
+  exportField: {
+    display: "grid",
+    gap: 6,
+  } as React.CSSProperties,
+  exportLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#334155",
+    letterSpacing: "0.01em",
+  } as React.CSSProperties,
+  exportInput: {
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid #e5e7eb",
+    fontSize: 13,
+    outline: "none",
+  } as React.CSSProperties,
+  exportCheckboxRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+    fontSize: 13,
+    color: "#334155",
+    lineHeight: 1.35,
+  } as React.CSSProperties,
+  exportMutedText: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: -8,
+  } as React.CSSProperties,
+  exportActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 6,
+  } as React.CSSProperties,
+  exportCancelButton: {
+    padding: "8px 12px",
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    background: "#fff",
+    color: "#334155",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  } as React.CSSProperties,
+  exportSubmitButton: {
+    padding: "8px 14px",
+    border: "none",
+    borderRadius: 8,
+    background: "#0f766e",
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    boxShadow: "0 4px 10px rgba(15, 118, 110, 0.22)",
   } as React.CSSProperties,
   filters: {
     display: "flex",
