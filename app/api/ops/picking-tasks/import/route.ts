@@ -52,19 +52,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No rows provided" }, { status: 400 });
     }
 
-    // Load available units (storage/shipping, not in tasks)
-    const { data: units, error: unitsError } = await supabaseAdmin
-      .from("units")
-      .select("id, barcode, status, cell_id, created_at, meta")
-      .eq("warehouse_id", profile.warehouse_id)
-      .not("cell_id", "is", null)
-      .order("created_at", { ascending: false });
+    // Load all units with pagination (Supabase default response window is limited).
+    const unitsPageSize = 1000;
+    const maxUnitsPages = 50;
+    let units: any[] = [];
+    for (let page = 0; page < maxUnitsPages; page++) {
+      const from = page * unitsPageSize;
+      const to = from + unitsPageSize - 1;
+      const { data: pageUnits, error: pageUnitsError } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, cell_id, created_at, meta")
+        .eq("warehouse_id", profile.warehouse_id)
+        .not("cell_id", "is", null)
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
-    if (unitsError) {
-      return NextResponse.json({ error: unitsError.message }, { status: 400 });
+      if (pageUnitsError) {
+        return NextResponse.json({ error: pageUnitsError.message }, { status: 400 });
+      }
+      if (!pageUnits?.length) break;
+      units.push(...pageUnits);
+      if (pageUnits.length < unitsPageSize) break;
     }
 
-    if (!units || units.length === 0) {
+    if (units.length === 0) {
       return NextResponse.json({ ok: true, created: 0, errors: [] });
     }
 
