@@ -348,11 +348,12 @@ export async function GET(req: Request) {
     worksheet["!cols"] = headers.map(() => ({ wch: 20 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Заказы");
-    const xlsxBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    const xlsxArrayBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const xlsxBytes = new Uint8Array(xlsxArrayBuffer);
 
     // Return as downloadable file
     const filenamePrefix = scope === "all" ? "units_all_system" : "units_on_warehouse";
-    return new Response(xlsxBuffer, {
+    return new Response(xlsxBytes, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${filenamePrefix}_${new Date().toISOString().split("T")[0]}.xlsx"`,
