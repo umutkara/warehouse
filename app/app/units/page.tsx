@@ -133,6 +133,9 @@ export default function UnitsListPage() {
   const [exportCellType, setExportCellType] = useState<string>("all");
   const [exportAllUnits, setExportAllUnits] = useState(false);
   const [exportWithHistory, setExportWithHistory] = useState(false);
+  const [exportCreatedFrom, setExportCreatedFrom] = useState("");
+  const [exportCreatedTo, setExportCreatedTo] = useState("");
+  const [exportTrimBarcodeSuffix01, setExportTrimBarcodeSuffix01] = useState(false);
 
   // Sync filters from URL when URL changes (e.g. back/forward, shared link)
   useEffect(() => {
@@ -289,6 +292,9 @@ export default function UnitsListPage() {
     setExportCellType("all");
     setExportAllUnits(false);
     setExportWithHistory(false);
+    setExportCreatedFrom("");
+    setExportCreatedTo("");
+    setExportTrimBarcodeSuffix01(false);
     setIsExportModalOpen(true);
   }, [statusFilter, ageFilter, opsStatusFilter, searchQuery]);
 
@@ -304,6 +310,9 @@ export default function UnitsListPage() {
       if (exportCellType !== "all") params.set("cellType", exportCellType);
       if (exportAllUnits) params.set("scope", "all");
       if (exportWithHistory) params.set("includeHistory", "1");
+      if (exportCreatedFrom) params.set("createdFrom", exportCreatedFrom);
+      if (exportCreatedTo) params.set("createdTo", exportCreatedTo);
+      if (exportTrimBarcodeSuffix01) params.set("trimBarcodeSuffix01", "1");
 
       const res = await fetch(`/api/units/export-excel?${params.toString()}`, {
         cache: "no-store",
@@ -336,7 +345,7 @@ export default function UnitsListPage() {
     } finally {
       setIsExporting(false);
     }
-  }, [exportAge, exportStatus, exportSearch, exportOps, exportCellType, exportAllUnits, exportWithHistory]);
+  }, [exportAge, exportStatus, exportSearch, exportOps, exportCellType, exportAllUnits, exportWithHistory, exportCreatedFrom, exportCreatedTo, exportTrimBarcodeSuffix01]);
 
   const canEditOpsStatus = ["ops", "logistics", "admin", "head"].includes(userRole);
 
@@ -1011,6 +1020,26 @@ export default function UnitsListPage() {
                     style={styles.exportInput}
                   />
                 </label>
+
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>Дата добавления на склад: от</span>
+                  <input
+                    type="date"
+                    value={exportCreatedFrom}
+                    onChange={(e) => setExportCreatedFrom(e.target.value)}
+                    style={styles.exportInput}
+                  />
+                </label>
+
+                <label style={styles.exportField}>
+                  <span style={styles.exportLabel}>Дата добавления на склад: до</span>
+                  <input
+                    type="date"
+                    value={exportCreatedTo}
+                    onChange={(e) => setExportCreatedTo(e.target.value)}
+                    style={styles.exportInput}
+                  />
+                </label>
               </div>
 
               <label style={styles.exportCheckboxRow}>
@@ -1020,6 +1049,17 @@ export default function UnitsListPage() {
                   onChange={(e) => setExportWithHistory(e.target.checked)}
                 />
                 <span>Добавить историю изменений (перемещения из журнала unit_moves)</span>
+              </label>
+
+              <label style={styles.exportCheckboxRow}>
+                <input
+                  type="checkbox"
+                  checked={exportTrimBarcodeSuffix01}
+                  onChange={(e) => setExportTrimBarcodeSuffix01(e.target.checked)}
+                />
+                <span>
+                  Нормализовать штрихкоды: для 3...01 убрать последние 2 цифры; для 00... убрать первые 00 и последние 2 цифры
+                </span>
               </label>
 
               <label

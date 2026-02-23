@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import * as XLSX from "xlsx";
 
 /**
  * GET /api/units/export-excel
@@ -13,6 +14,9 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * - cellType: all | bin | storage | picking | shipping | rejected | ff | ...
  * - scope: warehouse | all (all only for admin/head)
  * - includeHistory: 1 | 0
+ * - createdFrom: YYYY-MM-DD (created_at lower bound)
+ * - createdTo: YYYY-MM-DD (created_at upper bound)
+ * - trimBarcodeSuffix01: 1 | 0
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -38,9 +42,25 @@ export async function GET(req: Request) {
     const cellTypeFilter = searchParams.get("cellType") || "all";
     const scope = searchParams.get("scope") === "all" ? "all" : "warehouse";
     const includeHistory = searchParams.get("includeHistory") === "1";
+    const createdFromRaw = (searchParams.get("createdFrom") || "").trim();
+    const createdToRaw = (searchParams.get("createdTo") || "").trim();
+    const trimBarcodeSuffix01 = searchParams.get("trimBarcodeSuffix01") === "1";
     const userRole = profile?.role ?? "guest";
     const canExportAll = ["admin", "head"].includes(userRole);
+    const createdFromIso = createdFromRaw ? new Date(`${createdFromRaw}T00:00:00.000Z`) : null;
+    const createdToIso = createdToRaw ? new Date(`${createdToRaw}T23:59:59.999Z`) : null;
 
+    if (createdFromIso && Number.isNaN(createdFromIso.getTime())) {
+      return NextResponse.json({ error: "Некорректная дата 'от'" }, { status: 400 });
+    }
+
+    if (createdToIso && Number.isNaN(createdToIso.getTime())) {
+      return NextResponse.json({ error: "Некорректная дата 'до'" }, { status: 400 });
+    }
+
+    if (createdFromIso && createdToIso && createdFromIso.getTime() > createdToIso.getTime()) {
+      return NextResponse.json({ error: "Дата 'от' не может быть позже даты 'до'" }, { status: 400 });
+    }
     if (scope === "all" && !canExportAll) {
       return NextResponse.json({ error: "Недостаточно прав для выгрузки всех units" }, { status: 403 });
     }
@@ -88,6 +108,14 @@ export async function GET(req: Request) {
 
       if (dateThreshold) {
         next = next.lt("created_at", dateThreshold);
+      }
+
+      if (createdFromIso) {
+        next = next.gte("created_at", createdFromIso.toISOString());
+      }
+
+      if (createdToIso) {
+        next = next.lte("created_at", createdToIso.toISOString());
       }
 
       if (opsFilter && opsFilter !== "all") {
@@ -251,6 +279,17 @@ export async function GET(req: Request) {
       const createdAt = new Date(unit.created_at);
       const ageHours = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
       const lastAction = lastActionMap[unit.id];
+      const rawBarcode = String(unit.barcode || "");
+      let normalizedBarcode = rawBarcode;
+      if (trimBarcodeSuffix01) {
+        if (rawBarcode.startsWith("00") && rawBarcode.length > 4) {
+          // For "00..." barcodes remove leading "00" and trailing 2 digits.
+          normalizedBarcode = rawBarcode.slice(2, -2);
+        } else if (/^3.*01$/.test(rawBarcode) && rawBarcode.length > 2) {
+          // For "3...01" barcodes remove trailing "01".
+          normalizedBarcode = rawBarcode.slice(0, -2);
+        }
+      }
       
       let lastActionText = "—";
       let lastActionDate = "—";
@@ -266,7 +305,7 @@ export async function GET(req: Request) {
 
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
       const row: string[] = [
-        unit.barcode || "",
+        normalizedBarcode,
         unit.status || "",
         unit.product_name || "",
         unit.partner_name || "",
@@ -304,28 +343,19 @@ export async function GET(req: Request) {
       return row;
     });
 
-    // Generate CSV content
-    const csvDelimiter = ";";
-    const csvNewLine = "\r\n";
-    const escaped = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const csvContent = [
-      "sep=;",
-      headers.map((header) => escaped(header)).join(csvDelimiter),
-      ...rows.map((row) => 
-        row.map((cell) => escaped(cell)).join(csvDelimiter)
-      ),
-    ].join(csvNewLine);
-
-    // Add BOM for UTF-8 Excel compatibility
-    const bom = "\uFEFF";
-    const csvWithBom = bom + csvContent;
+    const worksheetData: (string | number)[][] = [headers, ...rows];
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    worksheet["!cols"] = headers.map(() => ({ wch: 20 }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Заказы");
+    const xlsxBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
 
     // Return as downloadable file
     const filenamePrefix = scope === "all" ? "units_all_system" : "units_on_warehouse";
-    return new Response(csvWithBom, {
+    return new Response(xlsxBuffer, {
       headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filenamePrefix}_${new Date().toISOString().split("T")[0]}.csv"`,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filenamePrefix}_${new Date().toISOString().split("T")[0]}.xlsx"`,
       },
     });
   } catch (e: any) {
