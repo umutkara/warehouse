@@ -183,6 +183,7 @@ export default function OpsShippingPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [opsStatusFilter, setOpsStatusFilter] = useState<string>("");
   const [includeRejected, setIncludeRejected] = useState(false);
+  const [sortAgeOrder, setSortAgeOrder] = useState<"desc" | "asc" | "">("");
   
   // Scenario state
   const [scenarioCategory, setScenarioCategory] = useState<ScenarioCategory | "">("");
@@ -541,19 +542,27 @@ export default function OpsShippingPage() {
     );
   });
 
-  // Select all units (based on filtered list)
+  // Sort by time on warehouse (age_hours)
+  const sortedAvailableUnits =
+    sortAgeOrder === "desc"
+      ? [...filteredAvailableUnits].sort((a, b) => (b.age_hours ?? 0) - (a.age_hours ?? 0))
+      : sortAgeOrder === "asc"
+        ? [...filteredAvailableUnits].sort((a, b) => (a.age_hours ?? 0) - (b.age_hours ?? 0))
+        : filteredAvailableUnits;
+
+  // Select all units (based on sorted list)
   function handleSelectAll() {
-    if (selectedUnitIds.size === filteredAvailableUnits.length && filteredAvailableUnits.length > 0) {
-      // Deselect all filtered units
-      const filteredIds = new Set(filteredAvailableUnits.map((u) => u.id));
+    if (selectedUnitIds.size === sortedAvailableUnits.length && sortedAvailableUnits.length > 0) {
+      // Deselect all
+      const filteredIds = new Set(sortedAvailableUnits.map((u) => u.id));
       setSelectedUnitIds((prev) => {
         const next = new Set(prev);
         filteredIds.forEach((id) => next.delete(id));
         return next;
       });
     } else {
-      // Select all filtered units
-      const filteredIds = new Set(filteredAvailableUnits.map((u) => u.id));
+      // Select all
+      const filteredIds = new Set(sortedAvailableUnits.map((u) => u.id));
       setSelectedUnitIds((prev) => {
         const next = new Set(prev);
         filteredIds.forEach((id) => next.add(id));
@@ -1161,6 +1170,24 @@ export default function OpsShippingPage() {
               }}
             />
           </div>
+          <div style={{ minWidth: 220, flex: "0 0 auto" }}>
+            <select
+              value={sortAgeOrder}
+              onChange={(e) => setSortAgeOrder(e.target.value as "" | "desc" | "asc")}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                fontSize: 14,
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                background: "#fff",
+              }}
+            >
+              <option value="">Сортировка: время на складе</option>
+              <option value="desc">Сначала дольше на складе</option>
+              <option value="asc">Сначала меньше на складе</option>
+            </select>
+          </div>
         </div>
 
         {loadingUnits ? (
@@ -1177,9 +1204,10 @@ export default function OpsShippingPage() {
           </div>
         ) : (
           <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
-            {searchQuery.trim() && (
+            {(searchQuery.trim() || sortAgeOrder) && (
               <div style={{ padding: "8px 12px", background: "#f0f9ff", borderBottom: "1px solid #ddd", fontSize: 13, color: "#666" }}>
-                Найдено: {filteredAvailableUnits.length} из {availableUnits.length} заказов
+                Найдено: {sortedAvailableUnits.length} из {availableUnits.length} заказов
+                {sortAgeOrder && " • Сортировка по времени на складе"}
               </div>
             )}
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1188,7 +1216,7 @@ export default function OpsShippingPage() {
                   <th style={{ padding: "12px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 600 }}>
                     <input
                       type="checkbox"
-                      checked={filteredAvailableUnits.length > 0 && filteredAvailableUnits.every((u) => selectedUnitIds.has(u.id))}
+                      checked={sortedAvailableUnits.length > 0 && sortedAvailableUnits.every((u) => selectedUnitIds.has(u.id))}
                       onChange={handleSelectAll}
                       style={{ cursor: "pointer", width: 16, height: 16 }}
                     />
@@ -1202,7 +1230,7 @@ export default function OpsShippingPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredAvailableUnits.map((unit) => (
+                {sortedAvailableUnits.map((unit) => (
                   <tr 
                     key={unit.id} 
                     style={{ 

@@ -1302,6 +1302,15 @@ export default function TsdPage() {
           }
         }
 
+        // ⭐ ПРОВЕРКИ для FROM = PICKING (возврат в BIN)
+        if (fromCell.cell_type === 'picking') {
+          if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
+            setScanValue("");
+            return;
+          }
+        }
+
         // Добавляем в массив
         setUnits([...units, unitInfo]);
         setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
@@ -1386,6 +1395,17 @@ export default function TsdPage() {
       return {
         valid: false,
         error: `Из FF можно переместить только в FF, STORAGE или SHIPPING. Выбрано: ${toType.toUpperCase()}`
+      };
+    }
+
+    // PICKING → BIN: возврат в приёмку (задание OPS остаётся активным)
+    if (fromType === 'picking') {
+      if (toType === 'bin') {
+        return { valid: true };
+      }
+      return {
+        valid: false,
+        error: `Из PICKING можно переместить только в BIN (возврат в приёмку). Выбрано: ${toType.toUpperCase()}`
       };
     }
 
@@ -4417,11 +4437,11 @@ export default function TsdPage() {
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте FROM ячейку (откуда): BIN, STORAGE, SHIPPING, REJECTED или FF</li>
+              <li>Отсканируйте FROM ячейку (откуда): BIN, STORAGE, SHIPPING, PICKING, REJECTED или FF</li>
               <li>Отсканируйте заказы один за другим (от 1 до бесконечности)</li>
-              <li>Отсканируйте TO ячейку (куда) - все заказы переместятся автоматически</li>
+              <li>Отсканируйте TO ячейку (куда) — все заказы переместятся автоматически</li>
               <li style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                📌 Разрешено: BIN→STORAGE/SHIPPING/REJECTED/FF, STORAGE→SHIPPING/STORAGE/REJECTED/FF, SHIPPING→STORAGE/SHIPPING/REJECTED/FF, REJECTED→REJECTED/FF/STORAGE/SHIPPING, FF→FF/STORAGE/SHIPPING
+                📌 Разрешено: BIN→STORAGE/SHIPPING/REJECTED/FF, STORAGE→SHIPPING/STORAGE/REJECTED/FF, SHIPPING→STORAGE/SHIPPING/REJECTED/FF, PICKING→BIN (возврат в приёмку; задание OPS остаётся активным), REJECTED→REJECTED/FF/STORAGE/SHIPPING, FF→FF/STORAGE/SHIPPING
               </li>
             </ol>
           ) : mode === "inventory" ? (

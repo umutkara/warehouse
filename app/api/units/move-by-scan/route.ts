@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
 
 function normalizeCellCode(v: any) {
   return String(v ?? "").trim().toUpperCase();
@@ -118,8 +119,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Запрет storage/shipping -> bin (BIN только входная)
-    if (toCell.cell_type === "bin" && fromCell.cell_type !== "bin") {
+    // Запрет storage/shipping -> bin (BIN только входная). picking -> bin разрешён (возврат в приёмку, задание отменится)
+    if (toCell.cell_type === "bin" && fromCell.cell_type !== "bin" && fromCell.cell_type !== "picking") {
       return NextResponse.json(
         { error: "Запрещено перемещать в BIN из storage/shipping. BIN - только входная зона." },
         { status: 400 }
@@ -133,12 +134,13 @@ export async function POST(req: Request) {
     // rejected → rejected (обратная совместимость)
     // rejected → ff, storage, shipping (ТСД перемещение из отклонённых)
     // storage/shipping → rejected/ff (обратная совместимость)
-    // picking → out (через ТСД отгрузка - но это отдельный API)
+    // picking → bin (возврат в приёмку; задание с этим заказом будет снято/отменено)
+    // picking → out (через ТСД отгрузка - отдельный API)
     const allowedMoves: Record<string, string[]> = {
       bin: ["storage", "shipping", "rejected", "ff"],
       storage: ["storage", "shipping", "picking", "rejected", "ff"],
       shipping: ["shipping", "storage", "picking", "rejected", "ff"],
-      picking: ["picking"], // Picking может перемещаться внутри picking зоны
+      picking: ["picking", "bin"],
       rejected: ["rejected", "ff", "storage", "shipping"],
       ff: ["ff", "storage", "shipping"],
     };
@@ -189,6 +191,20 @@ export async function POST(req: Request) {
 
     if (!result?.ok) {
       return NextResponse.json({ error: result?.error || "Ошибка перемещения" }, { status: 400 });
+    }
+
+    if (toStatus === "stored" || toStatus === "shipping") {
+      try {
+        await tryCreatePostponedTask(
+          unit.id,
+          profile.warehouse_id,
+          user.id,
+          profile.full_name || user.email || "Unknown",
+          supabaseAdmin
+        );
+      } catch (e: any) {
+        console.error("[move-by-scan] postponed auto-task error (non-blocking):", e?.message ?? e);
+      }
     }
 
     return NextResponse.json({
@@ -269,6 +285,20 @@ export async function POST(req: Request) {
     const result = typeof rpcResult === "string" ? JSON.parse(rpcResult) : rpcResult;
     if (!result?.ok) {
       return NextResponse.json({ error: result?.error || "Move failed" }, { status: 400 });
+    }
+
+    if (toStatus === "stored" || toStatus === "shipping") {
+      try {
+        await tryCreatePostponedTask(
+          unit.id,
+          profile.warehouse_id,
+          user.id,
+          profile.full_name || user.email || "Unknown",
+          supabaseAdmin
+        );
+      } catch (e: any) {
+        console.error("[move-by-scan] postponed auto-task error (non-blocking):", e?.message ?? e);
+      }
     }
 
     return NextResponse.json({

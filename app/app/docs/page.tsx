@@ -896,7 +896,7 @@ function TsdMoveSection() {
       <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>🔄 ТСД Перемещение</h2>
       <p style={{ color: "#6b7280", marginBottom: 24, lineHeight: 1.6 }}>
         Режим работы терминала сбора данных для перемещения заказов между ячейками склада. 
-        Складчик может перемещать заказы из BIN в STORAGE/SHIPPING, а также между STORAGE и SHIPPING ячейками.
+        Складчик может перемещать заказы из BIN в STORAGE/SHIPPING, между STORAGE и SHIPPING, а также возвращать заказы из PICKING в BIN (возврат в приёмку; задание OPS при этом остаётся активным).
       </p>
 
       {/* Процесс работы */}
@@ -912,8 +912,8 @@ function TsdMoveSection() {
           </div>
           <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.6 }}>
             Складчик сканирует ячейку, из которой будет брать заказы:<br/>
-            <strong>✅ Разрешенные типы:</strong> BIN, STORAGE, SHIPPING<br/>
-            <strong>❌ Запрещенные:</strong> PICKING, RECEIVING<br/><br/>
+            <strong>✅ Разрешенные типы:</strong> BIN, STORAGE, SHIPPING, PICKING (для возврата в BIN)<br/>
+            <strong>❌ Запрещенные:</strong> RECEIVING<br/><br/>
             <strong style={{ color: "#dc2626" }}>Важно для BIN:</strong> Если выбрана ячейка типа BIN (например, B1), то можно сканировать только заказы, которые находятся именно в этой ячейке B1, а не в других BIN ячейках!
           </div>
         </div>
@@ -936,6 +936,8 @@ function TsdMoveSection() {
             • Если заказ в другой BIN (B2, B3) → ❌ ОШИБКА<br/>
             • Если заказ в STORAGE/SHIPPING/PICKING → ❌ ОШИБКА<br/>
             • ✅ Можно брать только заказы из выбранной BIN ячейки<br/><br/>
+            <strong>2️⃣ Для PICKING (возврат в приёмку):</strong><br/>
+            • FROM = picking ячейка, TO = BIN. Заказ вернётся в приёмку; задание OPS остаётся активным.<br/><br/>
             
             <strong>3️⃣ Проверка на дубликат:</strong><br/>
             • Если заказ уже отсканирован → ❌ ОШИБКА: "дубликат"<br/><br/>
@@ -1006,7 +1008,7 @@ function TsdMoveSection() {
               </tr>
               <tr>
                 <td style={{ padding: 12, border: "1px solid #e5e7eb", fontWeight: 600 }}>PICKING</td>
-                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
+                <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#d1fae5", color: "#065f46" }}>✅<br/><span style={{ fontSize: 11 }}>возврат в приёмку</span></td>
                 <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
                 <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
                 <td style={{ padding: 12, border: "1px solid #e5e7eb", textAlign: "center", background: "#fee2e2", color: "#991b1b" }}>❌</td>
@@ -1027,7 +1029,7 @@ function TsdMoveSection() {
         <div style={{ marginTop: 16, padding: 12, background: "#eff6ff", borderRadius: 8 }}>
           <div style={{ fontSize: 13, color: "#1e40af", lineHeight: 1.6 }}>
             <strong>Легенда:</strong><br/>
-            🟢 <strong style={{ color: "#065f46" }}>Зеленый</strong> — Основное направление<br/>
+            🟢 <strong style={{ color: "#065f46" }}>Зеленый</strong> — Основное направление (в т.ч. PICKING→BIN: возврат в приёмку; задание OPS остаётся активным)<br/>
             🔵 <strong style={{ color: "#1e40af" }}>Синий</strong> — Перемещение внутри типа (STORAGE→STORAGE, SHIPPING→SHIPPING)<br/>
             🔴 <strong style={{ color: "#991b1b" }}>Красный</strong> — Запрещено
           </div>
@@ -1066,10 +1068,22 @@ function TsdMoveSection() {
             </div>
           </div>
 
-          {/* Пример 3 */}
+          {/* Пример 3: PICKING → BIN */}
+          <div style={{ padding: 16, background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#166534", marginBottom: 8 }}>
+              ✅ Пример 3: Возврат из PICKING в BIN
+            </div>
+            <div style={{ fontSize: 13, color: "#14532d", lineHeight: 1.6, fontFamily: "monospace" }}>
+              FROM: PICK-01 (picking)<br/>
+              Сканирует: ORD-555 → ✅ Добавлен<br/>
+              TO: B1 (bin) → ✅ УСПЕХ: заказ возвращён в приёмку (задание OPS остаётся активным)
+            </div>
+          </div>
+
+          {/* Пример 4: Запрещённое */}
           <div style={{ padding: 16, background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b", marginBottom: 8 }}>
-              ❌ Пример 3: Запрещенное перемещение
+              ❌ Пример 4: Запрещенное перемещение
             </div>
             <div style={{ fontSize: 13, color: "#7f1d1d", lineHeight: 1.6, fontFamily: "monospace" }}>
               FROM: S5 (storage)<br/>

@@ -96,4 +96,91 @@ describe("POST /api/units/move-by-scan contract", () => {
     });
     expect(rpcMock).not.toHaveBeenCalled();
   });
+
+  it("allows picking -> bin move and calls RPC (task stays active)", async () => {
+    const fromMock = vi
+      .fn()
+      .mockReturnValueOnce(
+        makeSingleQuery({
+          data: { warehouse_id: "w1", full_name: "Operator" },
+          error: null,
+        }),
+      )
+      .mockReturnValueOnce(
+        makeSingleQuery({
+          data: {
+            id: "unit-1",
+            barcode: "123456",
+            cell_id: "cell-pick",
+            warehouse_id: "w1",
+            status: "picking",
+          },
+          error: null,
+        }),
+      )
+      .mockReturnValueOnce(
+        makeSingleQuery({
+          data: {
+            id: "cell-pick",
+            code: "PICK-01",
+            cell_type: "picking",
+            warehouse_id: "w1",
+            meta: null,
+            is_active: true,
+          },
+          error: null,
+        }),
+      )
+      .mockReturnValueOnce(
+        makeSingleQuery({
+          data: {
+            id: "cell-bin",
+            code: "BIN-01",
+            cell_type: "bin",
+            warehouse_id: "w1",
+            meta: null,
+            is_active: true,
+          },
+          error: null,
+        }),
+      );
+
+    const rpcMock = vi.fn().mockResolvedValue({
+      data: { ok: true, unitId: "unit-1", fromCellId: "cell-pick", toCellId: "cell-bin", toStatus: "bin" },
+      error: null,
+    });
+    supabaseServerMock.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }) },
+      from: fromMock,
+      rpc: rpcMock,
+    });
+
+    const { POST } = await import("../../app/api/units/move-by-scan/route");
+    const res = await POST(
+      new Request("http://localhost/api/units/move-by-scan", {
+        method: "POST",
+        body: JSON.stringify({
+          unitBarcode: "123456",
+          fromCellCode: "PICK-01",
+          toCellCode: "BIN-01",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      unitId: "unit-1",
+      toCellId: "cell-bin",
+      toStatus: "bin",
+    });
+    expect(rpcMock).toHaveBeenCalledWith(
+      "move_unit_to_cell",
+      expect.objectContaining({
+        p_unit_id: "unit-1",
+        p_to_cell_id: "cell-bin",
+        p_to_status: "bin",
+      }),
+    );
+  });
 });
