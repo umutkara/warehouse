@@ -13,6 +13,7 @@ type Unit = {
   cell_code?: string;
   cell_type?: string;
   created_at: string;
+  age_hours?: number;
   rejection_count: number;
   last_rejection?: {
     rejected_at: string;
@@ -29,13 +30,37 @@ type Unit = {
   };
 };
 
+const TICKET_OPTIONS = [
+  { value: "all", label: "Все" },
+  { value: "open", label: "Открытые" },
+  { value: "resolved", label: "Решённые" },
+] as const;
+
+const AGE_OPTIONS = [
+  { value: "all", label: "Все" },
+  { value: "24h", label: "≥ 24 ч" },
+  { value: "48h", label: "≥ 48 ч" },
+  { value: "7d", label: "≥ 7 д" },
+] as const;
+
+const SORT_OPTIONS = [
+  { value: "created_desc", label: "Сначала новые" },
+  { value: "created_asc", label: "Сначала старые" },
+  { value: "age_desc", label: "Дольше на складе" },
+  { value: "age_asc", label: "Меньше на складе" },
+] as const;
+
 export default function MerchantRejectionsPage() {
   const router = useRouter();
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal state
+  const [ticketStatus, setTicketStatus] = useState<"all" | "open" | "resolved">("all");
+  const [ageFilter, setAgeFilter] = useState<"all" | "24h" | "48h" | "7d">("all");
+  const [sortBy, setSortBy] = useState<"created_desc" | "created_asc" | "age_desc" | "age_asc">("created_desc");
+  const [searchBarcode, setSearchBarcode] = useState("");
+
   const [showModal, setShowModal] = useState(false);
   const [modalAction, setModalAction] = useState<"create" | "resolve" | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
@@ -45,14 +70,19 @@ export default function MerchantRejectionsPage() {
 
   useEffect(() => {
     loadUnits();
-  }, []);
+  }, [ticketStatus, ageFilter, sortBy]);
 
   async function loadUnits() {
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/ops/merchant-rejections/list", {
+      const params = new URLSearchParams();
+      if (ticketStatus !== "all") params.set("ticket_status", ticketStatus);
+      if (ageFilter !== "all") params.set("age", ageFilter);
+      if (sortBy !== "created_desc") params.set("sort", sortBy);
+      const q = params.toString();
+      const res = await fetch("/api/ops/merchant-rejections/list" + (q ? "?" + q : ""), {
         cache: "no-store",
       });
 
@@ -148,20 +178,70 @@ export default function MerchantRejectionsPage() {
     );
   }
 
+  const filteredBySearch = searchBarcode.trim()
+    ? units.filter((u) => u.barcode.toLowerCase().includes(searchBarcode.trim().toLowerCase()))
+    : units;
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>🚫 Мерчант не принял</h1>
         <div style={styles.subtitle}>
-          Всего заказов: <strong>{units.length}</strong>
+          Заказы со статусом «партнёр не принял» в любой ячейке. Всего: <strong>{units.length}</strong>
+          {searchBarcode.trim() && ` (поиск: ${filteredBySearch.length})`}
         </div>
       </div>
 
-      {units.length === 0 ? (
+      <div style={styles.filters}>
+        <div style={styles.filterRow}>
+          <label style={styles.filterLabel}>Тикет:</label>
+          <select
+            value={ticketStatus}
+            onChange={(e) => setTicketStatus(e.target.value as typeof ticketStatus)}
+            style={styles.select}
+          >
+            {TICKET_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label style={{ ...styles.filterLabel, marginLeft: 16 }}>Время на складе:</label>
+          <select
+            value={ageFilter}
+            onChange={(e) => setAgeFilter(e.target.value as typeof ageFilter)}
+            style={styles.select}
+          >
+            {AGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label style={{ ...styles.filterLabel, marginLeft: 16 }}>Сортировка:</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            style={styles.select}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <div style={styles.filterRow}>
+          <label style={styles.filterLabel}>Поиск по заказу:</label>
+          <input
+            type="text"
+            value={searchBarcode}
+            onChange={(e) => setSearchBarcode(e.target.value)}
+            placeholder="Штрихкод или часть"
+            style={styles.searchInput}
+          />
+        </div>
+      </div>
+
+      {filteredBySearch.length === 0 ? (
         <div style={styles.emptyState}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>{units.length === 0 ? "✅" : "🔍"}</div>
           <div style={{ fontSize: 18, color: "#6b7280" }}>
-            Нет проблемных заказов
+            {units.length === 0 ? "Нет проблемных заказов" : "По поиску ничего не найдено"}
           </div>
         </div>
       ) : (
@@ -172,6 +252,7 @@ export default function MerchantRejectionsPage() {
                 <th style={styles.th}>Заказ</th>
                 <th style={styles.th}>Товар / Партнер</th>
                 <th style={styles.th}>Ячейка</th>
+                <th style={styles.th}>На складе</th>
                 <th style={styles.th}>Отклонений</th>
                 <th style={styles.th}>Последний отказ</th>
                 <th style={styles.th}>Тикет</th>
@@ -180,7 +261,7 @@ export default function MerchantRejectionsPage() {
               </tr>
             </thead>
             <tbody>
-              {units.map((unit) => (
+              {filteredBySearch.map((unit) => (
                 <tr key={unit.id} style={styles.tr}>
                   <td style={styles.td}>
                     <div
@@ -200,6 +281,15 @@ export default function MerchantRejectionsPage() {
                   </td>
                   <td style={styles.td}>
                     <div style={styles.cellCode}>{unit.cell_code || "—"}</div>
+                  </td>
+                  <td style={styles.td}>
+                    <div style={styles.ageHours}>
+                      {unit.age_hours != null
+                        ? unit.age_hours >= 24
+                          ? `${Math.floor(unit.age_hours / 24)} д`
+                          : `${unit.age_hours} ч`
+                        : "—"}
+                    </div>
                   </td>
                   <td style={styles.td}>
                     <div style={styles.rejectionCount}>{unit.rejection_count}</div>
@@ -244,7 +334,7 @@ export default function MerchantRejectionsPage() {
                       >
                         Создать тикет
                       </button>
-                    ) : unit.ticket.status === "open" ? (
+                    ) : unit.ticket.created && unit.ticket.status !== "resolved" ? (
                       <button
                         onClick={() => openResolveTicket(unit)}
                         style={styles.btnResolve}
@@ -339,6 +429,48 @@ const styles = {
   subtitle: {
     fontSize: 14,
     color: "#6b7280",
+  } as React.CSSProperties,
+  filters: {
+    marginBottom: 20,
+    padding: 16,
+    background: "#f9fafb",
+    borderRadius: 8,
+  } as React.CSSProperties,
+  filterRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  } as React.CSSProperties,
+  filterLabel: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#374151",
+  } as React.CSSProperties,
+  select: {
+    padding: "8px 12px",
+    fontSize: 13,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "#d1d5db",
+    borderRadius: 6,
+    background: "#fff",
+    minWidth: 140,
+  } as React.CSSProperties,
+  searchInput: {
+    padding: "8px 12px",
+    fontSize: 14,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "#d1d5db",
+    borderRadius: 6,
+    width: 220,
+  } as React.CSSProperties,
+  ageHours: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#374151",
   } as React.CSSProperties,
   emptyState: {
     textAlign: "center",
