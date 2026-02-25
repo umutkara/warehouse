@@ -22,6 +22,7 @@ type Unit = {
 };
 
 type UnitWithCell = Unit & {
+  age_hours?: number;
   cell?: {
     id: string;
     code: string;
@@ -52,6 +53,22 @@ type OpsStatusCode = keyof typeof OPS_STATUS_LABELS;
 function getOpsStatusText(status: string | null | undefined): string {
   if (!status) return "Не назначен";
   return OPS_STATUS_LABELS[status as OpsStatusCode] || status;
+}
+
+function formatAge(hours: number): string {
+  if (hours < 1) return "< 1ч";
+  if (hours < 24) return `${hours}ч`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (remainingHours === 0) return `${days}д`;
+  return `${days}д ${remainingHours}ч`;
+}
+
+function getAgeColor(hours: number): string {
+  if (hours > 168) return "#dc2626"; // > 7 days - red
+  if (hours > 48) return "#f59e0b";   // > 48h - orange
+  if (hours > 24) return "#eab308";   // > 24h - yellow
+  return "#10b981";                   // < 24h - green
 }
 
 function formatOrderNumberForExport(barcode?: string | null): string {
@@ -608,19 +625,12 @@ export default function OpsShippingPage() {
 
     try {
       // Prepare data
-      const headers = [
-        "Штрихкод",
-        "Статус",
-        "Ячейка",
-        "Тип ячейки",
-        "Создан",
-      ];
-
       const rows = availableUnits.map((unit) => {
         const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
-        
+        const ageStr = typeof unit.age_hours === "number" ? formatAge(unit.age_hours) : "";
         return {
           "Штрихкод": formatOrderNumberForExport(unit.barcode),
+          "На складе": ageStr,
           "Статус": unit.status || "",
           "Ячейка": unit.cell?.code || "",
           "Тип ячейки": unit.cell?.cell_type || "",
@@ -635,6 +645,7 @@ export default function OpsShippingPage() {
       // Set column widths
       ws["!cols"] = [
         { wch: 20 }, // Штрихкод
+        { wch: 12 }, // На складе
         { wch: 15 }, // Статус
         { wch: 15 }, // Ячейка
         { wch: 15 }, // Тип ячейки
@@ -667,6 +678,7 @@ export default function OpsShippingPage() {
       // Generate CSV headers
       const headers = [
         "Штрихкод",
+        "На складе",
         "Статус",
         "Ячейка",
         "Тип ячейки",
@@ -676,9 +688,10 @@ export default function OpsShippingPage() {
       // Generate CSV rows
       const rows = availableUnits.map((unit) => {
         const createdAt = unit.created_at ? new Date(unit.created_at).toLocaleString("ru-RU") : "";
-        
+        const ageStr = typeof unit.age_hours === "number" ? formatAge(unit.age_hours) : "";
         return [
           formatOrderNumberForExport(unit.barcode),
+          ageStr,
           unit.status || "",
           unit.cell?.code || "",
           unit.cell?.cell_type || "",
@@ -1181,6 +1194,7 @@ export default function OpsShippingPage() {
                     />
                   </th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Штрихкод</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>На складе</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Текущая ячейка</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Тип</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Статус</th>
@@ -1216,6 +1230,25 @@ export default function OpsShippingPage() {
                       />
                     </td>
                     <td style={{ padding: "12px", fontWeight: 600 }}>{unit.barcode}</td>
+                    <td style={{ padding: "12px" }}>
+                      {typeof unit.age_hours === "number" ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "4px 8px",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: getAgeColor(unit.age_hours),
+                          }}
+                          title="Время на складе (ч/д)"
+                        >
+                          {formatAge(unit.age_hours)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td style={{ padding: "12px" }}>{unit.cell?.code || "—"}</td>
                     <td style={{ padding: "12px" }}>
                       {unit.cell?.cell_type ? (

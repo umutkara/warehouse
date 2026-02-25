@@ -138,17 +138,45 @@ async function getStorageShippingUnits(_req: Request) {
     ...unitsFromMultiUnitTasks,
   ]);
 
+  // stay_start: last time unit entered warehouse (resets after return). If never returned = created_at.
+  const unitIds = units.map((u: any) => u.id);
+  const lastReturnedAtByUnitId = new Map<string, string>();
+  const batchSize = 100;
+  for (let i = 0; i < unitIds.length; i += batchSize) {
+    const batch = unitIds.slice(i, i + batchSize);
+    const { data: returnedRows } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select("unit_id, returned_at")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("status", "returned")
+      .in("unit_id", batch)
+      .not("returned_at", "is", null)
+      .order("returned_at", { ascending: false });
+    if (returnedRows?.length) {
+      returnedRows.forEach((r: { unit_id: string; returned_at: string }) => {
+        if (r.unit_id && r.returned_at && !lastReturnedAtByUnitId.has(r.unit_id)) {
+          lastReturnedAtByUnitId.set(r.unit_id, r.returned_at);
+        }
+      });
+    }
+  }
+
   // Filter units that are in storage, shipping, or rejected cells AND not in picking tasks.
   // Cell from warehouse_cells_map (with warehouse_id) = actual cell for this warehouse.
+  const now = new Date();
   const unitsInStorageOrShipping = units
     .map((unit) => {
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+      const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
+      const stayStartTime = new Date(stayStart).getTime();
+      const ageHours = Math.floor((now.getTime() - stayStartTime) / (1000 * 60 * 60));
       return {
         id: unit.id,
         barcode: unit.barcode,
         status: unit.status,
         cell_id: unit.cell_id,
         created_at: unit.created_at,
+        age_hours: ageHours,
         ops_status: unit.meta?.ops_status ?? null,
         cell: cell ? { id: cell.id, code: cell.code, cell_type: cell.cell_type } : null,
       };

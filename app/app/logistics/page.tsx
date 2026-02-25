@@ -26,6 +26,7 @@ export default function LogisticsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [pickingCells, setPickingCells] = useState<PickingCell[]>([]);
   const [selectedCellFilter, setSelectedCellFilter] = useState<string>("");
+  const [searchOrder, setSearchOrder] = useState("");
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -203,10 +204,14 @@ export default function LogisticsPage() {
     });
   }
 
-  // Filter units by selected picking cell
-  const filteredUnits = selectedCellFilter
-    ? units.filter((unit) => unit.cell_id === selectedCellFilter)
-    : units;
+  // Filter units by selected picking cell and search by order (barcode)
+  const filteredUnits = units
+    .filter((unit) => !selectedCellFilter || unit.cell_id === selectedCellFilter)
+    .filter((unit) => {
+      if (!searchOrder.trim()) return true;
+      const q = searchOrder.trim().toLowerCase();
+      return (unit.barcode || "").toLowerCase().includes(q);
+    });
 
   async function handleExportToExcel(format: "xlsx" | "csv" = "xlsx") {
     const unitsToExport = filteredUnits.length > 0 ? filteredUnits : units;
@@ -330,7 +335,7 @@ export default function LogisticsPage() {
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-md)" }}>
             <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
-              Заказы в Picking ({filteredUnits.length}{selectedCellFilter ? ` из ${units.length}` : ""})
+              Заказы в Picking ({filteredUnits.length}{(selectedCellFilter || searchOrder.trim()) ? ` из ${units.length}` : ""})
             </h2>
             {units.length > 0 && (
               <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
@@ -386,6 +391,38 @@ export default function LogisticsPage() {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Search by order (barcode) */}
+          <div style={{ marginBottom: "var(--spacing-md)" }}>
+            <label
+              htmlFor="searchOrder"
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                marginBottom: "var(--spacing-xs)",
+                color: "var(--color-text)",
+              }}
+            >
+              Поиск по заказу
+            </label>
+            <input
+              id="searchOrder"
+              type="text"
+              placeholder="Номер заказа (штрихкод)..."
+              value={searchOrder}
+              onChange={(e) => setSearchOrder(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "var(--spacing-sm) var(--spacing-md)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-md)",
+                fontSize: 14,
+                background: "#fff",
+                boxSizing: "border-box",
+              }}
+            />
           </div>
 
           {/* Filter by picking cell */}
@@ -511,7 +548,11 @@ export default function LogisticsPage() {
                 color: "#666",
               }}
             >
-              {selectedCellFilter ? "Нет заказов в выбранной ячейке" : "Нет заказов в picking"}
+              {searchOrder.trim()
+                ? `По запросу «${searchOrder.trim()}» ничего не найдено`
+                : selectedCellFilter
+                  ? "Нет заказов в выбранной ячейке"
+                  : "Нет заказов в picking"}
             </div>
           ) : (
             <>

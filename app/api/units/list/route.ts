@@ -166,10 +166,63 @@ export async function GET(req: Request) {
       return raw ?? (unit.warehouse_cells ? { code: unit.warehouse_cells.code, cell_type: unit.warehouse_cells.cell_type } : null);
     }
 
-    // Calculate age for each unit
+    // stay_start: last time unit "entered" warehouse (reset after return). If never returned = created_at.
+    const allUnitIds = (units || []).map((u: any) => u.id);
+    const lastReturnedAtByUnitId = new Map<string, string>();
+    if (allUnitIds.length > 0) {
+      const batchSize = 100;
+      for (let i = 0; i < allUnitIds.length; i += batchSize) {
+        const batch = allUnitIds.slice(i, i + batchSize);
+        const { data: returnedRows } = await supabaseAdmin
+          .from("outbound_shipments")
+          .select("unit_id, returned_at")
+          .eq("warehouse_id", profile.warehouse_id)
+          .eq("status", "returned")
+          .in("unit_id", batch)
+          .not("returned_at", "is", null)
+          .order("returned_at", { ascending: false });
+        if (returnedRows?.length) {
+          returnedRows.forEach((r: { unit_id: string; returned_at: string }) => {
+            if (r.unit_id && r.returned_at && !lastReturnedAtByUnitId.has(r.unit_id)) {
+              lastReturnedAtByUnitId.set(r.unit_id, r.returned_at);
+            }
+          });
+        }
+      }
+    }
+
+    // For shipped/out units: get latest out_at so age stops at leave
+    const shippedOutUnits = (units || []).filter((u: any) => u.status === "shipped" || u.status === "out");
+    const shippedOutIds = shippedOutUnits.map((u: any) => u.id);
+    const outAtByUnitId = new Map<string, string>();
+    if (shippedOutIds.length > 0) {
+      const batchSize = 100;
+      for (let i = 0; i < shippedOutIds.length; i += batchSize) {
+        const batch = shippedOutIds.slice(i, i + batchSize);
+        const { data: outShipments } = await supabaseAdmin
+          .from("outbound_shipments")
+          .select("unit_id, out_at")
+          .eq("warehouse_id", profile.warehouse_id)
+          .in("unit_id", batch)
+          .order("out_at", { ascending: false });
+        if (outShipments?.length) {
+          outShipments.forEach((s: { unit_id: string; out_at: string }) => {
+            if (s.unit_id && s.out_at && !outAtByUnitId.has(s.unit_id)) {
+              outAtByUnitId.set(s.unit_id, s.out_at);
+            }
+          });
+        }
+      }
+    }
+
+    // Age = time on warehouse in current stay (from stay_start to end). stay_start resets after return.
     const unitsWithAge = (units || []).map((unit: any) => {
-      const createdAt = new Date(unit.created_at);
-      const ageHours = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
+      const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
+      const stayStartTime = new Date(stayStart).getTime();
+      const isLeftWarehouse = unit.status === "shipped" || unit.status === "out";
+      const outAt = isLeftWarehouse ? outAtByUnitId.get(unit.id) : null;
+      const endTime = outAt ? new Date(outAt).getTime() : now.getTime();
+      const ageHours = Math.floor((endTime - stayStartTime) / (1000 * 60 * 60));
       const cell = getDisplayCell(unit);
       return {
         id: unit.id,

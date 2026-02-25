@@ -899,6 +899,19 @@ export default function UnitsListPage() {
                   >
                     {formatAge(unit.age_hours)}
                   </span>
+                  {(unit.status === "shipped" || unit.status === "out") && (
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontSize: 11,
+                        color: "#64748b",
+                        fontWeight: 500,
+                      }}
+                      title="Время на складе зафиксировано на момент выхода"
+                    >
+                      вышел
+                    </span>
+                  )}
                 </td>
                 <td style={styles.td}>
                   <div style={styles.date}>

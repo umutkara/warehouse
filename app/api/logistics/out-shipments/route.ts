@@ -33,38 +33,56 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get("status") || "out"; // default: active shipments
 
-  // Get shipments (use admin to bypass RLS)
-  const { data: shipments, error: shipmentsError } = await supabaseAdmin
-    .from("outbound_shipments")
-    .select(`
-      id,
-      unit_id,
-      courier_name,
-      out_by,
-      out_at,
-      returned_by,
-      returned_at,
-      return_reason,
-      status,
-      created_at
-    `)
-    .eq("warehouse_id", profile.warehouse_id)
-    .eq("status", status)
-    .order("out_at", { ascending: false });
+  // PostgREST default limit is 1000 — paginate to get all rows
+  const pageSize = 1000;
+  let shipments: any[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  if (shipmentsError) {
-    return NextResponse.json({ error: shipmentsError.message }, { status: 400 });
+  while (hasMore) {
+    const { data: page, error: shipmentsError } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select(`
+        id,
+        unit_id,
+        courier_name,
+        out_by,
+        out_at,
+        returned_by,
+        returned_at,
+        return_reason,
+        status,
+        created_at
+      `)
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("status", status)
+      .order("out_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    if (shipmentsError) {
+      return NextResponse.json({ error: shipmentsError.message }, { status: 400 });
+    }
+    if (!page?.length) break;
+    shipments = shipments.concat(page);
+    hasMore = page.length === pageSize;
+    offset += pageSize;
   }
 
 
-  // Get unit info
-  const unitIds = shipments?.map(s => s.unit_id) || [];
-  const { data: units } = await supabaseAdmin
-    .from("units")
-    .select("id, barcode")
-    .in("id", unitIds);
+  // Get unit info (chunk to avoid .in() limit when shipments > 1000)
+  const unitIds = shipments?.map(s => s.unit_id).filter(Boolean) || [];
+  const unitsMap = new Map<string, { id: string; barcode: string }>();
+  const unitChunkSize = 200;
+  for (let i = 0; i < unitIds.length; i += unitChunkSize) {
+    const chunk = unitIds.slice(i, i + unitChunkSize);
+    const { data: unitsChunk } = await supabaseAdmin
+      .from("units")
+      .select("id, barcode")
+      .in("id", chunk);
+    unitsChunk?.forEach((u: any) => { if (u?.id) unitsMap.set(u.id, u); });
+  }
 
-  const missingUnitIds = unitIds.filter((id) => !units?.some((u) => u.id === id));
+  const missingUnitIds = unitIds.filter((id) => !unitsMap.has(id));
 
   let auditBarcodeMap = new Map<string, string>();
   if (missingUnitIds.length > 0) {
@@ -90,8 +108,6 @@ export async function GET(req: Request) {
       }
     }
   }
-
-  const unitsMap = new Map(units?.map(u => [u.id, u]) || []);
 
   // Get user names (out_by, returned_by)
   const userIds = [
