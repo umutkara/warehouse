@@ -8,7 +8,7 @@ export type TryCreatePostponedTaskResult =
 
 /**
  * Авто-задача «Перенос 1/2»: вызывается только при смене OPS на «Перенос 1» или «Перенос 2» (ops-status).
- * Если unit в ячейке shipping/storage и есть прошлая задача с target_picking_cell_id —
+ * Если unit в ячейке shipping/storage/rejected и есть прошлая задача с target_picking_cell_id —
  * создаёт новую задачу ТСД с тем же сценарием и picking-ячейкой.
  * Не бросает исключения — при любой ошибке возвращает { created: false }.
  */
@@ -48,8 +48,12 @@ export async function tryCreatePostponedTask(
     if (cellErr || !cellRow) {
       return { created: false, reason: "cell not found" };
     }
-    if (cellRow.cell_type !== "storage" && cellRow.cell_type !== "shipping") {
-      return { created: false, reason: "cell not storage/shipping" };
+    if (
+      cellRow.cell_type !== "storage" &&
+      cellRow.cell_type !== "shipping" &&
+      cellRow.cell_type !== "rejected"
+    ) {
+      return { created: false, reason: "cell not storage/shipping/rejected" };
     }
 
     const { data: ptuRows, error: ptuErr } = await supabaseAdmin
