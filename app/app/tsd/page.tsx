@@ -1212,9 +1212,9 @@ export default function TsdPage() {
         if (!fromCell) {
           // Первый скан - FROM
           // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping, rejected, ff
-          const allowedFromTypes = ['bin', 'storage', 'shipping', 'rejected', 'ff'];
+          const allowedFromTypes = ['bin', 'storage', 'shipping', 'picking', 'rejected', 'ff'];
           if (!allowedFromTypes.includes(cellInfo.cell_type)) {
-            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, REJECTED, FF`);
+            setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, PICKING, REJECTED, FF`);
             setScanValue("");
             return;
           }
