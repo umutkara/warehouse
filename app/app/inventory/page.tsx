@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 
 // ⚡ Force dynamic for real-time inventory status
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,16 @@ type Profile = {
   role: string;
 };
 
+const INVENTORY_CELL_TYPES = [
+  { value: "bin", label: "BIN" },
+  { value: "storage", label: "Storage" },
+  { value: "shipping", label: "Shipping" },
+  { value: "picking", label: "Picking" },
+  { value: "rejected", label: "Rejected" },
+  { value: "ff", label: "FF" },
+  { value: "surplus", label: "Surplus" },
+];
+
 export default function InventoryPage() {
   const [status, setStatus] = useState<InventoryStatus | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -24,6 +34,8 @@ export default function InventoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [cellCodesInput, setCellCodesInput] = useState("");
+  const [selectedCellTypes, setSelectedCellTypes] = useState<string[]>([]);
 
   useEffect(() => {
     loadProfile();
@@ -71,9 +83,22 @@ export default function InventoryPage() {
     setError(null);
     setSuccess(null);
     try {
+      const parsedCellCodes = Array.from(
+        new Set(
+          cellCodesInput
+            .split(/[,\s]+/)
+            .map((v) => v.trim().toUpperCase())
+            .filter((v) => v.length > 0),
+        ),
+      );
+      const payload: Record<string, unknown> = {};
+      if (parsedCellCodes.length > 0) payload.cellCodes = parsedCellCodes;
+      if (selectedCellTypes.length > 0) payload.cellTypes = selectedCellTypes;
+
       const res = await fetch("/api/inventory/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -87,6 +112,12 @@ export default function InventoryPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleCellType(cellType: string) {
+    setSelectedCellTypes((prev) =>
+      prev.includes(cellType) ? prev.filter((t) => t !== cellType) : [...prev, cellType],
+    );
   }
 
   async function handleCancel() {
@@ -258,6 +289,69 @@ export default function InventoryPage() {
 
           {canManage && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {!status?.active && (
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    padding: 12,
+                    background: "#f9fafb",
+                    marginBottom: 4,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    Фильтр запуска (необязательно)
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                    Оставьте пустым, чтобы запустить инвентаризацию всех активных ячеек.
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, color: "#374151", marginBottom: 4 }}>
+                      Коды ячеек (через запятую или пробел): например A1, A2
+                    </div>
+                    <input
+                      value={cellCodesInput}
+                      onChange={(e) => setCellCodesInput(e.target.value)}
+                      placeholder="A1, A2"
+                      style={{
+                        width: "100%",
+                        border: "1px solid #d1d5db",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#374151", marginBottom: 6 }}>
+                      Типы ячеек:
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {INVENTORY_CELL_TYPES.map((item) => {
+                        const checked = selectedCellTypes.includes(item.value);
+                        return (
+                          <button
+                            key={item.value}
+                            type="button"
+                            onClick={() => toggleCellType(item.value)}
+                            style={{
+                              border: checked ? "1px solid #2563eb" : "1px solid #d1d5db",
+                              background: checked ? "#eff6ff" : "#fff",
+                              color: "#111827",
+                              borderRadius: 9999,
+                              padding: "4px 10px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 12 }}>
                 {!status?.active ? (
                   <button
