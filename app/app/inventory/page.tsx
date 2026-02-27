@@ -89,6 +89,30 @@ export default function InventoryPage() {
     }
   }
 
+  async function handleCancel() {
+    if (!window.confirm("Все изменения за эту сессию будут отменены. Юниты вернутся в исходные ячейки. Продолжить?")) return;
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/inventory/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error || "Ошибка отмены инвентаризации");
+        return;
+      }
+      setSuccess("Инвентаризация отменена, все изменения откачены");
+      await loadStatus();
+    } catch (e: any) {
+      setError(e?.message || "Ошибка отмены инвентаризации");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleStop() {
     setBusy(true);
     setError(null);
@@ -254,23 +278,42 @@ export default function InventoryPage() {
                     {busy ? "Запуск..." : "Начать инвентаризацию"}
                   </button>
                 ) : (
-                  <button
-                    onClick={handleStop}
-                    disabled={busy}
-                    style={{
-                      background: "#c00",
-                      color: "#fff",
-                      border: "none",
-                      padding: "10px 20px",
-                      borderRadius: 6,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      cursor: busy ? "not-allowed" : "pointer",
-                      opacity: busy ? 0.6 : 1,
-                    }}
-                  >
-                    {busy ? "Завершение..." : "Завершить инвентаризацию"}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleStop}
+                      disabled={busy}
+                      style={{
+                        background: "#c00",
+                        color: "#fff",
+                        border: "none",
+                        padding: "10px 20px",
+                        borderRadius: 6,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: busy ? "not-allowed" : "pointer",
+                        opacity: busy ? 0.6 : 1,
+                      }}
+                    >
+                      {busy ? "Завершение..." : "Завершить инвентаризацию"}
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={busy}
+                      style={{
+                        background: "#ea580c",
+                        color: "#fff",
+                        border: "none",
+                        padding: "10px 20px",
+                        borderRadius: 6,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: busy ? "not-allowed" : "pointer",
+                        opacity: busy ? 0.6 : 1,
+                      }}
+                    >
+                      {busy ? "Откат..." : "Отменить инвентаризацию"}
+                    </button>
+                  </>
                 )}
               </div>
 
