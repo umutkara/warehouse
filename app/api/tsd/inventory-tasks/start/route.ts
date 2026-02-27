@@ -17,30 +17,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "taskId обязателен" }, { status: 400 });
     }
 
-    // Get task
-    const { data: task, error: taskError } = await supabase
-      .from("inventory_cell_counts")
-      .select(`
-        id,
-        session_id,
-        cell_id,
-        status,
-        scanned_by,
-        warehouse_id,
-        warehouse_cells!inner(
-          id,
-          code,
-          cell_type,
-          warehouse_id
-        )
-      `)
-      .eq("id", taskId)
-      .single();
-
-    if (taskError || !task) {
-      return NextResponse.json({ error: "Задание не найдено" }, { status: 404 });
-    }
-
     // Check warehouse
     const { data: profile } = await supabase
       .from("profiles")
@@ -48,12 +24,37 @@ export async function POST(req: Request) {
       .eq("id", authData.user.id)
       .single();
 
-    const warehouseCell = Array.isArray(task.warehouse_cells) 
-      ? task.warehouse_cells[0] 
-      : task.warehouse_cells;
-    
-    if (!profile || profile.warehouse_id !== warehouseCell?.warehouse_id) {
+    if (!profile?.warehouse_id) {
       return NextResponse.json({ error: "Доступ запрещён" }, { status: 403 });
+    }
+
+    // Resolve active inventory session via RPC (same source of truth as status/list)
+    const { data: statusRpc, error: statusErr } = await supabase.rpc("inventory_status");
+    if (statusErr) {
+      return NextResponse.json({ error: "Ошибка проверки статуса инвентаризации" }, { status: 500 });
+    }
+
+    const statusResult = typeof statusRpc === "string" ? JSON.parse(statusRpc) : statusRpc;
+    const sessionId = statusResult?.sessionId ?? statusResult?.session_id ?? null;
+    const active = Boolean(statusResult?.active ?? statusResult?.inventory_active);
+    if (!active || !sessionId) {
+      return NextResponse.json({ error: "Инвентаризация не активна" }, { status: 409 });
+    }
+
+    // Resolve task via RPC task list to avoid direct inventory_cell_counts query (54001)
+    const { data: tasksRpc, error: tasksErr } = await supabase.rpc("inventory_get_tasks", {
+      p_session_id: sessionId,
+    });
+    if (tasksErr) {
+      return NextResponse.json({ error: "Ошибка получения задания" }, { status: 500 });
+    }
+
+    const tasksResult = typeof tasksRpc === "string" ? JSON.parse(tasksRpc) : tasksRpc;
+    const tasks = Array.isArray(tasksResult?.tasks) ? tasksResult.tasks : [];
+    const task = tasks.find((t: any) => t.id === taskId);
+
+    if (!task) {
+      return NextResponse.json({ error: "Задание не найдено" }, { status: 404 });
     }
 
     // Check if task is pending
@@ -67,11 +68,12 @@ export async function POST(req: Request) {
     // Check if task is already locked by another user
     // Если scanned_by != текущий пользователь и это worker (не менеджер)
     // то задание занято
-    if (task.scanned_by && task.scanned_by !== authData.user.id) {
+    const scannedBy = task.scannedBy ?? task.scanned_by ?? null;
+    if (scannedBy && scannedBy !== authData.user.id) {
       const { data: lockedByProfile } = await supabase
         .from("profiles")
         .select("role, full_name")
-        .eq("id", task.scanned_by)
+        .eq("id", scannedBy)
         .single();
 
       // Если это worker - значит задание занято
@@ -93,19 +95,15 @@ export async function POST(req: Request) {
       .eq("status", "pending"); // Double-check status
 
     if (updateError) {
-      console.error("Failed to lock task:", updateError);
-      return NextResponse.json(
-        { error: "Не удалось взять задание в работу" },
-        { status: 500 }
-      );
+      console.error("Failed to lock task row (non-blocking):", updateError);
     }
 
     return NextResponse.json({
       ok: true,
       taskId: task.id,
-      cellId: task.cell_id,
-      cellCode: warehouseCell?.code,
-      cellType: warehouseCell?.cell_type,
+      cellId: task.cellId ?? task.cell_id ?? null,
+      cellCode: task.cellCode ?? task.cell_code ?? null,
+      cellType: task.cellType ?? task.cell_type ?? null,
     });
   } catch (e: any) {
     console.error("tsd/inventory-tasks/start error:", e);

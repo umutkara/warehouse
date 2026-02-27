@@ -21,80 +21,73 @@ export async function GET() {
       return NextResponse.json({ error: "Профиль не найден" }, { status: 404 });
     }
 
-    // Check if inventory is active
-    const { data: warehouse } = await supabase
-      .from("warehouses")
-      .select("inventory_active, inventory_session_id")
-      .eq("id", profile.warehouse_id)
-      .single();
+    // Use the same source of truth as /api/inventory/status
+    const { data: statusRpc, error: statusErr } = await supabase.rpc("inventory_status");
+    if (statusErr) {
+      return NextResponse.json(
+        { error: "Ошибка статуса инвентаризации" },
+        { status: 500 }
+      );
+    }
 
-    if (!warehouse?.inventory_active || !warehouse.inventory_session_id) {
+    const statusResult =
+      typeof statusRpc === "string" ? JSON.parse(statusRpc) : statusRpc;
+    const inventoryActive = Boolean(
+      statusResult?.active ?? (statusResult as any)?.inventory_active
+    );
+    const inventorySessionId =
+      statusResult?.sessionId ?? (statusResult as any)?.session_id ?? null;
+
+    if (!inventoryActive || !inventorySessionId) {
       return NextResponse.json(
         { error: "Инвентаризация не активна" },
         { status: 409 }
       );
     }
 
-    // Get pending tasks (ячейки которые ещё не взяты в работу другими)
-    // Задание считается доступным если:
-    // - status = 'pending'
-    // - scanned_by = менеджер (кто создал) ИЛИ текущий пользователь
-    const { data: tasks, error: tasksError } = await supabase
-      .from("inventory_cell_counts")
-      .select(`
-        id,
-        cell_id,
-        status,
-        scanned_by,
-        warehouse_cells!inner(
-          id,
-          code,
-          cell_type
-        )
-      `)
-      .eq("session_id", warehouse.inventory_session_id)
-      .eq("status", "pending")
-      .order("warehouse_cells(code)", { ascending: true });
+    // Use inventory_get_tasks RPC (same path as /api/inventory/tasks) to avoid
+    // direct inventory_cell_counts reads that can trigger recursive policy issues.
+    const { data: tasksRpc, error: tasksRpcError } = await supabase.rpc(
+      "inventory_get_tasks",
+      { p_session_id: inventorySessionId }
+    );
 
-    if (tasksError) {
-      console.error("Tasks fetch error:", tasksError);
+    if (tasksRpcError) {
       return NextResponse.json(
         { error: "Ошибка загрузки заданий" },
         { status: 500 }
       );
     }
 
-    // Фильтруем: только задания которые никто не взял, или взял текущий пользователь
-    const availableTasks = (tasks || []).filter((task: any) => {
-      // Если scanned_by = текущий пользователь - показываем (он уже работает над ней)
-      if (task.scanned_by === authData.user.id) {
-        return true;
-      }
-      // Если scanned_by = кто-то другой - НЕ показываем (кто-то уже работает)
-      // Проверим через profiles - если это worker, значит занято
-      return false; // Упрощаем: если не текущий пользователь - не показываем
-    });
+    const tasksResult = typeof tasksRpc === "string" ? JSON.parse(tasksRpc) : tasksRpc;
+    if (!tasksResult?.ok) {
+      return NextResponse.json(
+        { error: tasksResult?.error || "Ошибка загрузки заданий" },
+        { status: 500 }
+      );
+    }
 
-    // Для простоты: показываем все pending задания
-    // В реальности нужно проверить роль scanned_by
-    const formattedTasks = (tasks || []).map((task: any) => {
-      const warehouseCell = Array.isArray(task.warehouse_cells) 
-        ? task.warehouse_cells[0] 
-        : task.warehouse_cells;
-      
+    const tasks = Array.isArray(tasksResult?.tasks) ? tasksResult.tasks : [];
+
+    const formattedTasks = tasks.map((task: any) => {
+      const cellId = task.cellId ?? task.cell_id ?? null;
+      const cellCode = task.cellCode ?? task.cell_code ?? null;
+      const cellType = task.cellType ?? task.cell_type ?? null;
+      const scannedBy = task.scannedBy ?? task.scanned_by ?? null;
+
       return {
         id: task.id,
-        cellId: task.cell_id,
-        cellCode: warehouseCell?.code,
-        cellType: warehouseCell?.cell_type,
+        cellId,
+        cellCode,
+        cellType,
         status: task.status,
-        isLockedByMe: task.scanned_by === authData.user.id,
+        isLockedByMe: scannedBy === authData.user.id,
       };
     });
 
     return NextResponse.json({
       ok: true,
-      sessionId: warehouse.inventory_session_id,
+      sessionId: inventorySessionId,
       tasks: formattedTasks,
     });
   } catch (e: any) {
