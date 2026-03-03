@@ -261,6 +261,7 @@ export async function GET(req: Request) {
       !noUnitsTaskIds.has(task.id) &&
       !allUnitsRejectedOrFfIds.has(task.id)
   );
+
   // Deduplicate by unit: keep only one task per unit (the newest by created_at) so duplicates from repeated imports don't inflate the list
   const byCreatedDesc = [...tasksAfterFilter].sort(
     (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
