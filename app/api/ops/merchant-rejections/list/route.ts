@@ -6,8 +6,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/ops/merchant-rejections/list
- * Returns units with OPS status "partner_rejected_return" (в любой ячейке).
- * Query: ticket_status=all|open|resolved, age=all|24h|48h|7d, sort=age_desc|age_asc|created_desc|created_asc
+ * Returns merchant rejection cases:
+ * - active: units currently in rejected cells
+ * - archived: units with merchant_rejection_ticket outside rejected
+ * - all: active + archived
+ * Query: scope=all|active|archived, ticket_status=all|open|resolved, age=all|24h|48h|7d, sort=age_desc|age_asc|created_desc|created_asc
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -34,9 +37,14 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url);
+    const scope = url.searchParams.get("scope") || "all";
     const ticketStatus = url.searchParams.get("ticket_status") || "all";
     const ageFilter = url.searchParams.get("age") || "all";
     const sortBy = url.searchParams.get("sort") || "created_desc";
+
+    if (!["all", "active", "archived"].includes(scope)) {
+      return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
+    }
 
     // Paginate to get all units (PostgREST default limit 1000)
     const pageSize = 1000;
@@ -64,9 +72,7 @@ export async function GET(req: Request) {
       offset += pageSize;
     }
 
-    const baseUnits = allUnits.filter((unit: any) => unit.meta?.ops_status === "partner_rejected_return");
-
-    const cellIds = [...new Set(baseUnits.map((u: any) => u.cell_id).filter(Boolean))];
+    const cellIds = [...new Set(allUnits.map((u: any) => u.cell_id).filter(Boolean))];
     const cellsMap = new Map<string, { code: string; cell_type: string }>();
     if (cellIds.length > 0) {
       const batch = 200;
@@ -80,6 +86,16 @@ export async function GET(req: Request) {
         cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
       }
     }
+
+    const baseUnits = allUnits.filter((unit: any) => {
+      const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+      const isRejectedNow = cell?.cell_type === "rejected";
+      const hasTicket = Boolean(unit.meta?.merchant_rejection_ticket);
+
+      if (scope === "active") return isRejectedNow;
+      if (scope === "archived") return !isRejectedNow && hasTicket;
+      return isRejectedNow || hasTicket;
+    });
 
     // stay_start for age_hours (reset after return)
     const unitIds = baseUnits.map((u: any) => u.id);
@@ -113,6 +129,7 @@ export async function GET(req: Request) {
       const lastRejection = rejections[rejections.length - 1];
       const ticket = meta.merchant_rejection_ticket || null;
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+      const caseState = cell?.cell_type === "rejected" ? "active" : "archived";
       const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
       const ageHours = Math.floor((now.getTime() - new Date(stayStart).getTime()) / (1000 * 60 * 60));
 
@@ -125,6 +142,7 @@ export async function GET(req: Request) {
         price: unit.price,
         cell_code: cell?.code ?? null,
         cell_type: cell?.cell_type ?? null,
+        case_state: caseState,
         created_at: unit.created_at,
         age_hours: ageHours,
         rejection_count: rejectionCount,

@@ -14,6 +14,7 @@ type Unit = {
   cell_type?: string;
   created_at: string;
   age_hours?: number;
+  case_state?: "active" | "archived";
   rejection_count: number;
   last_rejection?: {
     rejected_at: string;
@@ -34,6 +35,12 @@ const TICKET_OPTIONS = [
   { value: "all", label: "Все" },
   { value: "open", label: "Открытые" },
   { value: "resolved", label: "Решённые" },
+] as const;
+
+const SCOPE_OPTIONS = [
+  { value: "all", label: "Все кейсы" },
+  { value: "active", label: "Активные (в rejected)" },
+  { value: "archived", label: "Архив (с тикетом)" },
 ] as const;
 
 const AGE_OPTIONS = [
@@ -57,6 +64,7 @@ export default function MerchantRejectionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [ticketStatus, setTicketStatus] = useState<"all" | "open" | "resolved">("all");
+  const [scope, setScope] = useState<"all" | "active" | "archived">("all");
   const [ageFilter, setAgeFilter] = useState<"all" | "24h" | "48h" | "7d">("all");
   const [sortBy, setSortBy] = useState<"created_desc" | "created_asc" | "age_desc" | "age_asc">("created_desc");
   const [searchBarcode, setSearchBarcode] = useState("");
@@ -70,7 +78,7 @@ export default function MerchantRejectionsPage() {
 
   useEffect(() => {
     loadUnits();
-  }, [ticketStatus, ageFilter, sortBy]);
+  }, [scope, ticketStatus, ageFilter, sortBy]);
 
   async function loadUnits() {
     setLoading(true);
@@ -78,6 +86,7 @@ export default function MerchantRejectionsPage() {
 
     try {
       const params = new URLSearchParams();
+      if (scope !== "all") params.set("scope", scope);
       if (ticketStatus !== "all") params.set("ticket_status", ticketStatus);
       if (ageFilter !== "all") params.set("age", ageFilter);
       if (sortBy !== "created_desc") params.set("sort", sortBy);
@@ -162,6 +171,10 @@ export default function MerchantRejectionsPage() {
     setNotes("");
   }
 
+  function setAgeSort(direction: "desc" | "asc") {
+    setSortBy(direction === "desc" ? "age_desc" : "age_asc");
+  }
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -187,13 +200,23 @@ export default function MerchantRejectionsPage() {
       <div style={styles.header}>
         <h1 style={styles.title}>🚫 Мерчант не принял</h1>
         <div style={styles.subtitle}>
-          Заказы со статусом «партнёр не принял» в любой ячейке. Всего: <strong>{units.length}</strong>
+          Активные и архивные кейсы мерчант-отказа. Всего: <strong>{units.length}</strong>
           {searchBarcode.trim() && ` (поиск: ${filteredBySearch.length})`}
         </div>
       </div>
 
       <div style={styles.filters}>
         <div style={styles.filterRow}>
+          <label style={styles.filterLabel}>Режим:</label>
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as typeof scope)}
+            style={styles.select}
+          >
+            {SCOPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
           <label style={styles.filterLabel}>Тикет:</label>
           <select
             value={ticketStatus}
@@ -252,7 +275,34 @@ export default function MerchantRejectionsPage() {
                 <th style={styles.th}>Заказ</th>
                 <th style={styles.th}>Товар / Партнер</th>
                 <th style={styles.th}>Ячейка</th>
-                <th style={styles.th}>На складе</th>
+                <th style={styles.th}>Кейс</th>
+                <th style={styles.th}>
+                  <div style={styles.sortHeader}>
+                    <span>На складе</span>
+                    <button
+                      type="button"
+                      onClick={() => setAgeSort("desc")}
+                      style={{
+                        ...styles.sortArrow,
+                        color: sortBy === "age_desc" ? "#111827" : "#9ca3af",
+                      }}
+                      title="Сначала дольше на складе"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAgeSort("asc")}
+                      style={{
+                        ...styles.sortArrow,
+                        color: sortBy === "age_asc" ? "#111827" : "#9ca3af",
+                      }}
+                      title="Сначала меньше на складе"
+                    >
+                      ↑
+                    </button>
+                  </div>
+                </th>
                 <th style={styles.th}>Отклонений</th>
                 <th style={styles.th}>Последний отказ</th>
                 <th style={styles.th}>Тикет</th>
@@ -281,6 +331,13 @@ export default function MerchantRejectionsPage() {
                   </td>
                   <td style={styles.td}>
                     <div style={styles.cellCode}>{unit.cell_code || "—"}</div>
+                  </td>
+                  <td style={styles.td}>
+                    {unit.case_state === "active" ? (
+                      <span style={styles.caseActive}>Активный</span>
+                    ) : (
+                      <span style={styles.caseArchived}>Архив</span>
+                    )}
                   </td>
                   <td style={styles.td}>
                     <div style={styles.ageHours}>
@@ -507,6 +564,20 @@ const styles = {
     borderBottomStyle: "solid",
     borderBottomColor: "#e5e7eb",
   } as React.CSSProperties,
+  sortHeader: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  } as React.CSSProperties,
+  sortArrow: {
+    borderWidth: 0,
+    background: "transparent",
+    padding: 0,
+    cursor: "pointer",
+    fontSize: 12,
+    lineHeight: 1,
+    fontWeight: 700,
+  } as React.CSSProperties,
   tr: {
     borderBottomWidth: 1,
     borderBottomStyle: "solid",
@@ -534,6 +605,24 @@ const styles = {
     fontSize: 13,
     fontFamily: "monospace",
     color: "#059669",
+  } as React.CSSProperties,
+  caseActive: {
+    display: "inline-block",
+    fontSize: 12,
+    color: "#b45309",
+    background: "#fef3c7",
+    borderRadius: 9999,
+    padding: "3px 10px",
+    fontWeight: 600,
+  } as React.CSSProperties,
+  caseArchived: {
+    display: "inline-block",
+    fontSize: 12,
+    color: "#374151",
+    background: "#e5e7eb",
+    borderRadius: 9999,
+    padding: "3px 10px",
+    fontWeight: 600,
   } as React.CSSProperties,
   rejectionCount: {
     fontSize: 18,
