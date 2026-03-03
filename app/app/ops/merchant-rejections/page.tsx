@@ -60,6 +60,9 @@ const SORT_OPTIONS = [
 export default function MerchantRejectionsPage() {
   const router = useRouter();
   const [units, setUnits] = useState<Unit[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +81,10 @@ export default function MerchantRejectionsPage() {
 
   useEffect(() => {
     loadUnits();
+  }, [scope, ticketStatus, ageFilter, sortBy, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [scope, ticketStatus, ageFilter, sortBy]);
 
   async function loadUnits() {
@@ -90,6 +97,8 @@ export default function MerchantRejectionsPage() {
       if (ticketStatus !== "all") params.set("ticket_status", ticketStatus);
       if (ageFilter !== "all") params.set("age", ageFilter);
       if (sortBy !== "created_desc") params.set("sort", sortBy);
+      params.set("page", String(page));
+      params.set("page_size", "30");
       const q = params.toString();
       const res = await fetch("/api/ops/merchant-rejections/list" + (q ? "?" + q : ""), {
         cache: "no-store",
@@ -107,6 +116,8 @@ export default function MerchantRejectionsPage() {
 
       const json = await res.json();
       setUnits(json.units || []);
+      setTotal(Number(json.total || 0));
+      setTotalPages(Number(json.total_pages || 1));
     } catch (e: any) {
       setError("Ошибка загрузки");
     } finally {
@@ -200,8 +211,8 @@ export default function MerchantRejectionsPage() {
       <div style={styles.header}>
         <h1 style={styles.title}>🚫 Мерчант не принял</h1>
         <div style={styles.subtitle}>
-          Активные и архивные кейсы мерчант-отказа. Всего: <strong>{units.length}</strong>
-          {searchBarcode.trim() && ` (поиск: ${filteredBySearch.length})`}
+          Активные и архивные кейсы мерчант-отказа. Всего: <strong>{total}</strong>
+          {searchBarcode.trim() && ` (на странице: ${filteredBySearch.length})`}
         </div>
       </div>
 
@@ -406,6 +417,27 @@ export default function MerchantRejectionsPage() {
               ))}
             </tbody>
           </table>
+          <div style={styles.pagination}>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              style={{ ...styles.pageBtn, opacity: page <= 1 ? 0.5 : 1 }}
+            >
+              ← Назад
+            </button>
+            <div style={styles.pageInfo}>
+              Страница {page} из {totalPages}
+            </div>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              style={{ ...styles.pageBtn, opacity: page >= totalPages ? 0.5 : 1 }}
+            >
+              Вперёд →
+            </button>
+          </div>
         </div>
       )}
 
@@ -551,6 +583,28 @@ const styles = {
   table: {
     width: "100%",
     borderCollapse: "collapse",
+  } as React.CSSProperties,
+  pagination: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 16px",
+    borderTop: "1px solid #e5e7eb",
+    background: "#fafafa",
+  } as React.CSSProperties,
+  pageBtn: {
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#111827",
+    borderRadius: 6,
+    padding: "6px 12px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+  } as React.CSSProperties,
+  pageInfo: {
+    fontSize: 13,
+    color: "#4b5563",
   } as React.CSSProperties,
   th: {
     padding: 16,

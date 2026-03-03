@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * - active: units currently in rejected cells
  * - archived: units with merchant_rejection_ticket outside rejected
  * - all: active + archived
- * Query: scope=all|active|archived, ticket_status=all|open|resolved, age=all|24h|48h|7d, sort=age_desc|age_asc|created_desc|created_asc
+ * Query: scope=all|active|archived, ticket_status=all|open|resolved, age=all|24h|48h|7d, sort=age_desc|age_asc|created_desc|created_asc, page, page_size
  */
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -41,13 +41,15 @@ export async function GET(req: Request) {
     const ticketStatus = url.searchParams.get("ticket_status") || "all";
     const ageFilter = url.searchParams.get("age") || "all";
     const sortBy = url.searchParams.get("sort") || "created_desc";
+    const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+    const queryPageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size") || 30)));
 
     if (!["all", "active", "archived"].includes(scope)) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
 
     // Paginate to get all units (PostgREST default limit 1000)
-    const pageSize = 1000;
+    const fetchPageSize = 1000;
     let allUnits: any[] = [];
     let offset = 0;
     let hasMore = true;
@@ -57,7 +59,7 @@ export async function GET(req: Request) {
         .select("id, barcode, status, product_name, partner_name, price, created_at, meta, cell_id")
         .eq("warehouse_id", profile.warehouse_id)
         .order("created_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
+        .range(offset, offset + fetchPageSize - 1);
 
       if (unitsError) {
         console.error("Merchant rejections list error:", unitsError);
@@ -68,8 +70,8 @@ export async function GET(req: Request) {
       }
       if (!page?.length) break;
       allUnits = allUnits.concat(page);
-      hasMore = page.length === pageSize;
-      offset += pageSize;
+      hasMore = page.length === fetchPageSize;
+      offset += fetchPageSize;
     }
 
     const cellIds = [...new Set(allUnits.map((u: any) => u.cell_id).filter(Boolean))];
@@ -176,10 +178,20 @@ export async function GET(req: Request) {
       processedUnits.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
 
+    const total = processedUnits.length;
+    const totalPages = Math.max(1, Math.ceil(total / queryPageSize));
+    const safePage = Math.min(page, totalPages);
+    const from = (safePage - 1) * queryPageSize;
+    const to = from + queryPageSize;
+    const unitsPage = processedUnits.slice(from, to);
+
     return NextResponse.json({
       ok: true,
-      units: processedUnits,
-      total: processedUnits.length,
+      units: unitsPage,
+      total,
+      page: safePage,
+      page_size: queryPageSize,
+      total_pages: totalPages,
     });
   } catch (e: any) {
     console.error("Get merchant rejections error:", e);
