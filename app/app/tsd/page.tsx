@@ -205,9 +205,12 @@ export default function TsdPage() {
       if (mode === "inventory") {
         try {
           const res = await fetch("/api/inventory/status", { cache: "no-store" });
-          
+          let json: any = null;
+          try {
+            json = await res.json();
+          } catch {}
+
           if (res.ok) {
-            const json = await res.json();
             setInventoryActive(json.active || false);
             if (!json.active) {
               setInventoryError("Инвентаризация не активна. Обратитесь к менеджеру.");
@@ -832,7 +835,11 @@ export default function TsdPage() {
     setLoadingInventoryTasks(true);
     try {
       const res = await fetch("/api/tsd/inventory-tasks/list", { cache: "no-store" });
-      const json = await res.json();
+      let json: any = null;
+      try {
+        json = await res.json();
+      } catch {}
+
       if (res.ok) {
         setInventoryTasks(json.tasks || []);
       }

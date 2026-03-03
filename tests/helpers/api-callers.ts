@@ -25,3 +25,20 @@ export async function callPickingTaskCancel(taskId = "t1") {
     { params: Promise.resolve({ id: taskId }) },
   );
 }
+
+export async function callInventoryCancel() {
+  const { POST } = await import("../../app/api/inventory/cancel/route");
+  return POST(
+    new Request("http://localhost/api/inventory/cancel", { method: "POST" }),
+  );
+}
+
+export async function callInventoryStart(body?: Record<string, unknown>) {
+  const { POST } = await import("../../app/api/inventory/start/route");
+  return POST(
+    new Request("http://localhost/api/inventory/start", {
+      method: "POST",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
+  );
+}
