@@ -118,6 +118,9 @@ export default function MerchantRejectionsPage() {
       setUnits(json.units || []);
       setTotal(Number(json.total || 0));
       setTotalPages(Number(json.total_pages || 1));
+      if (typeof json.page === "number" && json.page > 0 && json.page !== page) {
+        setPage(json.page);
+      }
     } catch (e: any) {
       setError("Ошибка загрузки");
     } finally {
@@ -205,6 +208,21 @@ export default function MerchantRejectionsPage() {
   const filteredBySearch = searchBarcode.trim()
     ? units.filter((u) => u.barcode.toLowerCase().includes(searchBarcode.trim().toLowerCase()))
     : units;
+  const pageFrom = total === 0 ? 0 : (page - 1) * 30 + 1;
+  const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
+  const activeOnPage = units.filter((u) => u.case_state === "active").length;
+  const archivedOnPage = units.filter((u) => u.case_state === "archived").length;
+  const openTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status !== "resolved").length;
+  const resolvedTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status === "resolved").length;
+
+  function resetFilters() {
+    setScope("all");
+    setTicketStatus("all");
+    setAgeFilter("all");
+    setSortBy("created_desc");
+    setSearchBarcode("");
+    setPage(1);
+  }
 
   return (
     <div style={styles.container}>
@@ -213,6 +231,12 @@ export default function MerchantRejectionsPage() {
         <div style={styles.subtitle}>
           Активные и архивные кейсы мерчант-отказа. Всего: <strong>{total}</strong>
           {searchBarcode.trim() && ` (на странице: ${filteredBySearch.length})`}
+        </div>
+        <div style={styles.kpiRow}>
+          <span style={styles.kpiChip}>Активные: {activeOnPage}</span>
+          <span style={styles.kpiChip}>Архив: {archivedOnPage}</span>
+          <span style={styles.kpiChip}>Открытые тикеты: {openTicketsOnPage}</span>
+          <span style={styles.kpiChip}>Решённые тикеты: {resolvedTicketsOnPage}</span>
         </div>
       </div>
 
@@ -268,6 +292,13 @@ export default function MerchantRejectionsPage() {
             placeholder="Штрихкод или часть"
             style={styles.searchInput}
           />
+          <button
+            type="button"
+            onClick={resetFilters}
+            style={styles.resetBtn}
+          >
+            Сбросить фильтры
+          </button>
         </div>
       </div>
 
@@ -322,8 +353,14 @@ export default function MerchantRejectionsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredBySearch.map((unit) => (
-                <tr key={unit.id} style={styles.tr}>
+              {filteredBySearch.map((unit, index) => (
+                <tr
+                  key={unit.id}
+                  style={{
+                    ...styles.tr,
+                    background: index % 2 === 0 ? "#fff" : "#fcfcfd",
+                  }}
+                >
                   <td style={styles.td}>
                     <div
                       style={styles.barcode}
@@ -427,7 +464,7 @@ export default function MerchantRejectionsPage() {
               ← Назад
             </button>
             <div style={styles.pageInfo}>
-              Страница {page} из {totalPages}
+              Страница {page} из {totalPages} • Показано {pageFrom}-{pageTo} из {total}
             </div>
             <button
               type="button"
@@ -510,6 +547,20 @@ const styles = {
   header: {
     marginBottom: "var(--spacing-xl)",
   } as React.CSSProperties,
+  kpiRow: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    marginTop: 10,
+  } as React.CSSProperties,
+  kpiChip: {
+    fontSize: 12,
+    color: "#374151",
+    background: "#f3f4f6",
+    borderRadius: 9999,
+    padding: "4px 10px",
+    fontWeight: 600,
+  } as React.CSSProperties,
   title: {
     fontSize: 28,
     fontWeight: 700,
@@ -555,6 +606,17 @@ const styles = {
     borderColor: "#d1d5db",
     borderRadius: 6,
     width: 220,
+  } as React.CSSProperties,
+  resetBtn: {
+    marginLeft: "auto",
+    padding: "8px 12px",
+    fontSize: 12,
+    color: "#374151",
+    background: "#fff",
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontWeight: 600,
   } as React.CSSProperties,
   ageHours: {
     fontSize: 13,

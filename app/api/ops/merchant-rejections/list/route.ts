@@ -48,19 +48,79 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
 
-    // Paginate to get all units (PostgREST default limit 1000)
-    const fetchPageSize = 1000;
-    let allUnits: any[] = [];
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const { data: page, error: unitsError } = await supabaseAdmin
-        .from("units")
-        .select("id, barcode, status, product_name, partner_name, price, created_at, meta, cell_id")
-        .eq("warehouse_id", profile.warehouse_id)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + fetchPageSize - 1);
+    // Resolve rejected cells once (used in scope filtering)
+    const { data: rejectedCells, error: rejectedCellsError } = await supabaseAdmin
+      .from("warehouse_cells_map")
+      .select("id")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("cell_type", "rejected");
 
+    if (rejectedCellsError) {
+      console.error("Merchant rejections rejected-cells error:", rejectedCellsError);
+      return NextResponse.json(
+        { error: "Failed to load merchant rejections", details: rejectedCellsError.message },
+        { status: 500 }
+      );
+    }
+
+    const rejectedCellIds = (rejectedCells || []).map((c: any) => c.id).filter(Boolean);
+    const rejectedIdsCsv = rejectedCellIds.join(",");
+
+    function applyScopeAndTicketFilters(query: any) {
+      let q = query.eq("warehouse_id", profile.warehouse_id);
+
+      if (scope === "active") {
+        if (rejectedCellIds.length === 0) {
+          // No rejected cells means no active cases.
+          q = q.eq("id", "__never__");
+        } else {
+          q = q.in("cell_id", rejectedCellIds);
+        }
+      } else if (scope === "archived") {
+        if (rejectedCellIds.length > 0) {
+          q = q.not("cell_id", "in", `(${rejectedIdsCsv})`);
+        }
+        q = q.not("meta->merchant_rejection_ticket", "is", null);
+      } else {
+        // all = active OR archived(has ticket)
+        if (rejectedCellIds.length > 0) {
+          q = q.or(`cell_id.in.(${rejectedIdsCsv}),meta->merchant_rejection_ticket.not.is.null`);
+        } else {
+          q = q.not("meta->merchant_rejection_ticket", "is", null);
+        }
+      }
+
+      if (ticketStatus === "open") {
+        q = q
+          .not("meta->merchant_rejection_ticket", "is", null)
+          .neq("meta->merchant_rejection_ticket->>status", "resolved");
+      } else if (ticketStatus === "resolved") {
+        q = q
+          .not("meta->merchant_rejection_ticket", "is", null)
+          .eq("meta->merchant_rejection_ticket->>status", "resolved");
+      }
+
+      return q;
+    }
+
+    const selectColumns = "id, barcode, status, product_name, partner_name, price, created_at, meta, cell_id";
+    const from = (page - 1) * queryPageSize;
+    const to = from + queryPageSize - 1;
+
+    let baseUnits: any[] = [];
+    let total = 0;
+
+    // Fast path for default usage: DB-level scope/ticket filters + pagination.
+    if (ageFilter === "all") {
+      const unitsQuery = applyScopeAndTicketFilters(
+        supabaseAdmin.from("units").select(selectColumns, { count: "exact" }),
+      )
+        .order(sortBy.startsWith("created_") ? "created_at" : "created_at", {
+          ascending: sortBy === "created_asc",
+        })
+        .range(from, to);
+
+      const { data: unitsPage, count, error: unitsError } = await unitsQuery;
       if (unitsError) {
         console.error("Merchant rejections list error:", unitsError);
         return NextResponse.json(
@@ -68,13 +128,35 @@ export async function GET(req: Request) {
           { status: 500 }
         );
       }
-      if (!page?.length) break;
-      allUnits = allUnits.concat(page);
-      hasMore = page.length === fetchPageSize;
-      offset += fetchPageSize;
+      baseUnits = unitsPage || [];
+      total = count || 0;
+    } else {
+      // Fallback keeps exact age-filter behavior by evaluating age on all scope/ticket-matching units.
+      const fetchPageSize = 1000;
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const unitsQuery = applyScopeAndTicketFilters(
+          supabaseAdmin.from("units").select(selectColumns),
+        )
+          .order("created_at", { ascending: false })
+          .range(offset, offset + fetchPageSize - 1);
+        const { data: chunk, error: unitsError } = await unitsQuery;
+        if (unitsError) {
+          console.error("Merchant rejections list fallback error:", unitsError);
+          return NextResponse.json(
+            { error: "Failed to load merchant rejections", details: unitsError.message },
+            { status: 500 }
+          );
+        }
+        if (!chunk?.length) break;
+        baseUnits.push(...chunk);
+        hasMore = chunk.length === fetchPageSize;
+        offset += fetchPageSize;
+      }
     }
 
-    const cellIds = [...new Set(allUnits.map((u: any) => u.cell_id).filter(Boolean))];
+    const cellIds = [...new Set(baseUnits.map((u: any) => u.cell_id).filter(Boolean))];
     const cellsMap = new Map<string, { code: string; cell_type: string }>();
     if (cellIds.length > 0) {
       const batch = 200;
@@ -88,16 +170,6 @@ export async function GET(req: Request) {
         cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
       }
     }
-
-    const baseUnits = allUnits.filter((unit: any) => {
-      const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
-      const isRejectedNow = cell?.cell_type === "rejected";
-      const hasTicket = Boolean(unit.meta?.merchant_rejection_ticket);
-
-      if (scope === "active") return isRejectedNow;
-      if (scope === "archived") return !isRejectedNow && hasTicket;
-      return isRejectedNow || hasTicket;
-    });
 
     // stay_start for age_hours (reset after return)
     const unitIds = baseUnits.map((u: any) => u.id);
@@ -178,12 +250,15 @@ export async function GET(req: Request) {
       processedUnits.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
 
-    const total = processedUnits.length;
+    // For age-filter fallback we paginate after full age computation.
+    let unitsPage = processedUnits;
+    if (ageFilter !== "all") {
+      total = processedUnits.length;
+      unitsPage = processedUnits.slice(from, to + 1);
+    }
+
     const totalPages = Math.max(1, Math.ceil(total / queryPageSize));
     const safePage = Math.min(page, totalPages);
-    const from = (safePage - 1) * queryPageSize;
-    const to = from + queryPageSize;
-    const unitsPage = processedUnits.slice(from, to);
 
     return NextResponse.json({
       ok: true,
