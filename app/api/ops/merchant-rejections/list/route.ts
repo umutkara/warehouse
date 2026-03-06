@@ -30,6 +30,7 @@ export async function GET(req: Request) {
     if (!profile?.warehouse_id) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
+    const warehouseId = profile.warehouse_id;
 
     const allowedRoles = ["ops", "logistics", "manager", "head", "admin", "compliance"];
     if (!profile.role || !allowedRoles.includes(profile.role)) {
@@ -66,7 +67,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
     ageLog("request params", {
-      warehouse_id: profile.warehouse_id,
+      warehouse_id: warehouseId,
       scope,
       ticket_status: ticketStatus,
       age_filter: ageFilter,
@@ -83,7 +84,7 @@ export async function GET(req: Request) {
     const { data: rejectedCells, error: rejectedCellsError } = await supabaseAdmin
       .from("warehouse_cells_map")
       .select("id")
-      .eq("warehouse_id", profile.warehouse_id)
+      .eq("warehouse_id", warehouseId)
       .eq("cell_type", "rejected");
 
     if (rejectedCellsError) {
@@ -98,7 +99,7 @@ export async function GET(req: Request) {
     const rejectedIdsCsv = rejectedCellIds.join(",");
 
     function applyScopeAndTicketFilters(query: any) {
-      let q = query.eq("warehouse_id", profile.warehouse_id);
+      let q = query.eq("warehouse_id", warehouseId);
 
       if (scope === "active") {
         if (rejectedCellIds.length === 0) {
@@ -211,7 +212,7 @@ export async function GET(req: Request) {
         const { data: cells } = await supabaseAdmin
           .from("warehouse_cells_map")
           .select("id, code, cell_type")
-          .eq("warehouse_id", profile.warehouse_id)
+          .eq("warehouse_id", warehouseId)
           .in("id", chunk);
         cells?.forEach((c: any) => cellsMap.set(c.id, { code: c.code, cell_type: c.cell_type }));
       }
@@ -227,7 +228,7 @@ export async function GET(req: Request) {
         const { data: rows } = await supabaseAdmin
           .from("outbound_shipments")
           .select("unit_id, returned_at")
-          .eq("warehouse_id", profile.warehouse_id)
+          .eq("warehouse_id", warehouseId)
           .eq("status", "returned")
           .in("unit_id", chunk)
           .not("returned_at", "is", null)
