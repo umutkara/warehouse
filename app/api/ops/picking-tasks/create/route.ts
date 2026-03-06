@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 function normalizeBarcode(v: any): string {
   return String(v ?? "").replace(/\D/g, "");
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
   }
 
   // Check role: admin/head/manager/ops/logistics can create tasks
-  if (!["admin", "head", "manager", "ops", "logistics"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["admin", "head", "manager", "ops", "logistics"])) {
     return NextResponse.json({ error: "Forbidden: Only admin/head/manager/ops/logistics can create tasks" }, { status: 403 });
   }
 

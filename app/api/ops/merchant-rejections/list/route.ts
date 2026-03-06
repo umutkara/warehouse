@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
     const warehouseId = profile.warehouse_id;
 
     const allowedRoles = ["ops", "logistics", "manager", "head", "admin", "compliance"];
-    if (!profile.role || !allowedRoles.includes(profile.role)) {
+    if (!profile.role || !hasAnyRole(profile.role, allowedRoles)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

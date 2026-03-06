@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * POST /api/tsd/shipping-tasks/complete-batch
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
   }
 
   // Check role: worker + ops + admin/head/manager can complete
-  if (!["worker", "ops", "admin", "head", "manager"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["worker", "ops", "admin", "head", "manager"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

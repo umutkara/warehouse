@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * PATCH /api/units/[unitId]/update
@@ -34,7 +35,7 @@ export async function PATCH(
 
     // Only certain roles can update unit info
     const allowedRoles = ["admin", "head", "manager", "ops"];
-    if (!allowedRoles.includes(profile.role)) {
+    if (!hasAnyRole(profile.role, allowedRoles)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

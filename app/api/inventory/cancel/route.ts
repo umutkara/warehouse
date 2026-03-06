@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export async function POST(req: Request) {
   try {
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    if (!profile.role || !["admin", "head", "manager"].includes(profile.role)) {
+    if (!profile.role || !hasAnyRole(profile.role, ["admin", "head", "manager"])) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

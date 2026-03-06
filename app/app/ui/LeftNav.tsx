@@ -375,13 +375,13 @@ export default function LeftNav({ role }: { role: string }) {
         )}
 
         {/* Common section */}
-        {!isHubWorker && !isCompliance && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
-        {!isHubWorker && !isCompliance && (
+        {!isHubWorker && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
+        {!isHubWorker && (
           <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
             Дубли
           </NavButton>
         )}
-        {!isHubWorker && !isCompliance && (
+        {!isHubWorker && (
           <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
             Буфер
           </NavButton>
@@ -391,12 +391,12 @@ export default function LeftNav({ role }: { role: string }) {
             Этикетки ячеек
           </NavButton>
         )}
-        {!isHubWorker && !isCompliance && (
+        {!isHubWorker && (
           <NavButton href="/app/inventory" icon={<Icons.Inventory />} isCollapsed={!shouldExpand}>
             Инвентаризация
           </NavButton>
         )}
-        {!isHubWorker && !isCompliance && (
+        {!isHubWorker && (
           <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
             Излишки
           </NavButton>

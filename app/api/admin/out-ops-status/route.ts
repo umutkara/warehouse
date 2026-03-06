@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 const VALID_OPS_STATUSES = [
   "partner_accepted_return",
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    if (!["admin"].includes(profile.role)) {
+    if (!hasAnyRole(profile.role, ["admin"])) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

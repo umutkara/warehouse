@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export async function POST(req: Request) {
   const supabase = await supabaseServer();
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
   }
 
   // Role check: only admin, head, manager can create cells
-  if (!["admin", "head", "manager"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["admin", "head", "manager"])) {
     return NextResponse.json({ error: "Forbidden: insufficient permissions" }, { status: 403 });
   }
 

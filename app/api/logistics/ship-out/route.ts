@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 const HUB_PICKING_CELL_CODE = "shirvanhub-1";
 const HUB_WAREHOUSE_ID = "b48c495b-62db-42f5-8968-07e4fab80a82";
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
   }
 
   // Only logistics, admin, head, hub worker can ship
-  if (!["logistics", "admin", "head", "hub_worker"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["logistics", "admin", "head", "hub_worker"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 type ImportRow = {
   rowIndex?: number;
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    if (!["admin", "head", "manager", "ops", "logistics"].includes(profile.role)) {
+    if (!hasAnyRole(profile.role, ["admin", "head", "manager", "ops", "logistics"])) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

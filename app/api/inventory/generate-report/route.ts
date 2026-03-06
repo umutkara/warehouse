@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export async function POST(req: Request) {
   try {
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Профиль не найден" }, { status: 404 });
     }
 
-    if (!profile.role || !["admin", "head", "manager"].includes(profile.role)) {
+    if (!profile.role || !hasAnyRole(profile.role, ["admin", "head", "manager"])) {
       return NextResponse.json({ error: "Доступ запрещён" }, { status: 403 });
     }
 

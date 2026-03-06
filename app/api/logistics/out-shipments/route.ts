@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * GET /api/logistics/out-shipments
@@ -25,7 +26,7 @@ export async function GET(req: Request) {
   }
 
   // Only logistics, admin, head, manager, ops can view
-  if (!["logistics", "admin", "head", "manager", "ops", "hub_worker"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["logistics", "admin", "head", "manager", "ops", "hub_worker"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { tryCreatePostponedTask } from "@/lib/postponed-auto-task";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * POST /api/units/ops-status
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
   }
 
   // Check permissions - only ops, logistics, admin, head can update
-  if (!["ops", "logistics", "admin", "head"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["ops", "logistics", "admin", "head"])) {
     return NextResponse.json({ error: "Forbidden: Only ops, logistics, admin, head can update OPS status" }, { status: 403 });
   }
 

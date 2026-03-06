@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * GET /api/tsd/shipping-tasks/list
@@ -25,7 +26,7 @@ export async function GET(req: Request) {
   }
 
   // Check role: worker, ops, logistics, admin, head, manager can view
-  if (!["worker", "ops", "logistics", "admin", "head", "manager"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["worker", "ops", "logistics", "admin", "head", "manager"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

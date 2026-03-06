@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { hasAnyRole } from "./role-access";
 
 type RequireUserProfileOptions = {
   profileSelect?: string;
@@ -42,7 +43,7 @@ export async function requireUserProfile(
     };
   }
 
-  if (options.allowedRoles && !options.allowedRoles.includes(profile.role)) {
+  if (options.allowedRoles && !hasAnyRole(profile.role, options.allowedRoles)) {
     return {
       ok: false,
       response: NextResponse.json(

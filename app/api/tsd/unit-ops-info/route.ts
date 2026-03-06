@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 const OPS_STATUS_LABELS: Record<string, string> = {
   in_progress: "В работе",
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  if (!["worker", "ops", "admin", "head", "manager", "logistics"].includes(profile.role)) {
+  if (!hasAnyRole(profile.role, ["worker", "ops", "admin", "head", "manager", "logistics"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
