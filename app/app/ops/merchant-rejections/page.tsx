@@ -218,6 +218,18 @@ export default function MerchantRejectionsPage() {
     setPageJumpInput(String(targetPage));
   }
 
+  const filteredBySearch = searchBarcode.trim()
+    ? units.filter((u) => u.barcode.toLowerCase().includes(searchBarcode.trim().toLowerCase()))
+    : units;
+  const pageFrom = total === 0 ? 0 : (page - 1) * 30 + 1;
+  const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
+  const activeOnPage = filteredBySearch.filter((u) => u.case_state === "active").length;
+  const archivedOnPage = filteredBySearch.filter((u) => u.case_state === "archived").length;
+  const openTicketsOnPage = filteredBySearch.filter((u) => u.ticket.created && u.ticket.status === "open").length;
+  const resolvedTicketsOnPage = filteredBySearch.filter(
+    (u) => u.ticket.created && (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
+  ).length;
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -234,18 +246,6 @@ export default function MerchantRejectionsPage() {
     );
   }
 
-  const filteredBySearch = searchBarcode.trim()
-    ? units.filter((u) => u.barcode.toLowerCase().includes(searchBarcode.trim().toLowerCase()))
-    : units;
-  const pageFrom = total === 0 ? 0 : (page - 1) * 30 + 1;
-  const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
-  const activeOnPage = filteredBySearch.filter((u) => u.case_state === "active").length;
-  const archivedOnPage = filteredBySearch.filter((u) => u.case_state === "archived").length;
-  const openTicketsOnPage = filteredBySearch.filter((u) => u.ticket.created && u.ticket.status === "open").length;
-  const resolvedTicketsOnPage = filteredBySearch.filter(
-    (u) => u.ticket.created && (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
-  ).length;
-
   function resetFilters() {
     setScope("all");
     setTicketStatus("all");
@@ -260,14 +260,14 @@ export default function MerchantRejectionsPage() {
       <div style={styles.header}>
         <h1 style={styles.title}>🚫 Мерчант не принял</h1>
         <div style={styles.subtitle}>
-          Активные и архивные кейсы мерчант-отказа. Всего: <strong>{total}</strong>
+          Активные и архивные кейсы мерчант-отказа. Всего по всем страницам: <strong>{total}</strong>
           {searchBarcode.trim() && ` (на странице: ${filteredBySearch.length})`}
         </div>
         <div style={styles.kpiRow}>
-          <span style={styles.kpiChip}>Активные: {activeOnPage}</span>
-          <span style={styles.kpiChip}>Архив: {archivedOnPage}</span>
-          <span style={styles.kpiChip}>Открытые тикеты: {openTicketsOnPage}</span>
-          <span style={styles.kpiChip}>Решённые тикеты: {resolvedTicketsOnPage}</span>
+          <span style={styles.kpiChip}>Активные (стр.): {activeOnPage}</span>
+          <span style={styles.kpiChip}>Архив (стр.): {archivedOnPage}</span>
+          <span style={styles.kpiChip}>Открытые тикеты (стр.): {openTicketsOnPage}</span>
+          <span style={styles.kpiChip}>Решённые тикеты (стр.): {resolvedTicketsOnPage}</span>
         </div>
       </div>
 

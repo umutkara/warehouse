@@ -42,7 +42,6 @@ export async function GET(req: Request) {
     const ticketStatus = url.searchParams.get("ticket_status") || "all";
     const ageFilter = url.searchParams.get("age") || "all";
     const sortBy = url.searchParams.get("sort") || "created_desc";
-    const debugAge = ["1", "true", "yes"].includes((url.searchParams.get("debug_age") || "").toLowerCase());
     const page = Math.max(1, Number(url.searchParams.get("page") || 1));
     const queryPageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size") || 30)));
     const ageThresholdHours = ageFilter === "24h" ? 24 : ageFilter === "48h" ? 48 : ageFilter === "7d" ? 168 : null;
@@ -52,34 +51,10 @@ export async function GET(req: Request) {
         : null;
     const requiresPostProcessingPagination =
       ageFilter !== "all" || sortBy === "age_desc" || sortBy === "age_asc";
-    const shouldLogAge = ageFilter !== "all" || debugAge;
-
-    function ageLog(message: string, payload?: Record<string, unknown>) {
-      if (!shouldLogAge) return;
-      if (payload) {
-        console.info(`[merchant-rejections][age-debug] ${message}`, payload);
-      } else {
-        console.info(`[merchant-rejections][age-debug] ${message}`);
-      }
-    }
 
     if (!["all", "active", "archived"].includes(scope)) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
-    ageLog("request params", {
-      warehouse_id: warehouseId,
-      scope,
-      ticket_status: ticketStatus,
-      age_filter: ageFilter,
-      sort_by: sortBy,
-      page,
-      page_size: queryPageSize,
-      age_threshold_hours: ageThresholdHours,
-      age_threshold_iso: ageThresholdIso,
-      requires_post_processing_pagination: requiresPostProcessingPagination,
-      debug_age: debugAge,
-    });
-
     // Resolve rejected cells once (used in scope filtering)
     const { data: rejectedCells, error: rejectedCellsError } = await supabaseAdmin
       .from("warehouse_cells_map")
@@ -97,7 +72,6 @@ export async function GET(req: Request) {
 
     const rejectedCellIds = (rejectedCells || []).map((c: any) => c.id).filter(Boolean);
     const rejectedIdsCsv = rejectedCellIds.join(",");
-
     function applyScopeAndTicketFilters(query: any) {
       let q = query.eq("warehouse_id", warehouseId);
 
@@ -145,7 +119,7 @@ export async function GET(req: Request) {
     // Fast path: DB-level pagination is safe only for created_at sorting without age filtering.
     if (!requiresPostProcessingPagination) {
       const unitsQuery = applyScopeAndTicketFilters(
-        supabaseAdmin.from("units").select(selectColumns, { count: "planned" }),
+        supabaseAdmin.from("units").select(selectColumns, { count: "exact" }),
       )
         .order(sortBy.startsWith("created_") ? "created_at" : "created_at", {
           ascending: sortBy === "created_asc",
@@ -167,8 +141,6 @@ export async function GET(req: Request) {
       const fetchPageSize = 1000;
       let offset = 0;
       let hasMore = true;
-      let fetchedChunks = 0;
-      let fetchedRows = 0;
       while (hasMore) {
         let unitsQuery = applyScopeAndTicketFilters(
           supabaseAdmin.from("units").select(selectColumns),
@@ -192,15 +164,7 @@ export async function GET(req: Request) {
         baseUnits.push(...chunk);
         hasMore = chunk.length === fetchPageSize;
         offset += fetchPageSize;
-        fetchedChunks += 1;
-        fetchedRows += chunk.length;
       }
-      ageLog("fallback fetch completed", {
-        fetched_chunks: fetchedChunks,
-        fetched_rows: fetchedRows,
-        base_units_count: baseUnits.length,
-        used_created_at_prefilter: !!ageThresholdIso,
-      });
     }
 
     const cellIds = [...new Set(baseUnits.map((u: any) => u.cell_id).filter(Boolean))];
@@ -221,7 +185,6 @@ export async function GET(req: Request) {
     // stay_start for age_hours (reset after return)
     const unitIds = baseUnits.map((u: any) => u.id);
     const lastReturnedAtByUnitId = new Map<string, string>();
-    let returnedRowsCount = 0;
     if (unitIds.length > 0) {
       for (let i = 0; i < unitIds.length; i += 100) {
         const chunk = unitIds.slice(i, i + 100);
@@ -233,7 +196,6 @@ export async function GET(req: Request) {
           .in("unit_id", chunk)
           .not("returned_at", "is", null)
           .order("returned_at", { ascending: false });
-        returnedRowsCount += rows?.length || 0;
         rows?.forEach((r: any) => {
           if (!r.unit_id || !r.returned_at) return;
           const prev = lastReturnedAtByUnitId.get(r.unit_id);
@@ -243,14 +205,8 @@ export async function GET(req: Request) {
         });
       }
     }
-    ageLog("returned-at lookup completed", {
-      unit_ids_count: unitIds.length,
-      returned_rows_count: returnedRowsCount,
-      units_with_returned_at: lastReturnedAtByUnitId.size,
-    });
 
     const now = new Date();
-    const ageSamples: Array<Record<string, unknown>> = [];
     let processedUnits = baseUnits.map((unit: any) => {
       const meta = unit.meta || {};
       const rejectionCount = meta.merchant_rejection_count || 0;
@@ -280,20 +236,6 @@ export async function GET(req: Request) {
       const lastReturnedAt = lastReturnedAtByUnitId.get(unit.id) || null;
       const stayStart = lastReturnedAt || unit.created_at;
       const ageHours = Math.floor((now.getTime() - new Date(stayStart).getTime()) / (1000 * 60 * 60));
-      if (shouldLogAge && ageThresholdHours != null) {
-        const diffToThreshold = ageHours - ageThresholdHours;
-        if (ageSamples.length < 12 && (debugAge || Math.abs(diffToThreshold) <= 3)) {
-          ageSamples.push({
-            unit_id: unit.id,
-            barcode: unit.barcode,
-            created_at: unit.created_at,
-            last_returned_at: lastReturnedAt,
-            stay_start: stayStart,
-            age_hours: ageHours,
-            diff_to_threshold: diffToThreshold,
-          });
-        }
-      }
 
       return {
         id: unit.id,
@@ -338,15 +280,7 @@ export async function GET(req: Request) {
 
     if (ageFilter !== "all") {
       const thresholdHours = ageFilter === "24h" ? 24 : ageFilter === "48h" ? 48 : 168;
-      const beforeAgeFilterCount = processedUnits.length;
       processedUnits = processedUnits.filter((u: any) => (u.age_hours ?? 0) >= thresholdHours);
-      ageLog("age filter applied", {
-        threshold_hours: thresholdHours,
-        before_count: beforeAgeFilterCount,
-        after_count: processedUnits.length,
-        removed_count: beforeAgeFilterCount - processedUnits.length,
-        samples: ageSamples,
-      });
     }
 
     if (sortBy === "age_desc") {
@@ -374,15 +308,6 @@ export async function GET(req: Request) {
       pageOffsetTo = pageOffsetFrom + queryPageSize - 1;
       unitsPage = processedUnits.slice(pageOffsetFrom, pageOffsetTo + 1);
     }
-    ageLog("response pagination", {
-      requested_page: page,
-      safe_page: safePage,
-      total: computedTotal,
-      total_pages: computedTotalPages,
-      units_page_count: unitsPage.length,
-      offset_from: pageOffsetFrom,
-      offset_to: pageOffsetTo,
-    });
 
     return NextResponse.json({
       ok: true,
