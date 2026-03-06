@@ -164,32 +164,32 @@ async function getStorageShippingUnits(_req: Request) {
   // Filter units that are in storage, shipping, or rejected cells AND not in picking tasks.
   // Cell from warehouse_cells_map (with warehouse_id) = actual cell for this warehouse.
   const now = new Date();
-  const unitsInStorageOrShipping = units
-    .map((unit) => {
-      const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
-      const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
-      const stayStartTime = new Date(stayStart).getTime();
-      const ageHours = Math.floor((now.getTime() - stayStartTime) / (1000 * 60 * 60));
-      return {
-        id: unit.id,
-        barcode: unit.barcode,
-        status: unit.status,
-        cell_id: unit.cell_id,
-        created_at: unit.created_at,
-        age_hours: ageHours,
-        ops_status: unit.meta?.ops_status ?? null,
-        cell: cell ? { id: cell.id, code: cell.code, cell_type: cell.cell_type } : null,
-      };
-    })
-    .filter((unit) => {
-      const isInStorageOrShipping =
-        unit.cell &&
-        (unit.cell.cell_type === "storage" ||
-          unit.cell.cell_type === "shipping" ||
-          unit.cell.cell_type === "rejected");
-      const isNotInTasks = !unitIdsInTasks.has(unit.id);
-      return isInStorageOrShipping && isNotInTasks;
-    });
+  const mappedUnits = units.map((unit) => {
+    const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+    const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
+    const stayStartTime = new Date(stayStart).getTime();
+    const ageHours = Math.floor((now.getTime() - stayStartTime) / (1000 * 60 * 60));
+    return {
+      id: unit.id,
+      barcode: unit.barcode,
+      status: unit.status,
+      cell_id: unit.cell_id,
+      created_at: unit.created_at,
+      age_hours: ageHours,
+      ops_status: unit.meta?.ops_status ?? null,
+      cell: cell ? { id: cell.id, code: cell.code, cell_type: cell.cell_type } : null,
+    };
+  });
+
+  const unitsInStorageOrShipping = mappedUnits.filter((unit) => {
+    const isInStorageOrShipping =
+      unit.cell &&
+      (unit.cell.cell_type === "storage" ||
+        unit.cell.cell_type === "shipping" ||
+        unit.cell.cell_type === "rejected");
+    const isNotInTasks = !unitIdsInTasks.has(unit.id);
+    return isInStorageOrShipping && isNotInTasks;
+  });
 
   return NextResponse.json({
     ok: true,
