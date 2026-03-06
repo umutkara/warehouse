@@ -24,17 +24,19 @@ type Unit = {
   ticket: {
     created: boolean;
     ticket_id?: string;
-    status?: string;
+    status?: "open" | "resolved" | "partner_rejected";
     created_at?: string;
     resolved_at?: string;
     notes?: string;
+    ticket_number?: number;
+    ticket_count?: number;
   };
 };
 
 const TICKET_OPTIONS = [
   { value: "all", label: "Все" },
   { value: "open", label: "Открытые" },
-  { value: "resolved", label: "Решённые" },
+  { value: "resolved", label: "Закрытые" },
 ] as const;
 
 const SCOPE_OPTIONS = [
@@ -62,6 +64,7 @@ export default function MerchantRejectionsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageJumpInput, setPageJumpInput] = useState("1");
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +76,7 @@ export default function MerchantRejectionsPage() {
   const [searchBarcode, setSearchBarcode] = useState("");
 
   const [showModal, setShowModal] = useState(false);
-  const [modalAction, setModalAction] = useState<"create" | "resolve" | null>(null);
+  const [modalAction, setModalAction] = useState<"create" | "resolve" | "partner_rejected" | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [ticketId, setTicketId] = useState("");
   const [notes, setNotes] = useState("");
@@ -86,6 +89,10 @@ export default function MerchantRejectionsPage() {
   useEffect(() => {
     setPage(1);
   }, [scope, ticketStatus, ageFilter, sortBy]);
+
+  useEffect(() => {
+    setPageJumpInput(String(page));
+  }, [page]);
 
   async function loadUnits() {
     setLoading(true);
@@ -139,7 +146,12 @@ export default function MerchantRejectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unit_id: selectedUnit.id,
-          action: modalAction === "create" ? "create_ticket" : "mark_resolved",
+          action:
+            modalAction === "create"
+              ? "create_ticket"
+              : modalAction === "resolve"
+              ? "mark_resolved"
+              : "mark_partner_rejected",
           ticket_id: ticketId.trim() || undefined,
           notes: notes.trim() || undefined,
         }),
@@ -177,6 +189,13 @@ export default function MerchantRejectionsPage() {
     setShowModal(true);
   }
 
+  function openPartnerRejected(unit: Unit) {
+    setSelectedUnit(unit);
+    setModalAction("partner_rejected");
+    setNotes("");
+    setShowModal(true);
+  }
+
   function closeModal() {
     setShowModal(false);
     setSelectedUnit(null);
@@ -187,6 +206,16 @@ export default function MerchantRejectionsPage() {
 
   function setAgeSort(direction: "desc" | "asc") {
     setSortBy(direction === "desc" ? "age_desc" : "age_asc");
+  }
+
+  function handlePageJump() {
+    const raw = pageJumpInput.trim();
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const targetPage = Math.min(totalPages, Math.max(1, Math.floor(parsed)));
+    setPage(targetPage);
+    setPageJumpInput(String(targetPage));
   }
 
   if (loading) {
@@ -212,8 +241,10 @@ export default function MerchantRejectionsPage() {
   const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
   const activeOnPage = units.filter((u) => u.case_state === "active").length;
   const archivedOnPage = units.filter((u) => u.case_state === "archived").length;
-  const openTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status !== "resolved").length;
-  const resolvedTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status === "resolved").length;
+  const openTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status === "open").length;
+  const resolvedTicketsOnPage = units.filter(
+    (u) => u.ticket.created && (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
+  ).length;
 
   function resetFilters() {
     setScope("all");
@@ -388,7 +419,17 @@ export default function MerchantRejectionsPage() {
                     )}
                   </td>
                   <td style={styles.td}>
-                    <div style={styles.ageHours}>
+                    <div
+                      style={{
+                        ...styles.ageHours,
+                        color:
+                          unit.age_hours == null
+                            ? "#6b7280"
+                            : unit.age_hours <= 24
+                            ? "#059669"
+                            : "#dc2626",
+                      }}
+                    >
                       {unit.age_hours != null
                         ? unit.age_hours >= 24
                           ? `${Math.floor(unit.age_hours / 24)} д`
@@ -406,7 +447,7 @@ export default function MerchantRejectionsPage() {
                           {new Date(unit.last_rejection.rejected_at).toLocaleDateString("ru-RU")}
                         </div>
                         <div style={{ fontSize: 11, color: "#9ca3af" }}>
-                          {unit.last_rejection.scenario}
+                          {unit.last_rejection.scenario || "Сценарий не указан"}
                         </div>
                       </div>
                     ) : (
@@ -415,7 +456,12 @@ export default function MerchantRejectionsPage() {
                   </td>
                   <td style={styles.td}>
                     {unit.ticket.created ? (
-                      <div style={styles.ticketId}>{unit.ticket.ticket_id}</div>
+                      <div style={styles.ticketId}>
+                        {unit.ticket.ticket_id}
+                        {(unit.ticket.ticket_count || 0) > 1
+                          ? ` (#${unit.ticket.ticket_number || unit.ticket.ticket_count})`
+                          : ""}
+                      </div>
                     ) : (
                       <span style={styles.noTicket}>Не создан</span>
                     )}
@@ -424,6 +470,8 @@ export default function MerchantRejectionsPage() {
                     {unit.ticket.created ? (
                       unit.ticket.status === "resolved" ? (
                         <span style={styles.statusResolved}>✅ Решено</span>
+                      ) : unit.ticket.status === "partner_rejected" ? (
+                        <span style={styles.statusPartnerRejected}>🚫 Отклонен партнером</span>
                       ) : (
                         <span style={styles.statusOpen}>⏳ Открыт</span>
                       )
@@ -432,22 +480,28 @@ export default function MerchantRejectionsPage() {
                     )}
                   </td>
                   <td style={styles.td}>
-                    {!unit.ticket.created ? (
+                    {!unit.ticket.created || unit.ticket.status !== "open" ? (
                       <button
                         onClick={() => openCreateTicket(unit)}
                         style={styles.btnCreate}
                       >
-                        Создать тикет
-                      </button>
-                    ) : unit.ticket.created && unit.ticket.status !== "resolved" ? (
-                      <button
-                        onClick={() => openResolveTicket(unit)}
-                        style={styles.btnResolve}
-                      >
-                        Отметить решенным
+                        {unit.ticket.created ? "Создать повторный тикет" : "Создать тикет"}
                       </button>
                     ) : (
-                      <span style={{ fontSize: 12, color: "#9ca3af" }}>—</span>
+                      <div style={styles.actionStack}>
+                        <button
+                          onClick={() => openResolveTicket(unit)}
+                          style={styles.btnResolve}
+                        >
+                          Отметить решенным
+                        </button>
+                        <button
+                          onClick={() => openPartnerRejected(unit)}
+                          style={styles.btnPartnerRejected}
+                        >
+                          Отклонен партнером
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -466,6 +520,27 @@ export default function MerchantRejectionsPage() {
             <div style={styles.pageInfo}>
               Страница {page} из {totalPages} • Показано {pageFrom}-{pageTo} из {total}
             </div>
+            <div style={styles.pageJump}>
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={pageJumpInput}
+                onChange={(e) => setPageJumpInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handlePageJump();
+                }}
+                style={styles.pageJumpInput}
+                placeholder="Стр."
+              />
+              <button
+                type="button"
+                onClick={handlePageJump}
+                style={styles.pageJumpBtn}
+              >
+                Перейти
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
@@ -483,7 +558,11 @@ export default function MerchantRejectionsPage() {
         <div style={styles.modalOverlay} onClick={closeModal}>
           <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
             <h2 style={styles.modalTitle}>
-              {modalAction === "create" ? "Создать тикет" : "Отметить решенным"}
+              {modalAction === "create"
+                ? "Создать тикет"
+                : modalAction === "resolve"
+                ? "Отметить решенным"
+                : "Отклонен партнером"}
             </h2>
 
             <div style={{ marginBottom: 16 }}>
@@ -528,7 +607,13 @@ export default function MerchantRejectionsPage() {
                 disabled={submitting}
                 style={styles.btnSubmit}
               >
-                {submitting ? "Сохранение..." : modalAction === "create" ? "Создать" : "Отметить"}
+                {submitting
+                  ? "Сохранение..."
+                  : modalAction === "create"
+                  ? "Создать"
+                  : modalAction === "resolve"
+                  ? "Отметить"
+                  : "Отклонить"}
               </button>
             </div>
           </div>
@@ -650,6 +735,8 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
     padding: "12px 16px",
     borderTop: "1px solid #e5e7eb",
     background: "#fafafa",
@@ -667,6 +754,30 @@ const styles = {
   pageInfo: {
     fontSize: 13,
     color: "#4b5563",
+  } as React.CSSProperties,
+  pageJump: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+  pageJumpInput: {
+    width: 72,
+    padding: "6px 8px",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "#d1d5db",
+    borderRadius: 6,
+    fontSize: 13,
+  } as React.CSSProperties,
+  pageJumpBtn: {
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#111827",
+    borderRadius: 6,
+    padding: "6px 10px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
   } as React.CSSProperties,
   th: {
     padding: 16,
@@ -765,6 +876,11 @@ const styles = {
     color: "#f59e0b",
     fontWeight: 600,
   } as React.CSSProperties,
+  statusPartnerRejected: {
+    fontSize: 12,
+    color: "#dc2626",
+    fontWeight: 600,
+  } as React.CSSProperties,
   statusNone: {
     fontSize: 12,
     color: "#9ca3af",
@@ -788,6 +904,21 @@ const styles = {
     borderRadius: 6,
     cursor: "pointer",
     fontWeight: 500,
+  } as React.CSSProperties,
+  btnPartnerRejected: {
+    padding: "6px 12px",
+    fontSize: 12,
+    background: "#dc2626",
+    color: "#fff",
+    borderWidth: 0,
+    borderRadius: 6,
+    cursor: "pointer",
+    fontWeight: 500,
+  } as React.CSSProperties,
+  actionStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
   } as React.CSSProperties,
   modalOverlay: {
     position: "fixed",

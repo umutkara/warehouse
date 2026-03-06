@@ -31,7 +31,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
     }
 
-    const allowedRoles = ["ops", "logistics", "manager", "head", "admin"];
+    const allowedRoles = ["ops", "logistics", "manager", "head", "admin", "compliance"];
     if (!profile.role || !allowedRoles.includes(profile.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -41,12 +41,43 @@ export async function GET(req: Request) {
     const ticketStatus = url.searchParams.get("ticket_status") || "all";
     const ageFilter = url.searchParams.get("age") || "all";
     const sortBy = url.searchParams.get("sort") || "created_desc";
+    const debugAge = ["1", "true", "yes"].includes((url.searchParams.get("debug_age") || "").toLowerCase());
     const page = Math.max(1, Number(url.searchParams.get("page") || 1));
     const queryPageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size") || 30)));
+    const ageThresholdHours = ageFilter === "24h" ? 24 : ageFilter === "48h" ? 48 : ageFilter === "7d" ? 168 : null;
+    const ageThresholdIso =
+      ageThresholdHours != null
+        ? new Date(Date.now() - ageThresholdHours * 60 * 60 * 1000).toISOString()
+        : null;
+    const requiresPostProcessingPagination =
+      ageFilter !== "all" || sortBy === "age_desc" || sortBy === "age_asc";
+    const shouldLogAge = ageFilter !== "all" || debugAge;
+
+    function ageLog(message: string, payload?: Record<string, unknown>) {
+      if (!shouldLogAge) return;
+      if (payload) {
+        console.info(`[merchant-rejections][age-debug] ${message}`, payload);
+      } else {
+        console.info(`[merchant-rejections][age-debug] ${message}`);
+      }
+    }
 
     if (!["all", "active", "archived"].includes(scope)) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
+    ageLog("request params", {
+      warehouse_id: profile.warehouse_id,
+      scope,
+      ticket_status: ticketStatus,
+      age_filter: ageFilter,
+      sort_by: sortBy,
+      page,
+      page_size: queryPageSize,
+      age_threshold_hours: ageThresholdHours,
+      age_threshold_iso: ageThresholdIso,
+      requires_post_processing_pagination: requiresPostProcessingPagination,
+      debug_age: debugAge,
+    });
 
     // Resolve rejected cells once (used in scope filtering)
     const { data: rejectedCells, error: rejectedCellsError } = await supabaseAdmin
@@ -93,11 +124,11 @@ export async function GET(req: Request) {
       if (ticketStatus === "open") {
         q = q
           .not("meta->merchant_rejection_ticket", "is", null)
-          .neq("meta->merchant_rejection_ticket->>status", "resolved");
+          .eq("meta->merchant_rejection_ticket->>status", "open");
       } else if (ticketStatus === "resolved") {
         q = q
           .not("meta->merchant_rejection_ticket", "is", null)
-          .eq("meta->merchant_rejection_ticket->>status", "resolved");
+          .or("meta->merchant_rejection_ticket->>status.eq.resolved,meta->merchant_rejection_ticket->>status.eq.partner_rejected");
       }
 
       return q;
@@ -110,10 +141,10 @@ export async function GET(req: Request) {
     let baseUnits: any[] = [];
     let total = 0;
 
-    // Fast path for default usage: DB-level scope/ticket filters + pagination.
-    if (ageFilter === "all") {
+    // Fast path: DB-level pagination is safe only for created_at sorting without age filtering.
+    if (!requiresPostProcessingPagination) {
       const unitsQuery = applyScopeAndTicketFilters(
-        supabaseAdmin.from("units").select(selectColumns, { count: "exact" }),
+        supabaseAdmin.from("units").select(selectColumns, { count: "planned" }),
       )
         .order(sortBy.startsWith("created_") ? "created_at" : "created_at", {
           ascending: sortBy === "created_asc",
@@ -131,14 +162,21 @@ export async function GET(req: Request) {
       baseUnits = unitsPage || [];
       total = count || 0;
     } else {
-      // Fallback keeps exact age-filter behavior by evaluating age on all scope/ticket-matching units.
+      // Fallback keeps exact age-filter behavior and accurate age sorting by evaluating full matched set.
       const fetchPageSize = 1000;
       let offset = 0;
       let hasMore = true;
+      let fetchedChunks = 0;
+      let fetchedRows = 0;
       while (hasMore) {
-        const unitsQuery = applyScopeAndTicketFilters(
+        let unitsQuery = applyScopeAndTicketFilters(
           supabaseAdmin.from("units").select(selectColumns),
-        )
+        );
+        if (ageThresholdIso) {
+          // age_hours is based on stay_start (>= created_at), so this is a strict prefilter.
+          unitsQuery = unitsQuery.lte("created_at", ageThresholdIso);
+        }
+        unitsQuery = unitsQuery
           .order("created_at", { ascending: false })
           .range(offset, offset + fetchPageSize - 1);
         const { data: chunk, error: unitsError } = await unitsQuery;
@@ -153,7 +191,15 @@ export async function GET(req: Request) {
         baseUnits.push(...chunk);
         hasMore = chunk.length === fetchPageSize;
         offset += fetchPageSize;
+        fetchedChunks += 1;
+        fetchedRows += chunk.length;
       }
+      ageLog("fallback fetch completed", {
+        fetched_chunks: fetchedChunks,
+        fetched_rows: fetchedRows,
+        base_units_count: baseUnits.length,
+        used_created_at_prefilter: !!ageThresholdIso,
+      });
     }
 
     const cellIds = [...new Set(baseUnits.map((u: any) => u.cell_id).filter(Boolean))];
@@ -174,6 +220,7 @@ export async function GET(req: Request) {
     // stay_start for age_hours (reset after return)
     const unitIds = baseUnits.map((u: any) => u.id);
     const lastReturnedAtByUnitId = new Map<string, string>();
+    let returnedRowsCount = 0;
     if (unitIds.length > 0) {
       for (let i = 0; i < unitIds.length; i += 100) {
         const chunk = unitIds.slice(i, i + 100);
@@ -185,6 +232,7 @@ export async function GET(req: Request) {
           .in("unit_id", chunk)
           .not("returned_at", "is", null)
           .order("returned_at", { ascending: false });
+        returnedRowsCount += rows?.length || 0;
         rows?.forEach((r: any) => {
           if (!r.unit_id || !r.returned_at) return;
           const prev = lastReturnedAtByUnitId.get(r.unit_id);
@@ -194,18 +242,57 @@ export async function GET(req: Request) {
         });
       }
     }
+    ageLog("returned-at lookup completed", {
+      unit_ids_count: unitIds.length,
+      returned_rows_count: returnedRowsCount,
+      units_with_returned_at: lastReturnedAtByUnitId.size,
+    });
 
     const now = new Date();
+    const ageSamples: Array<Record<string, unknown>> = [];
     let processedUnits = baseUnits.map((unit: any) => {
       const meta = unit.meta || {};
       const rejectionCount = meta.merchant_rejection_count || 0;
-      const rejections = meta.merchant_rejections || [];
-      const lastRejection = rejections[rejections.length - 1];
+      const rejections = Array.isArray(meta.merchant_rejections) ? meta.merchant_rejections : [];
+      const lastRejectionByDate = rejections.reduce((latest: any, current: any) => {
+        if (!current?.rejected_at) return latest;
+        if (!latest?.rejected_at) return current;
+        return new Date(current.rejected_at).getTime() > new Date(latest.rejected_at).getTime()
+          ? current
+          : latest;
+      }, null);
+      const fallbackLastRejection = rejections.length > 0 ? rejections[rejections.length - 1] : null;
+      const lastRejection = lastRejectionByDate || fallbackLastRejection;
+      const lastWrittenScenario =
+        [...rejections]
+          .reverse()
+          .find((r: any) => typeof r?.scenario === "string" && r.scenario.trim().length > 0)
+          ?.scenario || lastRejection?.scenario || null;
       const ticket = meta.merchant_rejection_ticket || null;
+      const ticketHistory = Array.isArray(meta.merchant_rejection_tickets)
+        ? meta.merchant_rejection_tickets
+        : ticket
+        ? [ticket]
+        : [];
       const cell = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
       const caseState = cell?.cell_type === "rejected" ? "active" : "archived";
-      const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
+      const lastReturnedAt = lastReturnedAtByUnitId.get(unit.id) || null;
+      const stayStart = lastReturnedAt || unit.created_at;
       const ageHours = Math.floor((now.getTime() - new Date(stayStart).getTime()) / (1000 * 60 * 60));
+      if (shouldLogAge && ageThresholdHours != null) {
+        const diffToThreshold = ageHours - ageThresholdHours;
+        if (ageSamples.length < 12 && (debugAge || Math.abs(diffToThreshold) <= 3)) {
+          ageSamples.push({
+            unit_id: unit.id,
+            barcode: unit.barcode,
+            created_at: unit.created_at,
+            last_returned_at: lastReturnedAt,
+            stay_start: stayStart,
+            age_hours: ageHours,
+            diff_to_threshold: diffToThreshold,
+          });
+        }
+      }
 
       return {
         id: unit.id,
@@ -221,23 +308,44 @@ export async function GET(req: Request) {
         age_hours: ageHours,
         rejection_count: rejectionCount,
         last_rejection: lastRejection
-          ? { rejected_at: lastRejection.rejected_at, scenario: lastRejection.scenario, courier_name: lastRejection.courier_name }
+          ? { rejected_at: lastRejection.rejected_at, scenario: lastWrittenScenario, courier_name: lastRejection.courier_name }
           : null,
         ticket: ticket
-          ? { created: true, ticket_id: ticket.ticket_id, status: ticket.status, created_at: ticket.created_at, resolved_at: ticket.resolved_at, notes: ticket.notes }
+          ? {
+              created: true,
+              ticket_id: ticket.ticket_id,
+              status: ticket.status,
+              created_at: ticket.created_at,
+              resolved_at: ticket.resolved_at,
+              notes: ticket.notes,
+              ticket_number: ticket.ticket_number || ticketHistory.length || 1,
+              ticket_count: ticketHistory.length || 1,
+            }
           : { created: false, ticket_id: null, status: null },
       };
     });
 
     if (ticketStatus === "open") {
-      processedUnits = processedUnits.filter((u: any) => u.ticket.created && u.ticket.status !== "resolved");
+      processedUnits = processedUnits.filter((u: any) => u.ticket.created && u.ticket.status === "open");
     } else if (ticketStatus === "resolved") {
-      processedUnits = processedUnits.filter((u: any) => u.ticket.created && u.ticket.status === "resolved");
+      processedUnits = processedUnits.filter(
+        (u: any) =>
+          u.ticket.created &&
+          (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
+      );
     }
 
     if (ageFilter !== "all") {
       const thresholdHours = ageFilter === "24h" ? 24 : ageFilter === "48h" ? 48 : 168;
+      const beforeAgeFilterCount = processedUnits.length;
       processedUnits = processedUnits.filter((u: any) => (u.age_hours ?? 0) >= thresholdHours);
+      ageLog("age filter applied", {
+        threshold_hours: thresholdHours,
+        before_count: beforeAgeFilterCount,
+        after_count: processedUnits.length,
+        removed_count: beforeAgeFilterCount - processedUnits.length,
+        samples: ageSamples,
+      });
     }
 
     if (sortBy === "age_desc") {
@@ -250,23 +358,38 @@ export async function GET(req: Request) {
       processedUnits.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
 
-    // For age-filter fallback we paginate after full age computation.
+    // For fallback mode, pagination must happen after full filtering/sorting.
     let unitsPage = processedUnits;
-    if (ageFilter !== "all") {
-      total = processedUnits.length;
-      unitsPage = processedUnits.slice(from, to + 1);
+    let computedTotal = total;
+    let computedTotalPages = Math.max(1, Math.ceil(computedTotal / queryPageSize));
+    let safePage = Math.min(page, computedTotalPages);
+    let pageOffsetFrom = from;
+    let pageOffsetTo = to;
+    if (requiresPostProcessingPagination) {
+      computedTotal = processedUnits.length;
+      computedTotalPages = Math.max(1, Math.ceil(computedTotal / queryPageSize));
+      safePage = Math.min(page, computedTotalPages);
+      pageOffsetFrom = (safePage - 1) * queryPageSize;
+      pageOffsetTo = pageOffsetFrom + queryPageSize - 1;
+      unitsPage = processedUnits.slice(pageOffsetFrom, pageOffsetTo + 1);
     }
-
-    const totalPages = Math.max(1, Math.ceil(total / queryPageSize));
-    const safePage = Math.min(page, totalPages);
+    ageLog("response pagination", {
+      requested_page: page,
+      safe_page: safePage,
+      total: computedTotal,
+      total_pages: computedTotalPages,
+      units_page_count: unitsPage.length,
+      offset_from: pageOffsetFrom,
+      offset_to: pageOffsetTo,
+    });
 
     return NextResponse.json({
       ok: true,
       units: unitsPage,
-      total,
+      total: computedTotal,
       page: safePage,
       page_size: queryPageSize,
-      total_pages: totalPages,
+      total_pages: computedTotalPages,
     });
   } catch (e: any) {
     console.error("Get merchant rejections error:", e);

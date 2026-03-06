@@ -225,11 +225,13 @@ export default function LeftNav({ role }: { role: string }) {
 
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
   const canOps = ["ops", "manager", "head", "admin"].includes(role);
+  const canMerchantRejections = ["ops", "logistics", "manager", "head", "admin", "compliance"].includes(role);
   const canCourierStats = ["ops", "head", "admin"].includes(role);
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
   const canLogistics = ["logistics", "admin", "head"].includes(role);
   const isLogisticsOnly = role === "logistics";
   const isHubWorker = role === "hub_worker";
+  const isCompliance = role === "compliance";
 
   const shouldExpand = !isCollapsed || isHovering;
 
@@ -337,16 +339,20 @@ export default function LeftNav({ role }: { role: string }) {
           </NavButton>
         )}
 
-        {/* Ops section (ops, logistics, manager, head, admin) */}
-        {(canOps || canLogistics) && !isHubWorker && (
+        {/* Ops section (ops, logistics, manager, head, admin, compliance) */}
+        {(canOps || canLogistics || isCompliance) && !isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>OPS</SectionTitle>
-            <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
-              Создать задания
-            </NavButton>
-            <NavButton href="/app/ops/merchant-rejections" icon={<Icons.Alert />} isCollapsed={!shouldExpand}>
-              Мерчант не принял
-            </NavButton>
+            {!isCompliance && (
+              <NavButton href="/app/ops-shipping" icon={<Icons.Tasks />} isCollapsed={!shouldExpand}>
+                Создать задания
+              </NavButton>
+            )}
+            {canMerchantRejections && (
+              <NavButton href="/app/ops/merchant-rejections" icon={<Icons.Alert />} isCollapsed={!shouldExpand}>
+                Мерчант не принял
+              </NavButton>
+            )}
             {canCourierStats && (
               <NavButton href="/app/courier-stats" icon={<Icons.SLA />} isCollapsed={!shouldExpand}>
                 Статистика курьеров
@@ -369,13 +375,13 @@ export default function LeftNav({ role }: { role: string }) {
         )}
 
         {/* Common section */}
-        {!isHubWorker && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
-        {!isHubWorker && (
+        {!isHubWorker && !isCompliance && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
+        {!isHubWorker && !isCompliance && (
           <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
             Дубли
           </NavButton>
         )}
-        {!isHubWorker && (
+        {!isHubWorker && !isCompliance && (
           <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
             Буфер
           </NavButton>
@@ -385,12 +391,12 @@ export default function LeftNav({ role }: { role: string }) {
             Этикетки ячеек
           </NavButton>
         )}
-        {!isHubWorker && (
+        {!isHubWorker && !isCompliance && (
           <NavButton href="/app/inventory" icon={<Icons.Inventory />} isCollapsed={!shouldExpand}>
             Инвентаризация
           </NavButton>
         )}
-        {!isHubWorker && (
+        {!isHubWorker && !isCompliance && (
           <NavButton href="/app/surplus" icon={<Icons.Surplus />} isCollapsed={!shouldExpand}>
             Излишки
           </NavButton>
