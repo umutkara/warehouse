@@ -239,10 +239,10 @@ export default function MerchantRejectionsPage() {
     : units;
   const pageFrom = total === 0 ? 0 : (page - 1) * 30 + 1;
   const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
-  const activeOnPage = units.filter((u) => u.case_state === "active").length;
-  const archivedOnPage = units.filter((u) => u.case_state === "archived").length;
-  const openTicketsOnPage = units.filter((u) => u.ticket.created && u.ticket.status === "open").length;
-  const resolvedTicketsOnPage = units.filter(
+  const activeOnPage = filteredBySearch.filter((u) => u.case_state === "active").length;
+  const archivedOnPage = filteredBySearch.filter((u) => u.case_state === "archived").length;
+  const openTicketsOnPage = filteredBySearch.filter((u) => u.ticket.created && u.ticket.status === "open").length;
+  const resolvedTicketsOnPage = filteredBySearch.filter(
     (u) => u.ticket.created && (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
   ).length;
 
