@@ -161,9 +161,12 @@ export async function GET(req: Request) {
     });
     function getDisplayCell(unit: any): { code: string; cell_type: string } | null {
       const raw = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
-      if (unit.status === "rejected" && (!raw || raw.cell_type !== "rejected") && rejectedCell) return rejectedCell;
-      if (unit.status === "ff" && (!raw || raw.cell_type !== "ff") && ffCell) return ffCell;
-      return raw ?? (unit.warehouse_cells ? { code: unit.warehouse_cells.code, cell_type: unit.warehouse_cells.cell_type } : null);
+      if (raw) return raw;
+      if (unit.status === "rejected" && rejectedCell) return rejectedCell;
+      if (unit.status === "ff" && ffCell) return ffCell;
+      return unit.warehouse_cells
+        ? { code: unit.warehouse_cells.code, cell_type: unit.warehouse_cells.cell_type }
+        : null;
     }
 
     // stay_start: last time unit "entered" warehouse (reset after return). If never returned = created_at.

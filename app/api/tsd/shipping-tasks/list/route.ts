@@ -214,7 +214,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // Ячейки rejected/ff для склада — для отображения по статусу, когда cell_id ещё не обновлён (рассинхрон)
+  // Ячейки rejected/ff для склада — fallback только когда у юнита нет cell_id.
   let rejectedCellId: string | null = null;
   let ffCellId: string | null = null;
   const { data: statusCells } = await supabaseAdmin
@@ -230,9 +230,9 @@ export async function GET(req: Request) {
 
   function getDisplayCellId(u: any): string | null {
     const rawId = u.cell_id || u.from_cell_id;
-    const rawType = rawId ? cellsMap.get(rawId)?.cell_type : null;
-    if (u.status === "rejected" && rawType !== "rejected" && rejectedCellId) return rejectedCellId;
-    if (u.status === "ff" && rawType !== "ff" && ffCellId) return ffCellId;
+    if (rawId) return rawId;
+    if (u.status === "rejected" && rejectedCellId) return rejectedCellId;
+    if (u.status === "ff" && ffCellId) return ffCellId;
     return rawId ?? null;
   }
 
@@ -242,7 +242,7 @@ export async function GET(req: Request) {
   );
   const noUnitsTaskIds = new Set(tasksWithNoUnits.map((t: any) => t.id));
 
-  // Не показывать задачи, у которых все юниты в ff — по факту (в т.ч. по status при рассинхроне)
+  // Не показывать задачи, у которых все юниты в ff.
   const NON_ACTIONABLE_CELL_TYPES = ["ff"];
   const tasksAllUnitsInRejectedOrFf = sortedTasks.filter((t: any) => {
     const units = unitsMap.get(t.id) || [];
@@ -288,7 +288,7 @@ export async function GET(req: Request) {
     const activeUnits = units;
     const targetCell = task.target_picking_cell_id ? cellsMap.get(task.target_picking_cell_id) : null;
 
-    // Unique cells for display: use display cell (по статусу при рассинхроне cell_id), then cell_id/from_cell_id
+    // Unique cells for display: first actual cell_id/from_cell_id, then status fallback.
     const fromCells = [...new Set(activeUnits.map((u: any) => getDisplayCellId(u)).filter(Boolean))]
       .map((cellId) => cellId && cellsMap.get(cellId))
       .filter(Boolean);
