@@ -17,6 +17,10 @@ export function createQueryChain(finalResult: unknown) {
   chain.order = vi.fn(() => chain);
   chain.not = vi.fn(() => chain);
   chain.in = vi.fn(() => chain);
+  chain.gte = vi.fn(() => chain);
+  chain.lte = vi.fn(() => chain);
+  chain.neq = vi.fn(() => chain);
+  chain.range = vi.fn(() => chain);
   chain.update = vi.fn(() => chain);
   chain.insert = vi.fn(() => chain);
   chain.limit = vi.fn(() => chain);
@@ -47,6 +51,10 @@ export function createAdminFromMock(plans: MockPlan) {
     chain.order = vi.fn(() => chain);
     chain.not = vi.fn(() => chain);
     chain.in = vi.fn(() => chain);
+    chain.gte = vi.fn(() => chain);
+    chain.lte = vi.fn(() => chain);
+    chain.neq = vi.fn(() => chain);
+    chain.range = vi.fn(() => chain);
     chain.limit = vi.fn(() => chain);
     chain.single = vi.fn(async () => plan);
     chain.maybeSingle = vi.fn(async () => plan);

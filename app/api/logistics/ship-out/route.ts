@@ -9,7 +9,7 @@ const HUB_WAREHOUSE_ID = "b48c495b-62db-42f5-8968-07e4fab80a82";
 /**
  * POST /api/logistics/ship-out
  * Ships a unit from picking to OUT status
- * Body: { unitId: string, courierName: string }
+ * Body: { unitId: string, courierUserId?: string, courierName?: string }
  */
 export async function POST(req: Request) {
   const supabase = await supabaseServer();
@@ -35,13 +35,42 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { unitId, courierName, transferToWarehouseId } = body ?? {};
+  const { unitId, courierUserId, courierName, transferToWarehouseId } = body ?? {};
 
-  if (!unitId || !courierName) {
+  if (!unitId || (!courierUserId && !courierName)) {
     return NextResponse.json(
       { error: "unitId and courierName are required" },
       { status: 400 }
     );
+  }
+
+  let selectedCourierUserId: string | null = null;
+  let selectedCourierName = (courierName || "").toString().trim();
+
+  if (courierUserId) {
+    const requestedCourierUserId = courierUserId.toString().trim();
+    const { data: courierProfile, error: courierError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, warehouse_id, role, full_name")
+      .eq("id", requestedCourierUserId)
+      .single();
+
+    if (courierError || !courierProfile) {
+      return NextResponse.json({ error: "Courier not found" }, { status: 404 });
+    }
+    if (courierProfile.warehouse_id !== profile.warehouse_id) {
+      return NextResponse.json({ error: "Courier is not in this warehouse" }, { status: 400 });
+    }
+    if (!hasAnyRole(courierProfile.role, ["courier"])) {
+      return NextResponse.json({ error: "Selected user is not a courier" }, { status: 400 });
+    }
+
+    selectedCourierUserId = courierProfile.id;
+    selectedCourierName = (courierProfile.full_name || "").trim() || selectedCourierName;
+  }
+
+  if (!selectedCourierName) {
+    return NextResponse.json({ error: "Courier name is required" }, { status: 400 });
   }
 
   // Fetch picking task scenario for this unit BEFORE shipping (to ensure task still exists)
@@ -99,7 +128,7 @@ export async function POST(req: Request) {
   // Call RPC function to ship unit
   const { data: result, error: rpcError } = await supabase.rpc("ship_unit_out", {
     p_unit_id: unitId,
-    p_courier_name: courierName.trim(),
+    p_courier_name: selectedCourierName,
   });
 
   if (rpcError) {
@@ -113,7 +142,7 @@ export async function POST(req: Request) {
     if (forbidden && profile.role === "hub_worker") {
       const { data: adminResult, error: adminError } = await supabaseAdmin.rpc("ship_unit_out", {
         p_unit_id: unitId,
-        p_courier_name: courierName.trim(),
+        p_courier_name: selectedCourierName,
       });
 
       if (adminError) {
@@ -135,6 +164,145 @@ export async function POST(req: Request) {
         { error: parsedResult?.error || "Failed to ship unit" },
         { status: 400 }
       );
+    }
+  }
+
+  if (parsedResult?.shipment_id) {
+    const { data: updatedShipment, error: shipmentUpdateError } = await supabaseAdmin
+      .from("outbound_shipments")
+      .update({
+        courier_user_id: selectedCourierUserId,
+        courier_name: selectedCourierName,
+      })
+      .eq("id", parsedResult.shipment_id)
+      .eq("warehouse_id", profile.warehouse_id)
+      .select("id, unit_id, zone_id")
+      .maybeSingle();
+    if (shipmentUpdateError) {
+      console.error("[ship-out] update outbound shipment courier failed:", shipmentUpdateError);
+    }
+
+    const { data: poolRows } = await supabaseAdmin
+      .from("courier_task_pool")
+      .select("id, unit_id, zone_id, status, meta")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("source_shipment_id", parsedResult.shipment_id)
+      .eq("status", "available");
+
+    for (const row of poolRows || []) {
+      const baseMeta = row.meta && typeof row.meta === "object" ? row.meta : {};
+      const mergedMeta = {
+        ...baseMeta,
+        assigned_courier_user_id: selectedCourierUserId,
+        assigned_courier_name: selectedCourierName,
+        assigned_by: userData.user.id,
+        assigned_via: "logistics",
+      };
+      await supabaseAdmin
+        .from("courier_task_pool")
+        .update({
+          meta: mergedMeta,
+          ...(selectedCourierUserId
+            ? { status: "claimed", claim_note: "Assigned by logistics" }
+            : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+    }
+
+    if (selectedCourierUserId) {
+      const now = new Date().toISOString();
+      const { data: openShift } = await supabaseAdmin
+        .from("courier_shifts")
+        .select("id")
+        .eq("warehouse_id", profile.warehouse_id)
+        .eq("courier_user_id", selectedCourierUserId)
+        .in("status", ["open", "closing"])
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const poolRow = (poolRows || [])[0];
+      const shipmentUnitId = updatedShipment?.unit_id || unitId;
+      const shipmentZoneId = updatedShipment?.zone_id || poolRow?.zone_id || null;
+
+      const { data: existingTask } = await supabaseAdmin
+        .from("courier_tasks")
+        .select("id, courier_user_id, status")
+        .eq("warehouse_id", profile.warehouse_id)
+        .eq("unit_id", shipmentUnitId)
+        .not("status", "in", "(delivered,failed,returned,canceled)")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      let ensuredTaskId: string | null = null;
+      if (existingTask) {
+        ensuredTaskId = existingTask.id;
+        const { error: updateTaskError } = await supabaseAdmin
+          .from("courier_tasks")
+          .update({
+            courier_user_id: selectedCourierUserId,
+            shift_id: openShift?.id ?? null,
+            status: "claimed",
+            claimed_at: now,
+            last_event_at: now,
+            updated_at: now,
+            meta: {
+              source: "api.logistics.ship_out",
+              assigned_by: userData.user.id,
+              assigned_via: "logistics",
+              assigned_courier_name: selectedCourierName,
+            },
+          })
+          .eq("id", existingTask.id);
+        if (updateTaskError) {
+          console.error("[ship-out] update courier task failed:", updateTaskError);
+        }
+      } else {
+        const { data: insertedTask, error: insertTaskError } = await supabaseAdmin
+          .from("courier_tasks")
+          .insert({
+            warehouse_id: profile.warehouse_id,
+            pool_id: poolRow?.id ?? null,
+            shift_id: openShift?.id ?? null,
+            unit_id: shipmentUnitId,
+            courier_user_id: selectedCourierUserId,
+            zone_id: shipmentZoneId,
+            status: "claimed",
+            claimed_at: now,
+            last_event_at: now,
+            meta: {
+              source: "api.logistics.ship_out",
+              assigned_by: userData.user.id,
+              assigned_via: "logistics",
+              assigned_courier_name: selectedCourierName,
+            },
+          })
+          .select("id")
+          .single();
+        if (insertTaskError) {
+          console.error("[ship-out] create courier task failed:", insertTaskError);
+        } else {
+          ensuredTaskId = insertedTask.id;
+        }
+      }
+
+      if (ensuredTaskId) {
+        await supabaseAdmin.from("courier_task_events").insert({
+          warehouse_id: profile.warehouse_id,
+          task_id: ensuredTaskId,
+          unit_id: shipmentUnitId,
+          courier_user_id: selectedCourierUserId,
+          shift_id: openShift?.id ?? null,
+          event_id: `assigned-${ensuredTaskId}-${Date.now()}`,
+          event_type: "claimed",
+          happened_at: now,
+          note: "Assigned by logistics",
+          proof_meta: {},
+          meta: { source: "api.logistics.ship_out" },
+        });
+      }
     }
   }
 
@@ -178,8 +346,13 @@ export async function POST(req: Request) {
           p_action: "picking_task_complete",
           p_entity_type: "picking_task",
           p_entity_id: t.id,
-          p_summary: `Задача завершена при отгрузке (ship out): заказ ${parsedResult?.unit_barcode ?? unitId} отправлен курьером ${courierName}`,
-          p_meta: { source: "logistics.ship_out", unit_id: unitId, courier_name: courierName },
+          p_summary: `Задача завершена при отгрузке (ship out): заказ ${parsedResult?.unit_barcode ?? unitId} отправлен курьером ${selectedCourierName}`,
+          p_meta: {
+            source: "logistics.ship_out",
+            unit_id: unitId,
+            courier_name: selectedCourierName,
+            courier_user_id: selectedCourierUserId,
+          },
         });
       }
     }
@@ -196,7 +369,7 @@ export async function POST(req: Request) {
     .single();
 
   if (currentUnit) {
-    const comment = `Авто: отправлен в OUT, курьер ${courierName}`;
+    const comment = `Авто: отправлен в OUT, курьер ${selectedCourierName}`;
     const updatedMeta = {
       ...(currentUnit.meta || {}),
       ops_status: "in_progress",
@@ -311,7 +484,8 @@ export async function POST(req: Request) {
   const auditMeta = {
     shipment_id: parsedResult.shipment_id,
     unit_barcode: parsedResult.unit_barcode,
-    courier_name: courierName,
+    courier_name: selectedCourierName,
+    ...(selectedCourierUserId ? { courier_user_id: selectedCourierUserId } : {}),
     ...(scenario ? { scenario } : {}),
   };
 
@@ -319,7 +493,7 @@ export async function POST(req: Request) {
     p_action: "logistics.ship_out",
     p_entity_type: "unit",
     p_entity_id: unitId,
-    p_summary: `Отправлен заказ ${parsedResult.unit_barcode} курьером ${courierName}${scenario ? ` (${scenario})` : ""}`,
+    p_summary: `Отправлен заказ ${parsedResult.unit_barcode} курьером ${selectedCourierName}${scenario ? ` (${scenario})` : ""}`,
     p_meta: auditMeta,
   });
 

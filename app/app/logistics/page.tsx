@@ -21,6 +21,18 @@ type PickingCell = {
   meta?: { description?: string } | null;
 };
 
+type CourierOption = {
+  id: string;
+  full_name: string;
+  role: string;
+};
+
+type LastShipmentInfo = {
+  unitLabel: string;
+  courierName: string;
+  sentAt: string;
+};
+
 export default function LogisticsPage() {
   const router = useRouter();
   const [units, setUnits] = useState<Unit[]>([]);
@@ -31,11 +43,15 @@ export default function LogisticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
-  const [courierName, setCourierName] = useState("");
+  const [couriers, setCouriers] = useState<CourierOption[]>([]);
+  const [selectedCourierUserId, setSelectedCourierUserId] = useState("");
+  const [loadingCouriers, setLoadingCouriers] = useState(false);
   const [shipping, setShipping] = useState(false);
+  const [lastShipment, setLastShipment] = useState<LastShipmentInfo | null>(null);
 
   useEffect(() => {
     loadUnits();
+    loadCouriers();
   }, []);
 
   async function loadUnits() {
@@ -85,6 +101,32 @@ export default function LogisticsPage() {
     }
   }
 
+  async function loadCouriers() {
+    setLoadingCouriers(true);
+    try {
+      const res = await fetch("/api/logistics/couriers", { cache: "no-store" });
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+      if (res.status === 403) {
+        setError("У вас нет доступа к списку курьеров");
+        return;
+      }
+
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setCouriers((json.couriers || []) as CourierOption[]);
+      } else {
+        setError(json.error || "Ошибка загрузки курьеров");
+      }
+    } catch (e: any) {
+      setError(e.message || "Ошибка загрузки курьеров");
+    } finally {
+      setLoadingCouriers(false);
+    }
+  }
+
   // Toggle unit selection for batch mode
   function handleToggleUnit(unitId: string) {
     setSelectedUnitIds((prev) => {
@@ -111,12 +153,14 @@ export default function LogisticsPage() {
 
   // Batch ship out - sends multiple units with same courier
   async function handleBatchShipOut() {
-    if (selectedUnitIds.size === 0 || !courierName.trim()) {
-      alert("Выберите заказы и введите имя курьера");
+    if (selectedUnitIds.size === 0 || !selectedCourierUserId) {
+      alert("Выберите заказы и назначьте курьера");
       return;
     }
+    const selectedCourier = couriers.find((courier) => courier.id === selectedCourierUserId);
+    const selectedCourierName = selectedCourier?.full_name || "Неизвестный курьер";
 
-    if (!confirm(`Отправить ${selectedUnitIds.size} заказ${selectedUnitIds.size > 1 ? 'ов' : ''} курьером ${courierName.trim()}?`)) {
+    if (!confirm(`Отправить ${selectedUnitIds.size} заказ${selectedUnitIds.size > 1 ? 'ов' : ''} курьеру ${selectedCourierName}?`)) {
       return;
     }
 
@@ -132,7 +176,7 @@ export default function LogisticsPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               unitId,
-              courierName: courierName.trim(),
+              courierUserId: selectedCourierUserId,
             }),
           }).then((res) => res.json())
         )
@@ -142,9 +186,14 @@ export default function LogisticsPage() {
       const failed = results.length - successful;
 
       if (successful > 0) {
-        alert(`✓ Отправлено ${successful} из ${results.length} заказ${results.length > 1 ? 'ов' : ''} курьером ${courierName.trim()}`);
+        alert(`✓ Отправлено ${successful} из ${results.length} заказ${results.length > 1 ? 'ов' : ''} курьеру ${selectedCourierName}`);
+        setLastShipment({
+          unitLabel: successful === 1 ? "1 заказ" : `${successful} заказов`,
+          courierName: selectedCourierName,
+          sentAt: new Date().toISOString(),
+        });
         setSelectedUnitIds(new Set());
-        setCourierName("");
+        setSelectedCourierUserId("");
         await loadUnits();
       }
 
@@ -160,8 +209,8 @@ export default function LogisticsPage() {
 
   // Single ship out (existing behavior - preserved)
   async function handleShipOut() {
-    if (!selectedUnit || !courierName.trim()) {
-      alert("Введите имя курьера");
+    if (!selectedUnit || !selectedCourierUserId) {
+      alert("Назначьте курьера");
       return;
     }
 
@@ -174,16 +223,23 @@ export default function LogisticsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unitId: selectedUnit.id,
-          courierName: courierName.trim(),
+          courierUserId: selectedCourierUserId,
         }),
       });
 
       const json = await res.json();
 
       if (res.ok && json.ok) {
-        alert(`✓ Заказ ${selectedUnit.barcode} отправлен курьером ${courierName}`);
+        const selectedCourier = couriers.find((courier) => courier.id === selectedCourierUserId);
+        const sentCourierName = selectedCourier?.full_name || "курьеру";
+        alert(`✓ Заказ ${selectedUnit.barcode} отправлен курьеру ${sentCourierName}`);
+        setLastShipment({
+          unitLabel: selectedUnit.barcode,
+          courierName: sentCourierName,
+          sentAt: new Date().toISOString(),
+        });
         setSelectedUnit(null);
-        setCourierName("");
+        setSelectedCourierUserId("");
         await loadUnits();
       } else {
         setError(json.error || "Ошибка отправки");
@@ -212,6 +268,8 @@ export default function LogisticsPage() {
       const q = searchOrder.trim().toLowerCase();
       return (unit.barcode || "").toLowerCase().includes(q);
     });
+  const selectedCourierName =
+    couriers.find((courier) => courier.id === selectedCourierUserId)?.full_name || "";
 
   async function handleExportToExcel(format: "xlsx" | "csv" = "xlsx") {
     const unitsToExport = filteredUnits.length > 0 ? filteredUnits : units;
@@ -667,6 +725,30 @@ export default function LogisticsPage() {
               ? `Отправка заказов (${selectedUnitIds.size})`
               : "Отправка заказа"}
           </h2>
+          {lastShipment && (
+            <div
+              style={{
+                background: "#ecfdf5",
+                border: "1px solid #86efac",
+                borderRadius: "var(--radius-md)",
+                padding: "var(--spacing-md)",
+                marginBottom: "var(--spacing-md)",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#166534", marginBottom: 4 }}>
+                Последняя отправка
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                Заказ: {lastShipment.unitLabel}
+              </div>
+              <div style={{ fontSize: 14 }}>
+                Назначенный курьер: {lastShipment.courierName}
+              </div>
+              <div style={{ fontSize: 12, color: "#166534", marginTop: 4 }}>
+                {formatDate(lastShipment.sentAt)}
+              </div>
+            </div>
+          )}
 
           {!selectedUnit && selectedUnitIds.size === 0 ? (
             <div
@@ -700,7 +782,7 @@ export default function LogisticsPage() {
 
               <div style={{ marginBottom: "var(--spacing-lg)" }}>
                 <label
-                  htmlFor="courierNameBatch"
+                  htmlFor="courierSelectBatch"
                   style={{
                     display: "block",
                     fontSize: 14,
@@ -709,38 +791,52 @@ export default function LogisticsPage() {
                     color: "var(--color-text)",
                   }}
                 >
-                  Имя курьера <span style={{ color: "red" }}>*</span>
+                  Курьер (role: courier) <span style={{ color: "red" }}>*</span>
                 </label>
-                <input
-                  id="courierNameBatch"
-                  type="text"
-                  value={courierName}
-                  onChange={(e) => setCourierName(e.target.value)}
-                  placeholder="Введите имя курьера"
-                  disabled={shipping}
+                <select
+                  id="courierSelectBatch"
+                  value={selectedCourierUserId}
+                  onChange={(e) => setSelectedCourierUserId(e.target.value)}
+                  disabled={shipping || loadingCouriers}
                   style={{
                     width: "100%",
                     padding: "var(--spacing-sm) var(--spacing-md)",
                     border: "1px solid var(--color-border)",
                     borderRadius: "var(--radius-md)",
                     fontSize: 14,
+                    background: "#fff",
                   }}
-                />
+                >
+                  <option value="">{loadingCouriers ? "Загрузка курьеров..." : "Выберите курьера"}</option>
+                  {couriers.map((courier) => (
+                    <option key={courier.id} value={courier.id}>
+                      {courier.full_name}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+                  Назначение курьера выполняется только выбором из справочника. Ручной ввод имени логистами не допускается.
+                </div>
+                {selectedCourierName && (
+                  <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
+                    Назначен курьер: <strong>{selectedCourierName}</strong>
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={handleBatchShipOut}
-                disabled={shipping || !courierName.trim()}
+                disabled={shipping || !selectedCourierUserId}
                 style={{
                   width: "100%",
                   padding: "var(--spacing-md)",
-                  background: shipping || !courierName.trim() ? "#ccc" : "#16a34a",
+                  background: shipping || !selectedCourierUserId ? "#ccc" : "#16a34a",
                   color: "#fff",
                   border: "none",
                   borderRadius: "var(--radius-md)",
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: shipping || !courierName.trim() ? "not-allowed" : "pointer",
+                  cursor: shipping || !selectedCourierUserId ? "not-allowed" : "pointer",
                 }}
               >
                 {shipping ? "Отправка..." : `✓ Отправить все (${selectedUnitIds.size})`}
@@ -749,7 +845,7 @@ export default function LogisticsPage() {
               <button
                 onClick={() => {
                   setSelectedUnitIds(new Set());
-                  setCourierName("");
+                  setSelectedCourierUserId("");
                 }}
                 disabled={shipping}
                 style={{
@@ -806,7 +902,7 @@ export default function LogisticsPage() {
 
               <div style={{ marginBottom: "var(--spacing-lg)" }}>
                 <label
-                  htmlFor="courierName"
+                  htmlFor="courierSelect"
                   style={{
                     display: "block",
                     fontSize: 14,
@@ -815,38 +911,52 @@ export default function LogisticsPage() {
                     color: "var(--color-text)",
                   }}
                 >
-                  Имя курьера <span style={{ color: "red" }}>*</span>
+                  Курьер (role: courier) <span style={{ color: "red" }}>*</span>
                 </label>
-                <input
-                  id="courierName"
-                  type="text"
-                  value={courierName}
-                  onChange={(e) => setCourierName(e.target.value)}
-                  placeholder="Введите имя курьера"
-                  disabled={shipping}
+                <select
+                  id="courierSelect"
+                  value={selectedCourierUserId}
+                  onChange={(e) => setSelectedCourierUserId(e.target.value)}
+                  disabled={shipping || loadingCouriers}
                   style={{
                     width: "100%",
                     padding: "var(--spacing-sm) var(--spacing-md)",
                     border: "1px solid var(--color-border)",
                     borderRadius: "var(--radius-md)",
                     fontSize: 14,
+                    background: "#fff",
                   }}
-                />
+                >
+                  <option value="">{loadingCouriers ? "Загрузка курьеров..." : "Выберите курьера"}</option>
+                  {couriers.map((courier) => (
+                    <option key={courier.id} value={courier.id}>
+                      {courier.full_name}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+                  Назначение курьера выполняется только выбором из справочника. Ручной ввод имени логистами не допускается.
+                </div>
+                {selectedCourierName && (
+                  <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
+                    Назначен курьер: <strong>{selectedCourierName}</strong>
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={handleShipOut}
-                disabled={shipping || !courierName.trim() || !selectedUnit}
+                disabled={shipping || !selectedCourierUserId || !selectedUnit}
                 style={{
                   width: "100%",
                   padding: "var(--spacing-md)",
-                  background: shipping || !courierName.trim() || !selectedUnit ? "#ccc" : "#16a34a",
+                  background: shipping || !selectedCourierUserId || !selectedUnit ? "#ccc" : "#16a34a",
                   color: "#fff",
                   border: "none",
                   borderRadius: "var(--radius-md)",
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: shipping || !courierName.trim() || !selectedUnit ? "not-allowed" : "pointer",
+                  cursor: shipping || !selectedCourierUserId || !selectedUnit ? "not-allowed" : "pointer",
                 }}
               >
                 {shipping ? "Отправка..." : "✓ Готово / Отправить"}
@@ -855,7 +965,7 @@ export default function LogisticsPage() {
               <button
                 onClick={() => {
                   setSelectedUnit(null);
-                  setCourierName("");
+                  setSelectedCourierUserId("");
                 }}
                 disabled={shipping}
                 style={{

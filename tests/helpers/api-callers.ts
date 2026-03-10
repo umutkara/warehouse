@@ -42,3 +42,23 @@ export async function callInventoryStart(body?: Record<string, unknown>) {
     }),
   );
 }
+
+export async function callCourierShiftStart(body?: Record<string, unknown>) {
+  const { POST } = await import("../../app/api/courier/shift/start/route");
+  return POST(
+    new Request("http://localhost/api/courier/shift/start", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
+  );
+}
+
+export async function callCourierTaskClaim(body: Record<string, unknown>) {
+  const { POST } = await import("../../app/api/courier/tasks/claim/route");
+  return POST(
+    new Request("http://localhost/api/courier/tasks/claim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
