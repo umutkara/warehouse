@@ -45,6 +45,7 @@ export default function LogisticsPage() {
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [couriers, setCouriers] = useState<CourierOption[]>([]);
   const [selectedCourierUserId, setSelectedCourierUserId] = useState("");
+  const [manualCourierName, setManualCourierName] = useState("");
   const [loadingCouriers, setLoadingCouriers] = useState(false);
   const [shipping, setShipping] = useState(false);
   const [lastShipment, setLastShipment] = useState<LastShipmentInfo | null>(null);
@@ -153,12 +154,13 @@ export default function LogisticsPage() {
 
   // Batch ship out - sends multiple units with same courier
   async function handleBatchShipOut() {
-    if (selectedUnitIds.size === 0 || !selectedCourierUserId) {
-      alert("Выберите заказы и назначьте курьера");
+    if (selectedUnitIds.size === 0 || (!selectedCourierUserId && !manualCourierName.trim())) {
+      alert("Выберите заказы и укажите курьера");
       return;
     }
     const selectedCourier = couriers.find((courier) => courier.id === selectedCourierUserId);
-    const selectedCourierName = selectedCourier?.full_name || "Неизвестный курьер";
+    const selectedCourierName =
+      selectedCourier?.full_name || manualCourierName.trim() || "Неизвестный курьер";
 
     if (!confirm(`Отправить ${selectedUnitIds.size} заказ${selectedUnitIds.size > 1 ? 'ов' : ''} курьеру ${selectedCourierName}?`)) {
       return;
@@ -176,7 +178,9 @@ export default function LogisticsPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               unitId,
-              courierUserId: selectedCourierUserId,
+              ...(selectedCourierUserId
+                ? { courierUserId: selectedCourierUserId }
+                : { courierName: manualCourierName.trim() }),
             }),
           }).then((res) => res.json())
         )
@@ -194,6 +198,7 @@ export default function LogisticsPage() {
         });
         setSelectedUnitIds(new Set());
         setSelectedCourierUserId("");
+        setManualCourierName("");
         await loadUnits();
       }
 
@@ -209,8 +214,8 @@ export default function LogisticsPage() {
 
   // Single ship out (existing behavior - preserved)
   async function handleShipOut() {
-    if (!selectedUnit || !selectedCourierUserId) {
-      alert("Назначьте курьера");
+    if (!selectedUnit || (!selectedCourierUserId && !manualCourierName.trim())) {
+      alert("Укажите курьера");
       return;
     }
 
@@ -223,7 +228,9 @@ export default function LogisticsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unitId: selectedUnit.id,
-          courierUserId: selectedCourierUserId,
+          ...(selectedCourierUserId
+            ? { courierUserId: selectedCourierUserId }
+            : { courierName: manualCourierName.trim() }),
         }),
       });
 
@@ -231,7 +238,7 @@ export default function LogisticsPage() {
 
       if (res.ok && json.ok) {
         const selectedCourier = couriers.find((courier) => courier.id === selectedCourierUserId);
-        const sentCourierName = selectedCourier?.full_name || "курьеру";
+        const sentCourierName = selectedCourier?.full_name || manualCourierName.trim() || "курьеру";
         alert(`✓ Заказ ${selectedUnit.barcode} отправлен курьеру ${sentCourierName}`);
         setLastShipment({
           unitLabel: selectedUnit.barcode,
@@ -240,6 +247,7 @@ export default function LogisticsPage() {
         });
         setSelectedUnit(null);
         setSelectedCourierUserId("");
+        setManualCourierName("");
         await loadUnits();
       } else {
         setError(json.error || "Ошибка отправки");
@@ -270,6 +278,9 @@ export default function LogisticsPage() {
     });
   const selectedCourierName =
     couriers.find((courier) => courier.id === selectedCourierUserId)?.full_name || "";
+  const effectiveCourierName = selectedCourierName
+    ? selectedCourierName
+    : manualCourierName.trim();
 
   async function handleExportToExcel(format: "xlsx" | "csv" = "xlsx") {
     const unitsToExport = filteredUnits.length > 0 ? filteredUnits : units;
@@ -815,28 +826,62 @@ export default function LogisticsPage() {
                   ))}
                 </select>
                 <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-                  Назначение курьера выполняется только выбором из справочника. Ручной ввод имени логистами не допускается.
+                  Можно выбрать курьера из справочника или ввести имя вручную.
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label
+                    htmlFor="manualCourierNameBatch"
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      marginBottom: 6,
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    Ручной ввод имени курьера
+                  </label>
+                  <input
+                    id="manualCourierNameBatch"
+                    type="text"
+                    value={manualCourierName}
+                    onChange={(e) => setManualCourierName(e.target.value)}
+                    placeholder="Например: Али Мамедов"
+                    disabled={shipping}
+                    style={{
+                      width: "100%",
+                      padding: "var(--spacing-sm) var(--spacing-md)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-md)",
+                      fontSize: 14,
+                    }}
+                  />
                 </div>
                 {selectedCourierName && (
                   <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
                     Назначен курьер: <strong>{selectedCourierName}</strong>
                   </div>
                 )}
+                {!selectedCourierName && effectiveCourierName && (
+                  <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
+                    Введенный курьер: <strong>{effectiveCourierName}</strong>
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={handleBatchShipOut}
-                disabled={shipping || !selectedCourierUserId}
+                disabled={shipping || !effectiveCourierName}
                 style={{
                   width: "100%",
                   padding: "var(--spacing-md)",
-                  background: shipping || !selectedCourierUserId ? "#ccc" : "#16a34a",
+                  background: shipping || !effectiveCourierName ? "#ccc" : "#16a34a",
                   color: "#fff",
                   border: "none",
                   borderRadius: "var(--radius-md)",
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: shipping || !selectedCourierUserId ? "not-allowed" : "pointer",
+                  cursor: shipping || !effectiveCourierName ? "not-allowed" : "pointer",
                 }}
               >
                 {shipping ? "Отправка..." : `✓ Отправить все (${selectedUnitIds.size})`}
@@ -846,6 +891,7 @@ export default function LogisticsPage() {
                 onClick={() => {
                   setSelectedUnitIds(new Set());
                   setSelectedCourierUserId("");
+                  setManualCourierName("");
                 }}
                 disabled={shipping}
                 style={{
@@ -935,28 +981,62 @@ export default function LogisticsPage() {
                   ))}
                 </select>
                 <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-                  Назначение курьера выполняется только выбором из справочника. Ручной ввод имени логистами не допускается.
+                  Можно выбрать курьера из справочника или ввести имя вручную.
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <label
+                    htmlFor="manualCourierNameSingle"
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      marginBottom: 6,
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    Ручной ввод имени курьера
+                  </label>
+                  <input
+                    id="manualCourierNameSingle"
+                    type="text"
+                    value={manualCourierName}
+                    onChange={(e) => setManualCourierName(e.target.value)}
+                    placeholder="Например: Али Мамедов"
+                    disabled={shipping}
+                    style={{
+                      width: "100%",
+                      padding: "var(--spacing-sm) var(--spacing-md)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-md)",
+                      fontSize: 14,
+                    }}
+                  />
                 </div>
                 {selectedCourierName && (
                   <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
                     Назначен курьер: <strong>{selectedCourierName}</strong>
                   </div>
                 )}
+                {!selectedCourierName && effectiveCourierName && (
+                  <div style={{ fontSize: 13, color: "#065f46", marginTop: 8 }}>
+                    Введенный курьер: <strong>{effectiveCourierName}</strong>
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={handleShipOut}
-                disabled={shipping || !selectedCourierUserId || !selectedUnit}
+                disabled={shipping || !effectiveCourierName || !selectedUnit}
                 style={{
                   width: "100%",
                   padding: "var(--spacing-md)",
-                  background: shipping || !selectedCourierUserId || !selectedUnit ? "#ccc" : "#16a34a",
+                  background: shipping || !effectiveCourierName || !selectedUnit ? "#ccc" : "#16a34a",
                   color: "#fff",
                   border: "none",
                   borderRadius: "var(--radius-md)",
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: shipping || !selectedCourierUserId || !selectedUnit ? "not-allowed" : "pointer",
+                  cursor: shipping || !effectiveCourierName || !selectedUnit ? "not-allowed" : "pointer",
                 }}
               >
                 {shipping ? "Отправка..." : "✓ Готово / Отправить"}
@@ -966,6 +1046,7 @@ export default function LogisticsPage() {
                 onClick={() => {
                   setSelectedUnit(null);
                   setSelectedCourierUserId("");
+                  setManualCourierName("");
                 }}
                 disabled={shipping}
                 style={{
