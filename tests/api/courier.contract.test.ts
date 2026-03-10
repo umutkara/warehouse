@@ -58,20 +58,19 @@ describe("Courier API contracts", () => {
     });
   });
 
-  it("POST /api/courier/tasks/claim returns 409 when task unavailable", async () => {
+  it("POST /api/courier/tasks/claim returns 410 because pool flow is disabled", async () => {
     mockServerAuthOnly({ supabaseServerMock, userId: "courier-1" });
     const { supabaseAdmin } = await import("../../lib/supabase/admin");
     const adminMock = createAdminFromMock({
       profiles: [{ data: { warehouse_id: "w1", role: "courier", full_name: "Courier One" }, error: null }],
-      courier_task_pool: [{ data: null, error: null }],
     });
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
 
     const res = await callCourierTaskClaim({ poolId: "pool-1" });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(410);
     await expect(res.json()).resolves.toMatchObject({
-      error: "Task already claimed or unavailable",
+      error: "Pool claim flow is disabled. Use assignments confirm or scan-claim.",
     });
   });
 });
