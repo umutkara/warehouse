@@ -33,7 +33,11 @@ export default async function RoutePlanningPage() {
     <RoutePlanningClient
       initialRole={profile.role}
       initialCanEdit={canEditRoutePlanning(profile.role)}
-      mapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_JS_API_KEY || ""}
+      mapsApiKey={
+        process.env.NEXT_PUBLIC_GOOGLE_MAPS_JS_API_KEY ||
+        process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+        ""
+      }
     />
   );
 }
