@@ -170,6 +170,56 @@ function getRoleLabel(role: string): string {
   return map[role] || role || "unknown";
 }
 
+function hashString(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildCourierAvatarSvg(seed: string): string {
+  const palette = ["#22c55e", "#3b82f6", "#f59e0b", "#f97316", "#a855f7", "#ef4444", "#06b6d4"];
+  const color = palette[hashString(seed) % palette.length];
+  const faceVariant = hashString(`${seed}-face`) % 3;
+  const smilePath =
+    faceVariant === 0
+      ? "M 13 20 C 15 23 21 23 23 20"
+      : faceVariant === 1
+        ? "M 13 19 C 15 22 21 22 23 19"
+        : "M 13 21 C 15 24 21 24 23 21";
+  const wink = faceVariant === 2 ? "<line x1='21' y1='15' x2='24' y2='15' stroke='#0f172a' stroke-width='2' stroke-linecap='round'/>" : "<circle cx='22.5' cy='15' r='1.8' fill='#0f172a'/>";
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'>
+  <circle cx='18' cy='18' r='16' fill='${color}' stroke='white' stroke-width='2'/>
+  <circle cx='13.5' cy='15' r='1.8' fill='#0f172a'/>
+  ${wink}
+  <path d='${smilePath}' fill='none' stroke='#0f172a' stroke-width='2' stroke-linecap='round'/>
+</svg>`;
+}
+
+function buildCourierIcon(
+  maps: any,
+  seed: string,
+): { url: string; scaledSize: any; anchor: any } {
+  const svg = buildCourierAvatarSvg(seed);
+  const dataUri = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  return {
+    url: dataUri,
+    scaledSize: new maps.Size(36, 36),
+    anchor: new maps.Point(18, 18),
+  };
+}
+
 function loadGoogleMaps(apiKey: string): Promise<any> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Google Maps доступен только в браузере"));
@@ -294,6 +344,7 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
 
     const bounds = new maps.LatLngBounds();
     let hasBounds = false;
+    const infoWindow = new maps.InfoWindow();
 
     for (const zone of zones) {
       const path = parsePolygon(zone.polygon);
@@ -345,16 +396,27 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
         map,
         position: { lat, lng },
         title: `${courier.courier_name} (${courier.active_tasks})`,
-        icon: {
-          path: maps.SymbolPath.CIRCLE,
-          scale: 6,
-          fillColor: "#2563eb",
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: 1.2,
-        },
+        icon: buildCourierIcon(maps, courier.courier_user_id),
       });
       mapObjectsRef.current.markers.push(marker);
+      const recordedAt = courier.last_location?.recorded_at
+        ? formatDate(courier.last_location.recorded_at)
+        : "—";
+      const content = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size:12px; line-height:1.4; min-width:180px;">
+          <div style="font-weight:700; margin-bottom:3px;">${escapeHtml(courier.courier_name)}</div>
+          <div>Задач в работе: <b>${courier.active_tasks}</b></div>
+          <div>Смена: ${escapeHtml(courier.status)}</div>
+          <div>Обновлено: ${escapeHtml(recordedAt)}</div>
+        </div>
+      `;
+      marker.addListener("mouseover", () => {
+        infoWindow.setContent(content);
+        infoWindow.open({ map, anchor: marker });
+      });
+      marker.addListener("mouseout", () => {
+        infoWindow.close();
+      });
       bounds.extend(marker.getPosition());
       hasBounds = true;
     }
@@ -801,6 +863,40 @@ export default function RoutePlanningClient({
               открытых смен.
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className={styles.couriersStrip}>
+        <div className={styles.couriersStripHeader}>
+          <h3 className={styles.couriersStripTitle}>
+            Курьеры сейчас в доставке ({dashboard?.live_couriers.length || 0})
+          </h3>
+          <span className={styles.couriersStripHint}>
+            Цельная плашка: сводка по активным сменам и последнему live-пингу
+          </span>
+        </div>
+        <div className={styles.couriersGrid}>
+          {(dashboard?.live_couriers || []).length === 0 ? (
+            <div className={styles.empty}>Сейчас нет активных курьеров в доставке.</div>
+          ) : (
+            (dashboard?.live_couriers || []).map((courier) => (
+              <div key={courier.shift_id} className={styles.courierCard}>
+                <div className={styles.courierName}>{courier.courier_name}</div>
+                <div className={styles.courierMeta}>
+                  Статус смены: {courier.status} • Задач: {courier.active_tasks}
+                </div>
+                <div className={styles.courierMeta}>
+                  Старт: {formatDate(courier.started_at)}
+                </div>
+                <div className={styles.courierMeta}>
+                  Последний live:{" "}
+                  {courier.last_location?.recorded_at
+                    ? formatDate(courier.last_location.recorded_at)
+                    : "нет координат"}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
