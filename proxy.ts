@@ -23,7 +23,8 @@ export async function proxy(req: NextRequest) {
   );
 
   const { data } = await supabase.auth.getUser();
-  const isLoggedIn = !!data?.user;
+  const user = data?.user ?? null;
+  const isLoggedIn = !!user;
 
   const pathname = req.nextUrl.pathname;
 
@@ -35,6 +36,20 @@ export async function proxy(req: NextRequest) {
     if (!isLoggedIn) {
       const url = req.nextUrl.clone();
       url.pathname = "/login";
+      return NextResponse.redirect(url);
+    }
+
+    // Courier-аккаунты работают только в мобильном приложении.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.role === "courier") {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("error", "courier_web_denied");
       return NextResponse.redirect(url);
     }
   }

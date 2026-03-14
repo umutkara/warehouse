@@ -10,8 +10,25 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const lat = Number(body?.lat);
   const lng = Number(body?.lng);
+  const zoneId = body?.zoneId?.toString() || null;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return NextResponse.json({ error: "lat and lng are required numbers" }, { status: 400 });
+  }
+
+  if (zoneId) {
+    const { data: zone, error: zoneError } = await supabaseAdmin
+      .from("delivery_zones")
+      .select("id")
+      .eq("id", zoneId)
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("active", true)
+      .maybeSingle();
+    if (zoneError) {
+      return NextResponse.json({ error: zoneError.message }, { status: 500 });
+    }
+    if (!zone) {
+      return NextResponse.json({ error: "zoneId is invalid for this warehouse" }, { status: 400 });
+    }
   }
 
   const { data: shift } = await supabaseAdmin
@@ -29,6 +46,7 @@ export async function POST(req: Request) {
     warehouse_id: auth.profile.warehouse_id,
     courier_user_id: auth.user.id,
     shift_id: shift?.id ?? null,
+    zone_id: zoneId,
     lat,
     lng,
     accuracy_m: body?.accuracy ?? null,

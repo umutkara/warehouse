@@ -5,7 +5,9 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function GET(req: Request) {
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    return auth.response;
+  }
 
   const { data: zones, error } = await supabaseAdmin
     .from("delivery_zones")
