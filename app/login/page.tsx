@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -10,13 +10,13 @@ export default function LoginPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    if (searchParams.get("error") === "courier_web_denied") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "courier_web_denied") {
       setErr("Аккаунт courier доступен только в мобильном приложении.");
     }
-  }, [searchParams]);
+  }, []);
 
   async function onLogin() {
     setErr(null);
