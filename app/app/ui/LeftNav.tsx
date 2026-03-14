@@ -328,6 +328,9 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
               Буфер
             </NavButton>
+            <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+              Route Planning
+            </NavButton>
           </>
         )}
 
@@ -384,6 +387,11 @@ export default function LeftNav({ role }: { role: string }) {
         {!isHubWorker && (
           <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
             Буфер
+          </NavButton>
+        )}
+        {!isHubWorker && (
+          <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+            Route Planning
           </NavButton>
         )}
         {canWork && !isLogisticsOnly && !isHubWorker && (

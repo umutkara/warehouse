@@ -377,9 +377,42 @@ export default function LogisticsPage() {
 
   return (
     <div style={{ maxWidth: 1400, margin: "0 auto", padding: "var(--spacing-xl)" }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: "var(--spacing-md)" }}>
-        Логистика
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "var(--spacing-md)",
+          marginBottom: "var(--spacing-md)",
+        }}
+      >
+        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>
+          Логистика
+        </h1>
+        <button
+          onClick={() => router.push("/routeplanning")}
+          style={{
+            padding: "8px 14px",
+            background: "#111827",
+            color: "#fff",
+            border: "none",
+            borderRadius: "var(--radius-md)",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#1f2937";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#111827";
+          }}
+          title="Открыть карту маршрутов и live-контроль курьеров"
+        >
+          🗺 Route Planning
+        </button>
+      </div>
       <p style={{ color: "var(--color-text-secondary)", marginBottom: "var(--spacing-xl)" }}>
         Отправка заказов из picking в OUT (доставка курьером)
       </p>
