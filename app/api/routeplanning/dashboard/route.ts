@@ -11,6 +11,13 @@ const ACTIVE_COURIER_TASK_STATUSES = ["claimed", "in_route", "arrived", "dropped
 const OPEN_SHIFT_STATUSES = ["open", "closing"] as const;
 const MAX_PICKING_UNITS = 500;
 const MAX_DROP_EVENTS = 700;
+const DEFAULT_ZONE_STYLE = {
+  strokeColor: "#2563eb",
+  fillColor: "#60a5fa",
+  fillOpacity: 0.14,
+  strokeOpacity: 0.75,
+  strokeWeight: 2,
+} as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,6 +50,44 @@ function extractOpsStatus(proofMeta: unknown): string | null {
 
 function dbErrorResponse(message: string) {
   return NextResponse.json({ error: message }, { status: 500 });
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function extractZoneStyle(meta: unknown) {
+  if (!meta || typeof meta !== "object") return DEFAULT_ZONE_STYLE;
+  const record = meta as JsonRecord;
+  const display = record.display && typeof record.display === "object"
+    ? (record.display as JsonRecord)
+    : (record as JsonRecord);
+
+  const strokeColor = asTrimmedString(display.strokeColor) || DEFAULT_ZONE_STYLE.strokeColor;
+  const fillColor = asTrimmedString(display.fillColor) || DEFAULT_ZONE_STYLE.fillColor;
+  const fillOpacity = clampNumber(display.fillOpacity, DEFAULT_ZONE_STYLE.fillOpacity, 0, 1);
+  const strokeOpacity = clampNumber(
+    display.strokeOpacity,
+    DEFAULT_ZONE_STYLE.strokeOpacity,
+    0,
+    1,
+  );
+  const strokeWeight = clampNumber(
+    display.strokeWeight,
+    DEFAULT_ZONE_STYLE.strokeWeight,
+    1,
+    8,
+  );
+
+  return {
+    strokeColor,
+    fillColor,
+    fillOpacity,
+    strokeOpacity,
+    strokeWeight,
+  };
 }
 
 export async function GET() {
@@ -80,7 +125,7 @@ export async function GET() {
       .order("full_name", { ascending: true }),
     supabaseAdmin
       .from("delivery_zones")
-      .select("id, name, code, polygon, priority")
+      .select("id, name, code, polygon, priority, meta")
       .eq("warehouse_id", warehouseId)
       .eq("active", true)
       .order("priority", { ascending: false })
@@ -324,6 +369,7 @@ export async function GET() {
     code: zone.code,
     priority: zone.priority,
     polygon: Array.isArray(zone.polygon) ? zone.polygon : [],
+    style: extractZoneStyle(zone.meta),
   }));
 
   return NextResponse.json({

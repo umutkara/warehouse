@@ -204,6 +204,12 @@
   cursor: pointer;
 }
 
+.zoneEditToolbarButton {
+  border-color: #16a34a;
+  color: #166534;
+  background: #f0fdf4;
+}
+
 .hint {
   font-size: 12px;
   color: #6b7280;
@@ -431,6 +437,109 @@
   color: #64748b;
 }
 
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(2, 6, 23, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.modal {
+  width: min(1280px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid #d6dce5;
+  background: #ffffff;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.24);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.modalSubtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.modalBody {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.modalColumn {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.zoneDeleteButton {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.zoneStyleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoneColorDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+}
+
+.colorInput {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 2px 4px;
+}
+
+.zoneEditorMapCard {
+  border: 1px solid #dbe2ea;
+  border-radius: 12px;
+  overflow: hidden;
+  height: 420px;
+}
+
+.zoneEditorMap {
+  width: 100%;
+  height: 100%;
+}
+
 @media (max-width: 1400px) {
   .couriersGrid {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -445,5 +554,13 @@
 
   .row {
     grid-template-columns: 1fr;
+  }
+
+  .modalBody {
+    grid-template-columns: 1fr;
+  }
+
+  .zoneEditorMapCard {
+    height: 320px;
   }
 }

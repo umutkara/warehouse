@@ -68,12 +68,21 @@ type LiveCourier = {
   } | null;
 };
 
+type ZoneStyle = {
+  strokeColor: string;
+  fillColor: string;
+  fillOpacity: number;
+  strokeOpacity: number;
+  strokeWeight: number;
+};
+
 type Zone = {
   id: string;
   name: string;
   code: string;
   priority: number;
   polygon: unknown[];
+  style: ZoneStyle;
 };
 
 type DashboardResponse = {
@@ -116,6 +125,16 @@ type MapPanelProps = {
   liveCouriers: LiveCourier[];
 };
 
+type ZoneEditorModalProps = {
+  open: boolean;
+  apiKey: string;
+  canEdit: boolean;
+  seedZones: Zone[];
+  onClose: () => void;
+  onUnauthorized: () => void;
+  onZonesUpdated: (zones: Zone[]) => void;
+};
+
 declare global {
   interface Window {
     google?: {
@@ -127,6 +146,13 @@ declare global {
 
 const MAP_SCRIPT_ID = "routeplanning-google-maps-script";
 let googleMapsPromise: Promise<any> | null = null;
+const DEFAULT_ZONE_STYLE: ZoneStyle = {
+  strokeColor: "#2563eb",
+  fillColor: "#60a5fa",
+  fillOpacity: 0.14,
+  strokeOpacity: 0.75,
+  strokeWeight: 2,
+};
 
 function toFiniteNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -168,6 +194,35 @@ function getRoleLabel(role: string): string {
     compliance: "compliance",
   };
   return map[role] || role || "unknown";
+}
+
+function normalizeZoneStyle(input: Partial<ZoneStyle> | null | undefined): ZoneStyle {
+  return {
+    strokeColor: input?.strokeColor || DEFAULT_ZONE_STYLE.strokeColor,
+    fillColor: input?.fillColor || DEFAULT_ZONE_STYLE.fillColor,
+    fillOpacity:
+      typeof input?.fillOpacity === "number"
+        ? Math.max(0.05, Math.min(0.9, input.fillOpacity))
+        : DEFAULT_ZONE_STYLE.fillOpacity,
+    strokeOpacity:
+      typeof input?.strokeOpacity === "number"
+        ? Math.max(0.1, Math.min(1, input.strokeOpacity))
+        : DEFAULT_ZONE_STYLE.strokeOpacity,
+    strokeWeight:
+      typeof input?.strokeWeight === "number"
+        ? Math.max(1, Math.min(8, input.strokeWeight))
+        : DEFAULT_ZONE_STYLE.strokeWeight,
+  };
+}
+
+function codeFromName(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24) || `zone-${Date.now().toString(36)}`
+  );
 }
 
 function hashString(input: string): number {
@@ -349,14 +404,15 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
     for (const zone of zones) {
       const path = parsePolygon(zone.polygon);
       if (path.length < 3) continue;
+      const style = normalizeZoneStyle(zone.style);
 
       const polygon = new maps.Polygon({
         paths: path,
-        strokeColor: "#2563eb",
-        strokeOpacity: 0.75,
-        strokeWeight: 2,
-        fillColor: "#60a5fa",
-        fillOpacity: 0.14,
+        strokeColor: style.strokeColor,
+        strokeOpacity: style.strokeOpacity,
+        strokeWeight: style.strokeWeight,
+        fillColor: style.fillColor,
+        fillOpacity: style.fillOpacity,
       });
       polygon.setMap(map);
       mapObjectsRef.current.polygons.push(polygon);
@@ -440,6 +496,462 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
   );
 }
 
+function ZoneEditorModal({
+  open,
+  apiKey,
+  canEdit,
+  seedZones,
+  onClose,
+  onUnauthorized,
+  onZonesUpdated,
+}: ZoneEditorModalProps) {
+  const [zones, setZones] = useState<Zone[]>(seedZones);
+  const [loadingZones, setLoadingZones] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [zoneName, setZoneName] = useState("");
+  const [zoneCode, setZoneCode] = useState("");
+  const [zonePriority, setZonePriority] = useState("100");
+  const [strokeColor, setStrokeColor] = useState(DEFAULT_ZONE_STYLE.strokeColor);
+  const [fillColor, setFillColor] = useState(DEFAULT_ZONE_STYLE.fillColor);
+  const [fillOpacity, setFillOpacity] = useState("0.20");
+  const [draftPoints, setDraftPoints] = useState<Array<{ lat: number; lng: number }>>([]);
+
+  const mapCanvasRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const mapsRef = useRef<any>(null);
+  const clickListenerRef = useRef<any>(null);
+  const draftMarkersRef = useRef<any[]>([]);
+  const draftLineRef = useRef<any>(null);
+  const draftPolygonRef = useRef<any>(null);
+
+  const clearDraftObjects = useCallback(() => {
+    for (const marker of draftMarkersRef.current) {
+      marker.setMap(null);
+    }
+    draftMarkersRef.current = [];
+    if (draftLineRef.current) {
+      draftLineRef.current.setMap(null);
+      draftLineRef.current = null;
+    }
+    if (draftPolygonRef.current) {
+      draftPolygonRef.current.setMap(null);
+      draftPolygonRef.current = null;
+    }
+  }, []);
+
+  const fetchZones = useCallback(async () => {
+    if (!open) return;
+    setLoadingZones(true);
+    setModalError(null);
+    try {
+      const res = await fetch("/api/routeplanning/zones", { cache: "no-store" });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; zones?: Zone[]; error?: string }
+        | null;
+      if (!res.ok || !payload?.ok) {
+        setModalError(payload?.error || "Не удалось загрузить список геозон");
+        return;
+      }
+      const normalized = (payload.zones || []).map((zone) => ({
+        ...zone,
+        style: normalizeZoneStyle(zone.style),
+      }));
+      setZones(normalized);
+      onZonesUpdated(normalized);
+    } catch (error: unknown) {
+      setModalError(error instanceof Error ? error.message : "Ошибка загрузки геозон");
+    } finally {
+      setLoadingZones(false);
+    }
+  }, [onUnauthorized, onZonesUpdated, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setZones(seedZones);
+    setModalError(null);
+    setModalMessage(null);
+    void fetchZones();
+  }, [fetchZones, open, seedZones]);
+
+  useEffect(() => {
+    if (!open || !canEdit) return;
+    let cancelled = false;
+    void loadGoogleMaps(apiKey)
+      .then((maps) => {
+        if (cancelled || !mapCanvasRef.current) return;
+        mapsRef.current = maps;
+        if (!mapRef.current) {
+          mapRef.current = new maps.Map(mapCanvasRef.current, {
+            center: { lat: 40.4093, lng: 49.8671 },
+            zoom: 11,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
+          });
+        }
+        if (clickListenerRef.current) {
+          maps.event.removeListener(clickListenerRef.current);
+        }
+        clickListenerRef.current = mapRef.current.addListener("click", (event: any) => {
+          const lat = event?.latLng?.lat?.();
+          const lng = event?.latLng?.lng?.();
+          if (typeof lat !== "number" || typeof lng !== "number") return;
+          setDraftPoints((prev) => [...prev, { lat, lng }]);
+        });
+      })
+      .catch((error: unknown) => {
+        setModalError(error instanceof Error ? error.message : "Не удалось открыть карту геозон");
+      });
+
+    return () => {
+      cancelled = true;
+      if (clickListenerRef.current && mapsRef.current) {
+        mapsRef.current.event.removeListener(clickListenerRef.current);
+        clickListenerRef.current = null;
+      }
+      clearDraftObjects();
+    };
+  }, [apiKey, canEdit, clearDraftObjects, open]);
+
+  useEffect(() => {
+    if (!open || !canEdit || !mapRef.current || !mapsRef.current) return;
+    clearDraftObjects();
+    const maps = mapsRef.current;
+    const map = mapRef.current;
+    const style = normalizeZoneStyle({
+      strokeColor,
+      fillColor,
+      fillOpacity: Number(fillOpacity),
+    });
+
+    for (const point of draftPoints) {
+      const marker = new maps.Marker({
+        map,
+        position: point,
+        icon: {
+          path: maps.SymbolPath.CIRCLE,
+          scale: 5,
+          fillColor: style.strokeColor,
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 1,
+        },
+      });
+      draftMarkersRef.current.push(marker);
+    }
+
+    if (draftPoints.length >= 2) {
+      draftLineRef.current = new maps.Polyline({
+        map,
+        path: draftPoints,
+        strokeColor: style.strokeColor,
+        strokeOpacity: 0.9,
+        strokeWeight: 2,
+      });
+    }
+    if (draftPoints.length >= 3) {
+      draftPolygonRef.current = new maps.Polygon({
+        map,
+        paths: draftPoints,
+        strokeColor: style.strokeColor,
+        strokeOpacity: 0.9,
+        strokeWeight: 2,
+        fillColor: style.fillColor,
+        fillOpacity: style.fillOpacity,
+      });
+    }
+  }, [canEdit, clearDraftObjects, draftPoints, fillColor, fillOpacity, open, strokeColor]);
+
+  const handleCreateZone = useCallback(async () => {
+    if (!canEdit) return;
+    const name = zoneName.trim();
+    if (!name) {
+      setModalError("Введите название зоны");
+      return;
+    }
+    if (draftPoints.length < 3) {
+      setModalError("Нарисуйте минимум 3 точки на карте");
+      return;
+    }
+
+    setSaving(true);
+    setModalError(null);
+    setModalMessage(null);
+    try {
+      const res = await fetch("/api/routeplanning/zones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          code: zoneCode.trim() || codeFromName(name),
+          priority: Number(zonePriority) || 100,
+          polygon: draftPoints,
+          style: {
+            strokeColor,
+            fillColor,
+            fillOpacity: Number(fillOpacity),
+            strokeOpacity: 0.9,
+            strokeWeight: 2,
+          },
+        }),
+      });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !payload?.ok) {
+        setModalError(payload?.error || "Не удалось создать геозону");
+        return;
+      }
+
+      setModalMessage("Геозона создана");
+      setZoneName("");
+      setZoneCode("");
+      setZonePriority("100");
+      setDraftPoints([]);
+      await fetchZones();
+    } catch (error: unknown) {
+      setModalError(error instanceof Error ? error.message : "Ошибка создания зоны");
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    canEdit,
+    draftPoints,
+    fetchZones,
+    fillColor,
+    fillOpacity,
+    onUnauthorized,
+    strokeColor,
+    zoneCode,
+    zoneName,
+    zonePriority,
+  ]);
+
+  const handleDeleteZone = useCallback(
+    async (id: string, name: string) => {
+      if (!canEdit) return;
+      if (!window.confirm(`Удалить геозону "${name}"?`)) return;
+
+      setDeletingId(id);
+      setModalError(null);
+      setModalMessage(null);
+      try {
+        const res = await fetch(`/api/routeplanning/zones?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        if (res.status === 401) {
+          onUnauthorized();
+          return;
+        }
+        const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!res.ok || !payload?.ok) {
+          setModalError(payload?.error || "Не удалось удалить геозону");
+          return;
+        }
+        setModalMessage("Геозона удалена");
+        await fetchZones();
+      } catch (error: unknown) {
+        setModalError(error instanceof Error ? error.message : "Ошибка удаления зоны");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [canEdit, fetchZones, onUnauthorized],
+  );
+
+  if (!open) return null;
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+        <div className={styles.modalHeader}>
+          <div>
+            <h3 className={styles.modalTitle}>Редактирование геозон</h3>
+            <p className={styles.modalSubtitle}>Сейчас активных зон: {zones.length}</p>
+          </div>
+          <button type="button" className={styles.secondaryButton} onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+
+        {modalError && <div className={styles.error}>{modalError}</div>}
+        {modalMessage && <div className={styles.message}>{modalMessage}</div>}
+
+        <div className={styles.modalBody}>
+          <div className={styles.modalColumn}>
+            <div className={styles.listCard}>
+              <div className={styles.listHeader}>
+                <strong>Существующие зоны ({zones.length})</strong>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => void fetchZones()}
+                  disabled={loadingZones}
+                >
+                  Обновить
+                </button>
+              </div>
+              <div className={styles.listBody}>
+                {loadingZones ? (
+                  <div className={styles.empty}>Загрузка зон...</div>
+                ) : zones.length === 0 ? (
+                  <div className={styles.empty}>Геозон пока нет</div>
+                ) : (
+                  zones.map((zone) => (
+                    <div key={zone.id} className={styles.unitRow}>
+                      <div className={styles.unitBarcode}>{zone.name}</div>
+                      <div className={styles.unitMeta}>code: {zone.code}</div>
+                      <div className={styles.zoneStyleRow}>
+                        <span
+                          className={styles.zoneColorDot}
+                          style={{ background: normalizeZoneStyle(zone.style).fillColor }}
+                        />
+                        <span className={styles.unitMeta}>priority: {zone.priority}</span>
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className={styles.zoneDeleteButton}
+                          onClick={() => void handleDeleteZone(zone.id, zone.name)}
+                          disabled={deletingId === zone.id}
+                        >
+                          {deletingId === zone.id ? "Удаление..." : "Удалить"}
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.modalColumn}>
+            <div className={styles.assignPanel}>
+              <h4 className={styles.sectionTitle}>Создать новую зону</h4>
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Название зоны</label>
+                  <input
+                    className={styles.input}
+                    value={zoneName}
+                    onChange={(event) => setZoneName(event.target.value)}
+                    placeholder="Например: Север-1"
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Code (уникальный)</label>
+                  <input
+                    className={styles.input}
+                    value={zoneCode}
+                    onChange={(event) => setZoneCode(event.target.value)}
+                    placeholder="auto if empty"
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Цвет границы</label>
+                  <input
+                    className={styles.colorInput}
+                    type="color"
+                    value={strokeColor}
+                    onChange={(event) => setStrokeColor(event.target.value)}
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Цвет заливки</label>
+                  <input
+                    className={styles.colorInput}
+                    type="color"
+                    value={fillColor}
+                    onChange={(event) => setFillColor(event.target.value)}
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Прозрачность заливки</label>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min="0.05"
+                    max="0.9"
+                    step="0.05"
+                    value={fillOpacity}
+                    onChange={(event) => setFillOpacity(event.target.value)}
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Priority</label>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={zonePriority}
+                    onChange={(event) => setZonePriority(event.target.value)}
+                    disabled={!canEdit || saving}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => setDraftPoints((prev) => prev.slice(0, -1))}
+                  disabled={!canEdit || saving || draftPoints.length === 0}
+                >
+                  Удалить последнюю точку
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => setDraftPoints([])}
+                  disabled={!canEdit || saving || draftPoints.length === 0}
+                >
+                  Очистить контур
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  onClick={() => void handleCreateZone()}
+                  disabled={!canEdit || saving}
+                >
+                  {saving ? "Сохранение..." : `Сохранить зону (${draftPoints.length} точек)`}
+                </button>
+              </div>
+              <span className={styles.hint}>
+                Кликните по карте, чтобы поставить точки полигона. Минимум 3 точки.
+              </span>
+            </div>
+
+            <div className={styles.zoneEditorMapCard}>
+              <div ref={mapCanvasRef} className={styles.zoneEditorMap} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RoutePlanningClient({
   initialRole,
   initialCanEdit,
@@ -456,6 +968,7 @@ export default function RoutePlanningClient({
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [searchPicking, setSearchPicking] = useState("");
   const [searchDropped, setSearchDropped] = useState("");
+  const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
 
   const canEdit = dashboard?.can_edit ?? initialCanEdit;
   const effectiveRole = dashboard?.role || initialRole;
@@ -641,6 +1154,14 @@ export default function RoutePlanningClient({
     selectedUnitIds,
   ]);
 
+  const handleZonesUpdated = useCallback(
+    (zones: Zone[]) => {
+      setDashboard((prev) => (prev ? { ...prev, zones } : prev));
+      void loadDashboard(true);
+    },
+    [loadDashboard],
+  );
+
   return (
     <div className={styles.page}>
       <div className={styles.toolbar}>
@@ -662,13 +1183,17 @@ export default function RoutePlanningClient({
 
         <div className={styles.toolbarRight}>
           <span className={styles.badge}>Роль: {getRoleLabel(effectiveRole)}</span>
-          <span
-            className={`${styles.badge} ${
-              canEdit ? styles.badgeEditable : styles.badgeReadonly
-            }`}
-          >
-            {canEdit ? "Редактирование" : "Только просмотр"}
-          </span>
+          {canEdit ? (
+            <button
+              type="button"
+              className={`${styles.secondaryButton} ${styles.zoneEditToolbarButton}`}
+              onClick={() => setZoneEditorOpen(true)}
+            >
+              Редактирование геозон ({dashboard?.zones.length || 0})
+            </button>
+          ) : (
+            <span className={`${styles.badge} ${styles.badgeReadonly}`}>Только просмотр</span>
+          )}
           <button
             type="button"
             className={styles.refreshButton}
@@ -899,6 +1424,16 @@ export default function RoutePlanningClient({
           )}
         </div>
       </div>
+
+      <ZoneEditorModal
+        open={zoneEditorOpen}
+        apiKey={mapsApiKey}
+        canEdit={canEdit}
+        seedZones={dashboard?.zones || []}
+        onClose={() => setZoneEditorOpen(false)}
+        onUnauthorized={() => router.push("/login")}
+        onZonesUpdated={handleZonesUpdated}
+      />
     </div>
   );
 }
