@@ -120,7 +120,9 @@ async function requireRoutePlanningProfile() {
 
 export async function GET() {
   const auth = await requireRoutePlanningProfile();
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    return auth.response;
+  }
 
   const { data: zones, error } = await supabaseAdmin
     .from("delivery_zones")

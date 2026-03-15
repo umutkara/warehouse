@@ -96,7 +96,9 @@ export async function GET() {
     profileSelect: "warehouse_id, role",
     allowedRoles: [...ROUTE_PLANNING_VIEW_ROLES],
   });
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    return auth.response;
+  }
 
   const warehouseId = String(auth.profile.warehouse_id);
   const role = String(auth.profile.role || "");

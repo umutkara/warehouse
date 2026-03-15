@@ -400,6 +400,7 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
     const bounds = new maps.LatLngBounds();
     let hasBounds = false;
     const infoWindow = new maps.InfoWindow();
+    let renderedZonePolygons = 0;
 
     for (const zone of zones) {
       const path = parsePolygon(zone.polygon);
@@ -416,6 +417,7 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
       });
       polygon.setMap(map);
       mapObjectsRef.current.polygons.push(polygon);
+      renderedZonePolygons += 1;
 
       for (const point of path) {
         bounds.extend(point);
@@ -542,7 +544,7 @@ function ZoneEditorModal({
     }
   }, []);
 
-  const fetchZones = useCallback(async () => {
+  const fetchZones = useCallback(async (propagateToParent: boolean = false) => {
     if (!open) return;
     setLoadingZones(true);
     setModalError(null);
@@ -564,7 +566,9 @@ function ZoneEditorModal({
         style: normalizeZoneStyle(zone.style),
       }));
       setZones(normalized);
-      onZonesUpdated(normalized);
+      if (propagateToParent) {
+        onZonesUpdated(normalized);
+      }
     } catch (error: unknown) {
       setModalError(error instanceof Error ? error.message : "Ошибка загрузки геозон");
     } finally {
@@ -577,8 +581,8 @@ function ZoneEditorModal({
     setZones(seedZones);
     setModalError(null);
     setModalMessage(null);
-    void fetchZones();
-  }, [fetchZones, open, seedZones]);
+    void fetchZones(false);
+  }, [fetchZones, open]);
 
   useEffect(() => {
     if (!open || !canEdit) return;
@@ -631,21 +635,42 @@ function ZoneEditorModal({
       fillOpacity: Number(fillOpacity),
     });
 
-    for (const point of draftPoints) {
+    draftPoints.forEach((point, index) => {
       const marker = new maps.Marker({
         map,
         position: point,
+        draggable: true,
+        label: {
+          text: String(index + 1),
+          color: "#ffffff",
+          fontSize: "11px",
+          fontWeight: "700",
+        },
+        title: `Точка ${index + 1}. Перетащите для коррекции, ПКМ для удаления`,
         icon: {
           path: maps.SymbolPath.CIRCLE,
-          scale: 5,
+          scale: 8,
           fillColor: style.strokeColor,
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 1,
         },
       });
+      marker.addListener("dragend", (event: any) => {
+        const lat = event?.latLng?.lat?.();
+        const lng = event?.latLng?.lng?.();
+        if (typeof lat !== "number" || typeof lng !== "number") return;
+        setDraftPoints((prev) =>
+          prev.map((existing, existingIndex) =>
+            existingIndex === index ? { lat, lng } : existing,
+          ),
+        );
+      });
+      marker.addListener("rightclick", () => {
+        setDraftPoints((prev) => prev.filter((_, existingIndex) => existingIndex !== index));
+      });
       draftMarkersRef.current.push(marker);
-    }
+    });
 
     if (draftPoints.length >= 2) {
       draftLineRef.current = new maps.Polyline({
@@ -717,7 +742,7 @@ function ZoneEditorModal({
       setZoneCode("");
       setZonePriority("100");
       setDraftPoints([]);
-      await fetchZones();
+      await fetchZones(true);
     } catch (error: unknown) {
       setModalError(error instanceof Error ? error.message : "Ошибка создания зоны");
     } finally {
@@ -758,7 +783,7 @@ function ZoneEditorModal({
           return;
         }
         setModalMessage("Геозона удалена");
-        await fetchZones();
+        await fetchZones(true);
       } catch (error: unknown) {
         setModalError(error instanceof Error ? error.message : "Ошибка удаления зоны");
       } finally {
@@ -794,7 +819,7 @@ function ZoneEditorModal({
                 <button
                   type="button"
                   className={styles.secondaryButton}
-                  onClick={() => void fetchZones()}
+                  onClick={() => void fetchZones(false)}
                   disabled={loadingZones}
                 >
                   Обновить
@@ -938,7 +963,8 @@ function ZoneEditorModal({
                 </button>
               </div>
               <span className={styles.hint}>
-                Кликните по карте, чтобы поставить точки полигона. Минимум 3 точки.
+                Клик по карте добавляет точку. Перетащите точку для коррекции, ПКМ по точке удаляет
+                ее. Минимум 3 точки.
               </span>
             </div>
 
@@ -1157,9 +1183,8 @@ export default function RoutePlanningClient({
   const handleZonesUpdated = useCallback(
     (zones: Zone[]) => {
       setDashboard((prev) => (prev ? { ...prev, zones } : prev));
-      void loadDashboard(true);
     },
-    [loadDashboard],
+    [],
   );
 
   return (
