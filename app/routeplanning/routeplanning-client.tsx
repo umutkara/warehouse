@@ -703,7 +703,7 @@ function RoutePlanningMap({
       map.fitBounds(bounds, 60);
       hasAutoFittedRef.current = true;
     }
-  }, [mapsReady, zones, dropPoints, liveCouriers, clearMapObjects]);
+  }, [mapsReady, zones, dropPoints, liveCouriers, showCouriers, clearMapObjects]);
 
   return (
     <div className={styles.mapCard}>
