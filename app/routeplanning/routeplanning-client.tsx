@@ -2069,7 +2069,7 @@ export default function RoutePlanningClient({
   const [listsPickingHeightPct, setListsPickingHeightPct] = useState(40);
   const [isListsResizing, setIsListsResizing] = useState(false);
   const listsWrapRef = useRef<HTMLDivElement | null>(null);
-  const [mainAreaHeightPct, setMainAreaHeightPct] = useState(70);
+  const [mainHeights, setMainHeights] = useState({ mainAreaPx: 450, couriersStripPx: 220 });
   const [isMainCouriersResizing, setIsMainCouriersResizing] = useState(false);
   const mainCouriersWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -2120,13 +2120,17 @@ export default function RoutePlanningClient({
     try {
       const saved = localStorage.getItem("routeplanning-left-pane-width");
       const n = Number(saved);
-      if (Number.isFinite(n) && n >= 25 && n <= 75) setLeftPaneWidthPct(n);
+      if (Number.isFinite(n) && n >= 15 && n <= 90) setLeftPaneWidthPct(n);
       const savedLists = localStorage.getItem("routeplanning-lists-picking-height");
       const nLists = Number(savedLists);
-      if (Number.isFinite(nLists) && nLists >= 20 && nLists <= 80) setListsPickingHeightPct(nLists);
-      const savedMain = localStorage.getItem("routeplanning-main-area-height");
+      if (Number.isFinite(nLists) && nLists >= 10 && nLists <= 90) setListsPickingHeightPct(nLists);
+      const savedMain = localStorage.getItem("routeplanning-main-area-height-px");
       const nMain = Number(savedMain);
-      if (Number.isFinite(nMain) && nMain >= 35 && nMain <= 90) setMainAreaHeightPct(nMain);
+      const savedCouriers = localStorage.getItem("routeplanning-couriers-strip-height-px");
+      const nCouriers = Number(savedCouriers);
+      if (Number.isFinite(nMain) && nMain >= 200 && Number.isFinite(nCouriers) && nCouriers >= 100) {
+        setMainHeights({ mainAreaPx: nMain, couriersStripPx: nCouriers });
+      }
     } catch {
       /* ignore */
     }
@@ -2360,7 +2364,7 @@ export default function RoutePlanningClient({
       if (!isResizing || !splitContainerRef.current) return;
       const rect = splitContainerRef.current.getBoundingClientRect();
       const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
-      const clamped = Math.max(25, Math.min(75, pct));
+      const clamped = Math.max(15, Math.min(90, pct));
       setLeftPaneWidthPct(clamped);
       try {
         localStorage.setItem("routeplanning-left-pane-width", String(clamped));
@@ -2378,7 +2382,7 @@ export default function RoutePlanningClient({
       if (!isListsResizing || !listsWrapRef.current) return;
       const rect = listsWrapRef.current.getBoundingClientRect();
       const pct = Math.round(((e.clientY - rect.top) / rect.height) * 100);
-      const clamped = Math.max(20, Math.min(80, pct));
+      const clamped = Math.max(10, Math.min(90, pct));
       setListsPickingHeightPct(clamped);
       try {
         localStorage.setItem("routeplanning-lists-picking-height", String(clamped));
@@ -2394,15 +2398,21 @@ export default function RoutePlanningClient({
   const handleMainCouriersResizeMove = useCallback(
     (e: MouseEvent) => {
       if (!isMainCouriersResizing || !mainCouriersWrapRef.current) return;
-      const rect = mainCouriersWrapRef.current.getBoundingClientRect();
-      const pct = Math.round(((e.clientY - rect.top) / rect.height) * 100);
-      const clamped = Math.max(35, Math.min(90, pct));
-      setMainAreaHeightPct(clamped);
-      try {
-        localStorage.setItem("routeplanning-main-area-height", String(clamped));
-      } catch {
-        /* ignore */
-      }
+      const wrap = mainCouriersWrapRef.current;
+      const rect = wrap.getBoundingClientRect();
+      const yInContent = wrap.scrollTop + (e.clientY - rect.top);
+      setMainHeights((prev) => {
+        const total = prev.mainAreaPx + 8 + prev.couriersStripPx;
+        const newMain = Math.max(200, Math.round(yInContent));
+        const newCouriers = Math.max(100, total - newMain - 8);
+        try {
+          localStorage.setItem("routeplanning-main-area-height-px", String(newMain));
+          localStorage.setItem("routeplanning-couriers-strip-height-px", String(newCouriers));
+        } catch {
+          /* ignore */
+        }
+        return { mainAreaPx: newMain, couriersStripPx: newCouriers };
+      });
     },
     [isMainCouriersResizing],
   );
@@ -2551,8 +2561,12 @@ export default function RoutePlanningClient({
         style={{ cursor: isMainCouriersResizing ? "row-resize" : undefined }}
       >
         <div
+          className={styles.mainCouriersInner}
+          style={{ height: mainHeights.mainAreaPx + 8 + mainHeights.couriersStripPx }}
+        >
+        <div
           className={styles.mainArea}
-          style={{ height: `${mainAreaHeightPct}%` }}
+          style={{ height: mainHeights.mainAreaPx }}
         >
           <div
             ref={splitContainerRef}
@@ -2837,7 +2851,10 @@ export default function RoutePlanningClient({
           aria-label="Изменить высоту верхней и нижней области"
         />
 
-        <div className={styles.couriersStripArea}>
+        <div
+          className={styles.couriersStripArea}
+          style={{ height: mainHeights.couriersStripPx }}
+        >
       <div className={styles.couriersStrip}>
         <div className={styles.couriersStripHeader}>
           <h3 className={styles.couriersStripTitle}>
@@ -2880,6 +2897,7 @@ export default function RoutePlanningClient({
           )}
         </div>
       </div>
+        </div>
         </div>
       </div>
 
