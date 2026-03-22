@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * GET /api/units/list
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("warehouse_id")
+      .select("warehouse_id, role")
       .eq("id", userData.user.id)
       .single();
 
@@ -37,6 +38,8 @@ export async function GET(req: Request) {
     const searchQuery = searchParams.get("search") || "";
     const statusFilter = searchParams.get("status") || "all";
     const opsFilter = searchParams.get("ops") || "all";
+    const canUseKeywordSearch = hasAnyRole(profile.role, ["ops", "admin"]);
+    const normalizedSearchQuery = searchQuery.trim();
 
     // Calculate date threshold based on filter
     let dateThreshold: string | null = null;
@@ -101,10 +104,10 @@ export async function GET(req: Request) {
       }
     }
 
-    // Apply search filter
-    if (searchQuery.trim()) {
-      query = query.ilike("barcode", `%${searchQuery.trim()}%`);
-      countQuery = countQuery.ilike("barcode", `%${searchQuery.trim()}%`);
+    // Search is allowed only for ops/admin. Others can still pass ?search=... but it is ignored.
+    // For ops/admin we apply keyword filtering after loading units to support scenario search.
+    if (normalizedSearchQuery && !canUseKeywordSearch) {
+      // no-op: intentionally ignore search for unauthorized roles
     }
 
     // Apply age filter
@@ -242,10 +245,75 @@ export async function GET(req: Request) {
       };
     });
 
-    const total = typeof totalCount === "number" ? totalCount : unitsWithAge.length;
+    function resolveLastWrittenScenario(meta: any): string | null {
+      const merchantRejections = Array.isArray(meta?.merchant_rejections)
+        ? meta.merchant_rejections
+        : [];
+      const serviceCenterReturns = Array.isArray(meta?.service_center_returns)
+        ? meta.service_center_returns
+        : [];
+
+      const latestMerchantScenario =
+        [...merchantRejections]
+          .reverse()
+          .find((item: any) => typeof item?.scenario === "string" && item.scenario.trim())
+          ?.scenario || null;
+      if (latestMerchantScenario) return String(latestMerchantScenario).trim();
+
+      const latestServiceScenario =
+        [...serviceCenterReturns]
+          .reverse()
+          .find((item: any) => typeof item?.scenario === "string" && item.scenario.trim())
+          ?.scenario || null;
+      if (latestServiceScenario) return String(latestServiceScenario).trim();
+
+      return null;
+    }
+
+    function normalize(value: unknown): string {
+      return String(value || "").toLowerCase().trim();
+    }
+
+    function matchesKeywords(unit: any, keywords: string[]): boolean {
+      const lastWrittenScenario = resolveLastWrittenScenario(unit.meta);
+      const haystack = [
+        unit.barcode,
+        unit.product_name,
+        unit.partner_name,
+        unit.status,
+        unit.cell_code,
+        unit.cell_type,
+        unit.meta?.ops_status,
+        unit.meta?.ops_status_comment,
+        lastWrittenScenario,
+      ]
+        .map((v) => normalize(v))
+        .filter(Boolean)
+        .join(" ");
+
+      return keywords.every((keyword) => haystack.includes(keyword));
+    }
+
+    let responseUnits = unitsWithAge;
+    if (canUseKeywordSearch && normalizedSearchQuery) {
+      const keywords = normalizedSearchQuery
+        .toLowerCase()
+        .split(/\s+/)
+        .map((k) => k.trim())
+        .filter(Boolean);
+      if (keywords.length > 0) {
+        responseUnits = unitsWithAge.filter((unit) => matchesKeywords(unit, keywords));
+      }
+    }
+
+    const total = canUseKeywordSearch && normalizedSearchQuery
+      ? responseUnits.length
+      : typeof totalCount === "number"
+      ? totalCount
+      : responseUnits.length;
     return NextResponse.json({
       ok: true,
-      units: unitsWithAge,
+      units: responseUnits,
       total,
     });
   } catch (e: any) {

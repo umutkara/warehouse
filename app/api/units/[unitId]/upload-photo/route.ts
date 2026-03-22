@@ -65,6 +65,15 @@ export async function POST(
       );
     }
 
+    const currentPhotos = (unit.photos as any[]) || [];
+    const MAX_PHOTOS = 10;
+    if (currentPhotos.length >= MAX_PHOTOS) {
+      return NextResponse.json(
+        { error: `Максимум ${MAX_PHOTOS} фотографий на unit` },
+        { status: 400 }
+      );
+    }
+
     // Validate file size (max 5MB)
     const maxSize = 5 * 1024 * 1024;
     if (photo.size > maxSize) {
@@ -107,7 +116,6 @@ export async function POST(
     const photoUrl = urlData.publicUrl;
 
     // Add photo to unit's photos array
-    const currentPhotos = (unit.photos as any[]) || [];
     const newPhoto = {
       url: photoUrl,
       filename: filename,

@@ -22,6 +22,12 @@ export async function POST(req: Request) {
     .eq("warehouse_id", auth.profile.warehouse_id)
     .in("id", shipmentIds);
 
+  const unitIds = [...new Set((shipments || []).map((s) => s.unit_id).filter(Boolean))];
+  const { data: unitsData } = unitIds.length
+    ? await supabaseAdmin.from("units").select("id, barcode").in("id", unitIds)
+    : { data: [] };
+  const barcodeByUnitId = new Map((unitsData || []).map((u) => [u.id, u.barcode]));
+
   if (shipmentsError) {
     return NextResponse.json({ error: shipmentsError.message }, { status: 500 });
   }
@@ -155,6 +161,20 @@ export async function POST(req: Request) {
     }
 
     confirmedIds.push(shipment.id);
+
+    await supabaseAdmin.rpc("audit_log_event", {
+      p_action: "courier.pickup_confirmed",
+      p_entity_type: "unit",
+      p_entity_id: shipment.unit_id,
+      p_summary: `Курьер подтвердил забор: ${barcodeByUnitId.get(shipment.unit_id) || shipment.unit_id}`,
+      p_meta: {
+        source: "api.courier.assignments.confirm",
+        courier_user_id: auth.user.id,
+        courier_name: auth.profile.full_name || auth.user.id,
+        shipment_id: shipment.id,
+        unit_barcode: barcodeByUnitId.get(shipment.unit_id),
+      },
+    });
   }
 
   return NextResponse.json({ ok: true, confirmed: confirmedIds });

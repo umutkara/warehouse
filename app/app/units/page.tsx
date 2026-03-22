@@ -136,6 +136,7 @@ export default function UnitsListPage() {
   const [exportCreatedFrom, setExportCreatedFrom] = useState("");
   const [exportCreatedTo, setExportCreatedTo] = useState("");
   const [exportTrimBarcodeSuffix01, setExportTrimBarcodeSuffix01] = useState(false);
+  const canUseKeywordSearch = ["ops", "admin"].includes(userRole);
 
   // Sync filters from URL when URL changes (e.g. back/forward, shared link)
   useEffect(() => {
@@ -179,7 +180,7 @@ export default function UnitsListPage() {
         age: ageFilter,
         status: statusFilter,
       });
-      if (searchQuery.trim()) params.set("search", searchQuery.trim());
+      if (canUseKeywordSearch && searchQuery.trim()) params.set("search", searchQuery.trim());
       if (opsStatusFilter !== "all") params.set("ops", opsStatusFilter);
 
       const res = await fetch(`/api/units/list?${params.toString()}`, {
@@ -204,7 +205,7 @@ export default function UnitsListPage() {
     } finally {
       setLoading(false);
     }
-  }, [ageFilter, statusFilter, searchQuery, opsStatusFilter, router]);
+  }, [ageFilter, statusFilter, searchQuery, opsStatusFilter, router, canUseKeywordSearch]);
 
   useEffect(() => {
     loadUnits();
@@ -226,6 +227,14 @@ export default function UnitsListPage() {
     }
     loadRole();
   }, []);
+
+  useEffect(() => {
+    if (canUseKeywordSearch) return;
+    if (!searchQuery && !searchInput) return;
+    setSearchQuery("");
+    setSearchInput("");
+    applyFiltersToUrl({ search: "" });
+  }, [canUseKeywordSearch, searchQuery, searchInput, applyFiltersToUrl]);
 
   useEffect(() => {
     if (!selectedUnit?.id) return;
@@ -517,23 +526,29 @@ export default function UnitsListPage() {
 
       {/* Search + Export */}
       <div style={styles.searchAndExportContainer}>
-        <form onSubmit={handleSearch} style={styles.searchContainer}>
-          <input
-            type="text"
-            placeholder="🔍 Поиск по номеру заказа..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            style={styles.searchInput}
-          />
-          <button type="submit" style={styles.searchButton}>
-            Найти
-          </button>
-          {searchQuery && (
-            <button type="button" onClick={clearSearch} style={styles.clearButton}>
-              ✕
+        {canUseKeywordSearch ? (
+          <form onSubmit={handleSearch} style={styles.searchContainer}>
+            <input
+              type="text"
+              placeholder="🔍 Поиск по ключевым словам и последнему сценарию..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              style={styles.searchInput}
+            />
+            <button type="submit" style={styles.searchButton}>
+              Найти
             </button>
-          )}
-        </form>
+            {searchQuery && (
+              <button type="button" onClick={clearSearch} style={styles.clearButton}>
+                ✕
+              </button>
+            )}
+          </form>
+        ) : (
+          <div style={{ ...styles.searchContainer, color: "#6b7280", fontSize: 13 }}>
+            Поиск доступен только для ролей ops/admin
+          </div>
+        )}
 
         <button onClick={openExportModal} style={styles.exportButton}>
           📊 Экспорт в Excel

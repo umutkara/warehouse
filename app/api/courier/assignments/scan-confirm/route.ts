@@ -146,5 +146,20 @@ export async function POST(req: Request) {
     });
   }
 
+  await supabaseAdmin.rpc("audit_log_event", {
+    p_action: "courier.pickup_confirmed",
+    p_entity_type: "unit",
+    p_entity_id: shipment.unit_id,
+    p_summary: `Курьер подтвердил забор сканом: ${barcode}`,
+    p_meta: {
+      source: "api.courier.assignments.scan_confirm",
+      courier_user_id: auth.user.id,
+      courier_name: auth.profile.full_name || auth.user.id,
+      shipment_id: shipment.id,
+      unit_barcode: barcode,
+      scanned_barcode: barcode,
+    },
+  });
+
   return NextResponse.json({ ok: true, shipment_id: shipment.id, task_id: taskId, barcode });
 }

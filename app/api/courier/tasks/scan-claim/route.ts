@@ -187,6 +187,21 @@ export async function POST(req: Request) {
       meta: { source: "api.courier.tasks.scan_claim" },
     });
 
+  if (foundUnit) {
+    await supabaseAdmin.rpc("audit_log_event", {
+      p_action: "courier.scan_claim",
+      p_entity_type: "unit",
+      p_entity_id: unit.id,
+      p_summary: `Курьер взял заказ по скану: ${barcode}`,
+      p_meta: {
+        source: "api.courier.tasks.scan_claim",
+        scanned_barcode: barcode,
+        courier_user_id: auth.user.id,
+        unit_barcode: barcode,
+      },
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     task_id: taskId,

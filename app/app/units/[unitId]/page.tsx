@@ -543,7 +543,8 @@ export default function UnitDetailPage() {
           icon = "📋";
           bgColor = "#f0f9ff";
           borderColor = "#bae6fd";
-          const { old_status_text, new_status_text, comment } = meta || {};
+          const { old_status_text, new_status_text, comment, receiver_signature_url, act_photo_url, source } = meta || {};
+          const isCourierDrop = source === "api.courier.tasks.event:dropped";
           return (
             <div
               key={uniqueKey}
@@ -564,12 +565,75 @@ export default function UnitDetailPage() {
                     <strong>Комментарий:</strong> {comment}
                   </div>
                 )}
+                {isCourierDrop && (receiver_signature_url || act_photo_url) && (
+                  <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+                    {receiver_signature_url && (
+                      <div>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Подпись принимающей стороны</div>
+                        <a href={receiver_signature_url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                          <img src={receiver_signature_url} alt="Подпись" style={{ maxWidth: 120, maxHeight: 80, border: "1px solid #e5e7eb", borderRadius: 4 }} />
+                        </a>
+                      </div>
+                    )}
+                    {act_photo_url && (
+                      <div>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Фото акта</div>
+                        <a href={act_photo_url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                          <img src={act_photo_url} alt="Фото акта" style={{ maxWidth: 120, maxHeight: 80, objectFit: "cover", border: "1px solid #e5e7eb", borderRadius: 4 }} />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={styles.historyMeta}>
                   {auditActor} ({auditRole}) • {date}
                 </div>
               </div>
             </div>
           );
+        }
+
+        // Special handling for OPS status reverted (courier undid drop)
+        if (action === "ops.unit_status_reverted") {
+          icon = "↩️";
+          bgColor = "#fefce8";
+          borderColor = "#fef08a";
+          return (
+            <div
+              key={uniqueKey}
+              style={{
+                ...styles.historyItem,
+                background: bgColor,
+                borderColor: borderColor,
+              }}
+            >
+              <div style={styles.historyIcon}>{icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={styles.historyTitle}>Курьер отменил дроп</div>
+                <div style={styles.historyText}>OPS статус возвращён</div>
+                <div style={styles.historyMeta}>{date}</div>
+              </div>
+            </div>
+          );
+        }
+
+        // Special handling for courier actions
+        if (action === "courier.pickup_confirmed") {
+          icon = "✅";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
+        } else if (action === "courier.pickup_rejected") {
+          icon = "❌";
+          bgColor = "#fef2f2";
+          borderColor = "#fecaca";
+        } else if (action === "courier.scan_claim") {
+          icon = "📱";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
+        } else if (action === "unit.create.external_pickup") {
+          icon = "✨";
+          bgColor = "#f0fdf4";
+          borderColor = "#bbf7d0";
         }
 
         // Special handling for merchant rejection and service center return
@@ -918,17 +982,29 @@ export default function UnitDetailPage() {
           <div style={styles.card}>
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Фотографии</h2>
-              <label style={styles.uploadButton}>
+              <label
+                style={{
+                  ...styles.uploadButton,
+                  ...((unit.photos?.length ?? 0) >= 10 || uploading
+                    ? { opacity: 0.6, cursor: "not-allowed", pointerEvents: "none" }
+                    : {}),
+                }}
+              >
                 {uploading ? "Загрузка..." : "+ Добавить"}
                 <input
                   type="file"
                   accept="image/*"
                   onChange={handlePhotoUpload}
-                  disabled={uploading}
+                  disabled={uploading || (unit.photos?.length ?? 0) >= 10}
                   style={{ display: "none" }}
                 />
               </label>
             </div>
+            {(unit.photos?.length ?? 0) >= 10 && (
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Достигнут лимит: макс. 10 фото. Удалите фото, чтобы добавить новое.
+              </div>
+            )}
 
             {uploadError && (
               <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 8 }}>{uploadError}</div>
@@ -941,10 +1017,26 @@ export default function UnitDetailPage() {
               {unit.photos?.map((photo, idx) => (
                 <div key={idx} style={styles.photoCard}>
                   <div style={styles.photoContainer}>
-                    <img src={photo.url} alt={`Photo ${idx + 1}`} style={styles.photo} />
+                    <a
+                      href={photo.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        cursor: "zoom-in",
+                        display: "block",
+                      }}
+                      title="Открыть в полном размере"
+                    >
+                      <img src={photo.url} alt={`Photo ${idx + 1}`} style={styles.photo} />
+                    </a>
                   </div>
                   <button
-                    onClick={() => handleDeletePhoto(photo.filename)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeletePhoto(photo.filename);
+                    }}
                     style={styles.deletePhotoButton}
                     title="Удалить фото"
                   >

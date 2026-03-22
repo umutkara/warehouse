@@ -13,10 +13,18 @@ export async function supabaseServer() {
           return cookieStore.get(name)?.value;
         },
         set(name: string, value: string, options: any) {
-          cookieStore.set(name, value, options);
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            return;
+          }
         },
         remove(name: string, options: any) {
-          cookieStore.set(name, "", { ...options, maxAge: 0 });
+          try {
+            cookieStore.set(name, "", { ...options, maxAge: 0 });
+          } catch {
+            return;
+          }
         },
       },
     }

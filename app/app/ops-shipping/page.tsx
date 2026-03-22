@@ -122,6 +122,28 @@ type UnitDetails = {
   } | null;
 };
 
+type CourierReturnItem = {
+  handover_item_id: string;
+  task_id: string | null;
+  unit_id: string;
+  unit_barcode: string;
+  current_status: string | null;
+  current_cell_id: string | null;
+  dropped_at: string;
+  ops_status: string | null;
+  color_key: "red" | "yellow" | "purple" | "green";
+  color_hex: string;
+};
+
+type CourierReturnGroup = {
+  courier_user_id: string;
+  courier_name: string;
+  handover_session_id: string;
+  handover_confirmed_at: string | null;
+  total_units: number;
+  items: CourierReturnItem[];
+};
+
 // Scenario configuration
 const SCENARIO_FROM = "Склад Возвратов";
 
@@ -201,6 +223,10 @@ export default function OpsShippingPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [lastCreatedCount, setLastCreatedCount] = useState<number | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [returnsGroups, setReturnsGroups] = useState<CourierReturnGroup[]>([]);
+  const [loadingReturns, setLoadingReturns] = useState(false);
+  const [updatingReturnColorUnitId, setUpdatingReturnColorUnitId] = useState<string | null>(null);
+  const [returnsError, setReturnsError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ created: number; total: number } | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
@@ -282,6 +308,7 @@ export default function OpsShippingPage() {
     loadPickingCells();
     loadAvailableUnits(signal);
     loadTasks(signal);
+    loadCourierReturns(signal);
 
     return () => controller.abort();
   }, []);
@@ -322,6 +349,55 @@ export default function OpsShippingPage() {
       setAvailableUnits([]);
     } finally {
       if (!silent && !abortSignal?.aborted) setLoadingUnits(false);
+    }
+  }
+
+  async function loadCourierReturns(abortSignal?: AbortSignal) {
+    setLoadingReturns(true);
+    setReturnsError(null);
+    try {
+      const res = await fetch("/api/ops/courier-returns", { cache: "no-store", signal: abortSignal });
+      if (abortSignal?.aborted) return;
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; pending_groups?: CourierReturnGroup[]; error?: string }
+        | null;
+      if (!res.ok || !payload?.ok) {
+        setReturnsGroups([]);
+        setReturnsError(payload?.error || "Не удалось загрузить задания возврата");
+        return;
+      }
+      setReturnsGroups(payload.pending_groups || []);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setReturnsGroups([]);
+      setReturnsError(e?.message || "Ошибка загрузки заданий возврата");
+    } finally {
+      if (!abortSignal?.aborted) setLoadingReturns(false);
+    }
+  }
+
+  async function handleReturnColorChange(unitId: string, colorKey: "red" | "green") {
+    setUpdatingReturnColorUnitId(unitId);
+    setReturnsError(null);
+    try {
+      const res = await fetch("/api/ops/courier-returns/color", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unitId, colorKey }),
+      });
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: string }
+        | null;
+      if (!res.ok || !payload?.ok) {
+        setReturnsError(payload?.error || "Не удалось изменить цвет точки");
+        return;
+      }
+      await loadCourierReturns();
+      setSuccess("Цвет точки обновлен");
+    } catch (e: any) {
+      setReturnsError(e?.message || "Ошибка обновления цвета");
+    } finally {
+      setUpdatingReturnColorUnitId(null);
     }
   }
 
@@ -1533,6 +1609,133 @@ export default function OpsShippingPage() {
           <strong>Готово!</strong> Создано заданий: {lastCreatedCount}. Задания доступны в ТСД в режиме "Отгрузка".
         </div>
       )}
+
+      <div
+        style={{
+          marginTop: 24,
+          marginBottom: 24,
+          border: "1px solid #dbe2ea",
+          borderRadius: 16,
+          background: "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.9))",
+          boxShadow: "0 10px 26px rgba(15, 23, 42, 0.08)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Задания с точек на склад</h2>
+            <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+              После закрытия смены: курьер + список заказов, которые нужно отсканировать в BIN
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => loadCourierReturns()} disabled={loadingReturns}>
+            {loadingReturns ? "Загрузка..." : "Обновить"}
+          </Button>
+        </div>
+
+        <div style={{ padding: 14, display: "grid", gap: 10 }}>
+          {returnsError ? (
+            <Alert variant="error">{returnsError}</Alert>
+          ) : null}
+          {loadingReturns ? (
+            <div style={{ border: "1px dashed #cbd5e1", borderRadius: 10, padding: 16, textAlign: "center", color: "#64748b" }}>
+              Загрузка заданий возврата...
+            </div>
+          ) : returnsGroups.length === 0 ? (
+            <div style={{ border: "1px dashed #cbd5e1", borderRadius: 10, padding: 16, textAlign: "center", color: "#64748b" }}>
+              Нет ожидающих заданий с точек на склад.
+            </div>
+          ) : (
+            returnsGroups.map((group) => (
+              <div
+                key={group.handover_session_id}
+                style={{
+                  border: "1px solid #dbe2ea",
+                  borderRadius: 12,
+                  background: "#ffffff",
+                  padding: 10,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                    {group.courier_name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#475569" }}>
+                    Заказов: <strong>{group.total_units}</strong> • Handover:{" "}
+                    {group.handover_confirmed_at
+                      ? new Date(group.handover_confirmed_at).toLocaleString("ru-RU")
+                      : "—"}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {group.items.map((item) => (
+                    <div
+                      key={item.handover_item_id}
+                      style={{
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 10,
+                        padding: 8,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>
+                          #{item.unit_barcode || item.unit_id}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          dropped: {new Date(item.dropped_at).toLocaleString("ru-RU")} • OPS:{" "}
+                          {item.ops_status || "—"}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          Статус: {item.current_status || "—"} • Сканируйте в BIN для завершения возврата
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            borderRadius: 999,
+                            padding: "4px 10px",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: "#ffffff",
+                            background: item.color_hex,
+                          }}
+                        >
+                          {item.color_key}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleReturnColorChange(item.unit_id, "red")}
+                          disabled={item.color_key !== "yellow" || updatingReturnColorUnitId === item.unit_id}
+                        >
+                          В красный
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleReturnColorChange(item.unit_id, "green")}
+                          disabled={item.color_key !== "yellow" || updatingReturnColorUnitId === item.unit_id}
+                        >
+                          В зеленый
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       {/* Picking cells warning */}
       {pickingCells.length === 0 && (

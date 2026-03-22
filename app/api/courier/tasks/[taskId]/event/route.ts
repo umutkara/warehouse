@@ -61,6 +61,22 @@ export async function POST(
         { status: 400 },
       );
     }
+    // Require receiver signature and act photo for drop
+    const proofObj = proof && typeof proof === "object" ? (proof as Record<string, unknown>) : {};
+    const receiverSignature = proofObj.receiver_signature;
+    const actPhotoUrl = proofObj.act_photo_url ?? proofObj.act_photo_filename;
+    if (!receiverSignature || (typeof receiverSignature !== "string" && typeof receiverSignature !== "object")) {
+      return NextResponse.json(
+        { error: "Подпись принимающей стороны обязательна при дропе" },
+        { status: 400 },
+      );
+    }
+    if (!actPhotoUrl || typeof actPhotoUrl !== "string" || !actPhotoUrl.trim()) {
+      return NextResponse.json(
+        { error: "Фото акта обязательно при дропе" },
+        { status: 400 },
+      );
+    }
   }
 
   const { data: task, error: taskError } = await supabaseAdmin
@@ -235,9 +251,52 @@ export async function POST(
     });
   }
 
+  // For dropped: upload signature to storage if base64, resolve act_photo_url
+  let receiverSignatureUrl: string | null = null;
+  let actPhotoUrlForMeta: string | null = null;
+  if (eventType === "dropped" && proof && typeof proof === "object") {
+    const proofObj = proof as Record<string, unknown>;
+    const rs = proofObj.receiver_signature;
+    const apo = proofObj.act_photo_url ?? proofObj.act_photo_filename;
+    if (typeof apo === "string" && apo.trim()) {
+      actPhotoUrlForMeta = apo.trim();
+      if (!actPhotoUrlForMeta.startsWith("http")) {
+        const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+        const path = actPhotoUrlForMeta.startsWith("/") ? actPhotoUrlForMeta.slice(1) : actPhotoUrlForMeta;
+        actPhotoUrlForMeta = `${baseUrl}/storage/v1/object/public/unit-photos/${path}`;
+      }
+    }
+    if (rs) {
+      let base64 = "";
+      if (typeof rs === "string") {
+        const match = rs.match(/^data:image\/\w+;base64,(.+)$/);
+        base64 = match ? match[1] : rs;
+      }
+      if (base64) {
+        try {
+          const buf = Buffer.from(base64, "base64");
+          const sigFilename = `${task.warehouse_id}/${task.unit_id}/drop_signature_${Date.now()}.png`;
+          const { error: sigUploadErr } = await supabaseAdmin.storage
+            .from("unit-photos")
+            .upload(sigFilename, buf, { contentType: "image/png", upsert: false });
+          if (!sigUploadErr) {
+            const { data: sigUrlData } = supabaseAdmin.storage
+              .from("unit-photos")
+              .getPublicUrl(sigFilename);
+            receiverSignatureUrl = sigUrlData.publicUrl;
+          }
+        } catch (_) {
+          console.warn("Failed to upload signature image");
+        }
+      }
+    }
+  }
+
   let proofMetaForEvent: Record<string, unknown> = {
     ...(proof && typeof proof === "object" ? proof : {}),
     ...(opsStatus ? { ops_status: opsStatus } : {}),
+    ...(receiverSignatureUrl ? { receiver_signature_url: receiverSignatureUrl } : {}),
+    ...(actPhotoUrlForMeta ? { act_photo_url: actPhotoUrlForMeta } : {}),
   };
   if (eventType === "dropped" && opsStatus) {
     const { data: unitForProof } = await supabaseAdmin
@@ -337,20 +396,43 @@ export async function POST(
       return NextResponse.json({ error: unitUpdateError.message }, { status: 500 });
     }
 
+    const opsStatusTextMap: Record<string, string> = {
+      partner_accepted_return: "Партнер принял на возврат",
+      partner_rejected_return: "Партнер не принял на возврат",
+      sent_to_sc: "Передан в СЦ",
+      delivered_to_rc: "Товар доставлен на РЦ",
+      client_accepted: "Клиент принял",
+      client_rejected: "Клиент не принял",
+      sent_to_client: "Товар отправлен клиенту",
+      delivered_to_pudo: "Товар доставлен на ПУДО",
+      case_cancelled_cc: "Кейс отменен (Направлен КК)",
+      postponed_1: "Перенос",
+      postponed_2: "Перенос 2",
+      warehouse_did_not_issue: "Склад не выдал",
+      in_progress: "В работе",
+      no_report: "Отчета нет",
+    };
+    const oldStatusText = oldStatus ? (opsStatusTextMap[oldStatus] || oldStatus) : "не назначен";
+    const newStatusText = opsStatusTextMap[opsStatus] || opsStatus;
+
     await supabaseAdmin.rpc("audit_log_event", {
       p_action: "ops.unit_status_update",
       p_entity_type: "unit",
       p_entity_id: task.unit_id,
-      p_summary: `OPS статус изменён курьером при дропе: ${oldStatus || "не назначен"} → ${opsStatus}`,
+      p_summary: `OPS статус изменён курьером при дропе: ${oldStatusText} → ${newStatusText}`,
       p_meta: {
         old_status: oldStatus,
         new_status: opsStatus,
+        old_status_text: oldStatusText,
+        new_status_text: newStatusText,
         comment: note || null,
         old_comment: oldComment,
         source: "api.courier.tasks.event:dropped",
         task_id: task.id,
         event_id: eventId,
         unit_barcode: unitRow.barcode,
+        receiver_signature_url: receiverSignatureUrl ?? undefined,
+        act_photo_url: actPhotoUrlForMeta ?? undefined,
       },
     });
   }

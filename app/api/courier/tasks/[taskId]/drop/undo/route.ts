@@ -168,6 +168,20 @@ export async function POST(
     },
   });
 
+  await supabaseAdmin.rpc("audit_log_event", {
+    p_action: "ops.unit_status_reverted",
+    p_entity_type: "unit",
+    p_entity_id: task.unit_id,
+    p_summary: `Курьер отменил дроп: OPS статус возвращён к «${oldOpsStatus || "не назначен"}»`,
+    p_meta: {
+      source: "api.courier.tasks.drop.undo",
+      unit_barcode: unitRow.barcode,
+      reverted_ops_status: currentOpsStatus,
+      restored_ops_status: oldOpsStatus,
+      undone_event_id: latestDrop.event_id,
+    },
+  });
+
   return NextResponse.json({
     ok: true,
     status: "claimed",

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
   const { data: shipments, error: shipmentsError } = await supabaseAdmin
     .from("outbound_shipments")
-    .select("id, status, courier_user_id, meta")
+    .select("id, unit_id, status, courier_user_id, meta")
     .eq("warehouse_id", auth.profile.warehouse_id)
     .in("id", shipmentIds);
 
@@ -67,6 +67,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
     rejectedIds.push(shipment.id);
+
+    const { data: unitRow } = await supabaseAdmin
+      .from("units")
+      .select("barcode")
+      .eq("id", shipment.unit_id)
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .single();
+
+    await supabaseAdmin.rpc("audit_log_event", {
+      p_action: "courier.pickup_rejected",
+      p_entity_type: "unit",
+      p_entity_id: shipment.unit_id,
+      p_summary: `Курьер отказался от забора: ${unitRow?.barcode || shipment.unit_id}. Причина: ${note}`,
+      p_meta: {
+        source: "api.courier.assignments.reject",
+        courier_user_id: auth.user.id,
+        courier_name: auth.profile.full_name || auth.user.id,
+        shipment_id: shipment.id,
+        unit_barcode: unitRow?.barcode,
+        reject_note: note,
+      },
+    });
   }
 
   return NextResponse.json({ ok: true, rejected: rejectedIds });
