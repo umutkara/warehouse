@@ -102,18 +102,41 @@
 .split {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  display: flex;
+  gap: 0;
+  position: relative;
+}
+
+.splitResizer {
+  flex-shrink: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: linear-gradient(90deg, transparent 2px, #e2e8f0 2px, #e2e8f0 6px, transparent 6px);
+  transition: background 0.15s;
+}
+
+.splitResizer:hover,
+.splitResizer.splitResizerDragging {
+  background: linear-gradient(90deg, transparent 1px, #3b82f6 1px, #3b82f6 7px, transparent 7px);
 }
 
 .pane {
   min-height: 0;
+  min-width: 280px;
   border-radius: 14px;
   border: 1px solid #d6dce5;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
+}
+
+.paneLeft {
+  flex-shrink: 0;
+}
+
+.paneRight {
+  flex: 1;
+  min-width: 320px;
 }
 
 .paneInner {
@@ -357,6 +380,77 @@
   left: 8px;
   right: 8px;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mapFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(210, 214, 220, 0.8);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.mapFiltersSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mapFiltersLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mapFiltersChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mapFilterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s;
+}
+
+.mapFilterChip:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.mapFilterChip input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.mapFilterChipDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.mapLegend {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -771,8 +865,20 @@
 
 @media (max-width: 1100px) {
   .split {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+    flex-direction: column;
+  }
+
+  .splitResizer {
+    display: none;
+  }
+
+  .paneLeft {
+    width: 100% !important;
+  }
+
+  .paneLeft,
+  .paneRight {
+    min-height: 280px;
   }
 
   .row {

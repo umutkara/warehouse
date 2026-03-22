@@ -127,6 +127,11 @@ type MapPanelProps = {
   zones: Zone[];
   dropPoints: DropPoint[];
   liveCouriers: LiveCourier[];
+  showCouriers: boolean;
+  colorFilter: Set<"red" | "yellow" | "purple" | "green">;
+  onColorFilterChange: (color: "red" | "yellow" | "purple" | "green") => void;
+  onShowCouriersChange: (show: boolean) => void;
+  availableColors: Array<"red" | "yellow" | "purple" | "green">;
 };
 
 type ZoneEditorModalProps = {
@@ -514,7 +519,17 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
   return googleMapsPromise;
 }
 
-function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelProps) {
+function RoutePlanningMap({
+  apiKey,
+  zones,
+  dropPoints,
+  liveCouriers,
+  showCouriers,
+  colorFilter,
+  onColorFilterChange,
+  onShowCouriersChange,
+  availableColors,
+}: MapPanelProps) {
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const mapObjectsRef = useRef<{ markers: any[]; polygons: any[] }>({
@@ -649,7 +664,8 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
       hasBounds = true;
     }
 
-    for (const courier of liveCouriers) {
+    const couriersToShow = showCouriers ? liveCouriers : [];
+    for (const courier of couriersToShow) {
       const lat = courier.last_location?.lat;
       const lng = courier.last_location?.lng;
       if (lat === null || lng === null || lat === undefined || lng === undefined) continue;
@@ -692,12 +708,56 @@ function RoutePlanningMap({ apiKey, zones, dropPoints, liveCouriers }: MapPanelP
   return (
     <div className={styles.mapCard}>
       <div className={styles.mapOverlay}>
-        <span className={styles.legend}>Зоны</span>
-        <span className={styles.legend}>Красный: обычный дроп</span>
-        <span className={styles.legend}>Фиолетовый: партнер принял</span>
-        <span className={styles.legend}>Желтый: передан в СЦ</span>
-        <span className={styles.legend}>Зеленый: вручную в OPS</span>
-        <span className={styles.legend}>Синий: live курьер</span>
+        <div className={styles.mapFilters}>
+          <div className={styles.mapFiltersSection}>
+            <span className={styles.mapFiltersLabel}>Цвет точек</span>
+            <div className={styles.mapFiltersChips}>
+              {availableColors.length === 0 ? (
+                <span className={styles.legend}>Нет точек</span>
+              ) : (
+                availableColors.map((color) => (
+                  <label key={color} className={styles.mapFilterChip}>
+                    <input
+                      type="checkbox"
+                      checked={colorFilter.has(color)}
+                      onChange={() => onColorFilterChange(color)}
+                    />
+                    <span
+                      className={styles.mapFilterChipDot}
+                      style={{
+                        background:
+                          color === "red"
+                            ? "#ef4444"
+                            : color === "yellow"
+                              ? "#eab308"
+                              : color === "purple"
+                                ? "#a855f7"
+                                : "#22c55e",
+                      }}
+                    />
+                    {DROP_COLOR_LABEL[color]}
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+          <div className={styles.mapFiltersSection}>
+            <label className={styles.mapFilterChip}>
+              <input
+                type="checkbox"
+                checked={showCouriers}
+                onChange={(e) => onShowCouriersChange(e.target.checked)}
+              />
+              <span className={styles.mapFilterChipDot} style={{ background: "#3b82f6" }} />
+              Курьеры
+            </label>
+          </div>
+        </div>
+        <div className={styles.mapLegend}>
+          <span className={styles.legend}>Зоны</span>
+          <span className={styles.legend}>Дроп по цвету</span>
+          <span className={styles.legend}>Курьеры (синий)</span>
+        </div>
       </div>
       <div ref={mapCanvasRef} className={styles.mapCanvas} />
       {mapError && <div className={styles.mapNotice}>{mapError}</div>}
@@ -2001,6 +2061,10 @@ export default function RoutePlanningClient({
   const [searchDropped, setSearchDropped] = useState("");
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
   const [courierInsightsOpen, setCourierInsightsOpen] = useState(false);
+  const [showCouriersOnMap, setShowCouriersOnMap] = useState(true);
+  const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(45);
+  const [isResizing, setIsResizing] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
 
   const canEdit = dashboard?.can_edit ?? initialCanEdit;
   const effectiveRole = dashboard?.role || initialRole;
@@ -2044,6 +2108,16 @@ export default function RoutePlanningClient({
     },
     [router],
   );
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("routeplanning-left-pane-width");
+      const n = Number(saved);
+      if (Number.isFinite(n) && n >= 25 && n <= 75) setLeftPaneWidthPct(n);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     void loadDashboard(false);
@@ -2267,6 +2341,46 @@ export default function RoutePlanningClient({
     [],
   );
 
+  const handleResizeStart = useCallback(() => setIsResizing(true), []);
+  const handleResizeMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isResizing || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+      const clamped = Math.max(25, Math.min(75, pct));
+      setLeftPaneWidthPct(clamped);
+      try {
+        localStorage.setItem("routeplanning-left-pane-width", String(clamped));
+      } catch {
+        /* ignore */
+      }
+    },
+    [isResizing],
+  );
+  const handleResizeEnd = useCallback(() => setIsResizing(false), []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (e: MouseEvent) => handleResizeMove(e);
+    const onUp = () => {
+      handleResizeEnd();
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
+
   return (
     <div className={styles.page}>
       <div className={styles.toolbar}>
@@ -2313,8 +2427,15 @@ export default function RoutePlanningClient({
       {error && <div className={styles.error}>{error}</div>}
       {message && <div className={styles.message}>{message}</div>}
 
-      <div className={styles.split}>
-        <div className={styles.pane}>
+      <div
+        ref={splitContainerRef}
+        className={styles.split}
+        style={{ cursor: isResizing ? "col-resize" : undefined }}
+      >
+        <div
+          className={`${styles.pane} ${styles.paneLeft}`}
+          style={{ width: `${leftPaneWidthPct}%` }}
+        >
           <div className={styles.paneInner}>
             <h2 className={styles.sectionTitle}>Заказы и назначения</h2>
 
@@ -2534,7 +2655,14 @@ export default function RoutePlanningClient({
           </div>
         </div>
 
-        <div className={styles.pane}>
+        <div
+          className={`${styles.splitResizer} ${isResizing ? styles.splitResizerDragging : ""}`}
+          onMouseDown={handleResizeStart}
+          role="separator"
+          aria-label="Изменить размер панелей"
+        />
+
+        <div className={`${styles.pane} ${styles.paneRight}`}>
           <div className={styles.paneInner}>
             <h2 className={styles.sectionTitle}>Карта маршрутов и дропов</h2>
             <RoutePlanningMap
@@ -2542,6 +2670,11 @@ export default function RoutePlanningClient({
               zones={dashboard?.zones || []}
               dropPoints={filteredDropPoints}
               liveCouriers={dashboard?.live_couriers || []}
+              showCouriers={showCouriersOnMap}
+              colorFilter={droppedColorFilter}
+              onColorFilterChange={toggleDroppedColorFilter}
+              onShowCouriersChange={setShowCouriersOnMap}
+              availableColors={DROP_COLOR_ORDER}
             />
             <div className={styles.hint}>
               Обновление данных: каждые 15 секунд. Показаны точки дропа и последние live-координаты
