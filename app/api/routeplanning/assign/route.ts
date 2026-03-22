@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { requireUserProfile } from "@/app/api/_shared/user-profile";
 import { supabaseServer } from "@/lib/supabase/server";
 import { canEditRoutePlanning } from "@/lib/routeplanning/access";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 const MAX_UNITS_PER_REQUEST = 150;
 
 type AssignRequestBody = {
   unitIds?: unknown;
   courierUserId?: unknown;
-  courierName?: unknown;
+  source?: unknown;
 };
 
 type SingleAssignResult = {
@@ -17,6 +19,8 @@ type SingleAssignResult = {
   status: number;
   error: string | null;
 };
+
+type AssignSource = "picking" | "dropped";
 
 function asTrimmedString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -45,8 +49,7 @@ function parseErrorMessage(payload: unknown): string | null {
 async function shipSingleUnit(
   request: Request,
   unitId: string,
-  courierUserId: string | null,
-  courierName: string | null,
+  courierUserId: string,
 ): Promise<SingleAssignResult> {
   const targetUrl = new URL("/api/logistics/ship-out", request.url);
   const headers = new Headers({
@@ -63,7 +66,7 @@ async function shipSingleUnit(
     headers,
     body: JSON.stringify({
       unitId,
-      ...(courierUserId ? { courierUserId } : { courierName }),
+      courierUserId,
     }),
     cache: "no-store",
   });
@@ -76,6 +79,151 @@ async function shipSingleUnit(
     status: response.status,
     error: parseErrorMessage(payload),
   };
+}
+
+async function reassignDroppedUnit(params: {
+  warehouseId: string;
+  unitId: string;
+  courierUserId: string;
+  courierName: string;
+  shiftId: string;
+}): Promise<SingleAssignResult> {
+  const now = new Date().toISOString();
+  const { warehouseId, unitId, courierUserId, courierName, shiftId } = params;
+
+  const { data: shipment, error: shipmentError } = await supabaseAdmin
+    .from("outbound_shipments")
+    .select("id, status, meta")
+    .eq("warehouse_id", warehouseId)
+    .eq("unit_id", unitId)
+    .eq("status", "out")
+    .order("out_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (shipmentError) {
+    return { unit_id: unitId, ok: false, status: 500, error: shipmentError.message };
+  }
+  if (!shipment) {
+    return {
+      unit_id: unitId,
+      ok: false,
+      status: 404,
+      error: "Active OUT shipment not found for dropped reassignment",
+    };
+  }
+
+  const shipmentMeta =
+    shipment.meta && typeof shipment.meta === "object"
+      ? (shipment.meta as Record<string, unknown>)
+      : {};
+  const mergedShipmentMeta = {
+    ...shipmentMeta,
+    reassigned_from_routeplanning_at: now,
+    reassigned_from_routeplanning_to: courierUserId,
+  };
+  const { error: shipmentUpdateError } = await supabaseAdmin
+    .from("outbound_shipments")
+    .update({
+      courier_user_id: courierUserId,
+      courier_name: courierName,
+      updated_at: now,
+      meta: mergedShipmentMeta,
+    })
+    .eq("id", shipment.id)
+    .eq("warehouse_id", warehouseId);
+  if (shipmentUpdateError) {
+    return { unit_id: unitId, ok: false, status: 500, error: shipmentUpdateError.message };
+  }
+
+  const { data: existingTask, error: taskFetchError } = await supabaseAdmin
+    .from("courier_tasks")
+    .select("id, meta")
+    .eq("warehouse_id", warehouseId)
+    .eq("unit_id", unitId)
+    .not("status", "in", "(delivered,failed,returned,canceled)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (taskFetchError) {
+    return { unit_id: unitId, ok: false, status: 500, error: taskFetchError.message };
+  }
+
+  let taskId: string | null = null;
+  if (existingTask) {
+    const taskMeta =
+      existingTask.meta && typeof existingTask.meta === "object"
+        ? (existingTask.meta as Record<string, unknown>)
+        : {};
+    const { error: taskUpdateError } = await supabaseAdmin
+      .from("courier_tasks")
+      .update({
+        courier_user_id: courierUserId,
+        shift_id: shiftId,
+        status: "claimed",
+        claimed_at: now,
+        last_event_at: now,
+        updated_at: now,
+        meta: {
+          ...taskMeta,
+          source: "api.routeplanning.assign.dropped",
+          assigned_via: "routeplanning",
+          assigned_reassigned_at: now,
+        },
+      })
+      .eq("id", existingTask.id);
+    if (taskUpdateError) {
+      return { unit_id: unitId, ok: false, status: 500, error: taskUpdateError.message };
+    }
+    taskId = existingTask.id;
+  } else {
+    const { data: insertedTask, error: taskInsertError } = await supabaseAdmin
+      .from("courier_tasks")
+      .insert({
+        warehouse_id: warehouseId,
+        pool_id: null,
+        shift_id: shiftId,
+        unit_id: unitId,
+        courier_user_id: courierUserId,
+        zone_id: null,
+        status: "claimed",
+        claimed_at: now,
+        last_event_at: now,
+        meta: {
+          source: "api.routeplanning.assign.dropped",
+          assigned_via: "routeplanning",
+        },
+      })
+      .select("id")
+      .single();
+    if (taskInsertError || !insertedTask?.id) {
+      return {
+        unit_id: unitId,
+        ok: false,
+        status: 500,
+        error: taskInsertError?.message || "Failed to create courier task",
+      };
+    }
+    taskId = insertedTask.id;
+  }
+
+  const { error: eventInsertError } = await supabaseAdmin.from("courier_task_events").insert({
+    warehouse_id: warehouseId,
+    task_id: taskId,
+    unit_id: unitId,
+    courier_user_id: courierUserId,
+    shift_id: shiftId,
+    event_id: `reassign-dropped-${taskId}-${Date.now()}`,
+    event_type: "claimed",
+    happened_at: now,
+    note: "Reassigned from dropped points list by logistics",
+    proof_meta: {},
+    meta: { source: "api.routeplanning.assign.dropped" },
+  });
+  if (eventInsertError) {
+    return { unit_id: unitId, ok: false, status: 500, error: eventInsertError.message };
+  }
+
+  return { unit_id: unitId, ok: true, status: 200, error: null };
 }
 
 export async function POST(req: Request) {
@@ -95,7 +243,7 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as AssignRequestBody | null;
   const unitIds = normalizeUnitIds(body?.unitIds);
   const courierUserId = asTrimmedString(body?.courierUserId);
-  const courierName = asTrimmedString(body?.courierName);
+  const source = asTrimmedString(body?.source) === "dropped" ? "dropped" : "picking";
 
   if (!unitIds.length) {
     return NextResponse.json({ error: "unitIds are required" }, { status: 400 });
@@ -110,15 +258,56 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!courierUserId && !courierName) {
+  if (!courierUserId) {
+    return NextResponse.json({ error: "courierUserId is required" }, { status: 400 });
+  }
+
+  const { data: courierProfile, error: courierProfileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id, warehouse_id, role, full_name")
+    .eq("id", courierUserId)
+    .maybeSingle();
+  if (courierProfileError) {
+    return NextResponse.json({ error: courierProfileError.message }, { status: 500 });
+  }
+  if (!courierProfile || courierProfile.warehouse_id !== auth.profile.warehouse_id) {
+    return NextResponse.json({ error: "Courier not found in this warehouse" }, { status: 404 });
+  }
+  if (!hasAnyRole(courierProfile.role, ["courier"])) {
+    return NextResponse.json({ error: "Selected user is not a courier" }, { status: 400 });
+  }
+
+  const { data: openShift, error: openShiftError } = await supabaseAdmin
+    .from("courier_shifts")
+    .select("id, status")
+    .eq("warehouse_id", auth.profile.warehouse_id)
+    .eq("courier_user_id", courierUserId)
+    .in("status", ["open", "closing"])
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (openShiftError) {
+    return NextResponse.json({ error: openShiftError.message }, { status: 500 });
+  }
+  if (!openShift) {
     return NextResponse.json(
-      { error: "courierUserId or courierName is required" },
-      { status: 400 },
+      { error: "Assignment is allowed only to on-shift couriers", code: "COURIER_NOT_ON_SHIFT" },
+      { status: 409 },
     );
   }
 
   const settled = await Promise.allSettled(
-    unitIds.map((unitId) => shipSingleUnit(req, unitId, courierUserId, courierName)),
+    unitIds.map((unitId) =>
+      source === "dropped"
+        ? reassignDroppedUnit({
+            warehouseId: auth.profile.warehouse_id,
+            unitId,
+            courierUserId,
+            courierName: courierProfile.full_name || "Без имени",
+            shiftId: openShift.id,
+          })
+        : shipSingleUnit(req, unitId, courierUserId),
+    ),
   );
 
   const results: SingleAssignResult[] = settled.map((result, index) => {

@@ -10,16 +10,32 @@ export const dynamic = "force-dynamic";
 
 export default async function RoutePlanningPage() {
   const supabase = await supabaseServer();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  let userData: any;
+  let userError: any;
+  try {
+    const authRes = await supabase.auth.getUser();
+    userData = authRes.data;
+    userError = authRes.error;
+  } catch (error) {
+    throw error;
+  }
   if (userError || !userData?.user) {
     redirect("/login");
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role, warehouse_id")
-    .eq("id", userData.user.id)
-    .single();
+  let profile: any;
+  let profileError: any;
+  try {
+    const profileRes = await supabase
+      .from("profiles")
+      .select("role, warehouse_id")
+      .eq("id", userData.user.id)
+      .single();
+    profile = profileRes.data;
+    profileError = profileRes.error;
+  } catch (error) {
+    throw error;
+  }
 
   if (profileError || !profile?.warehouse_id || !profile.role) {
     redirect("/login");

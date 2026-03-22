@@ -6,11 +6,20 @@ import {
   canEditRoutePlanning,
   ROUTE_PLANNING_VIEW_ROLES,
 } from "@/lib/routeplanning/access";
+import { resolveDropColor } from "@/lib/courier/drop-color";
 
 const ACTIVE_COURIER_TASK_STATUSES = ["claimed", "in_route", "arrived", "dropped"] as const;
 const OPEN_SHIFT_STATUSES = ["open", "closing"] as const;
 const MAX_PICKING_UNITS = 500;
 const MAX_DROP_EVENTS = 700;
+const TARGET_WAREHOUSE_ZONE_CODE = "geri-qaytarmalar-anbar";
+const TARGET_WAREHOUSE_ZONE_STYLE = {
+  strokeColor: "#dc2626",
+  fillColor: "#ef4444",
+  fillOpacity: 0.2,
+  strokeOpacity: 0.95,
+  strokeWeight: 3,
+} as const;
 const DEFAULT_ZONE_STYLE = {
   strokeColor: "#2563eb",
   fillColor: "#60a5fa",
@@ -46,6 +55,11 @@ function extractOpsStatus(proofMeta: unknown): string | null {
   if (!proofMeta || typeof proofMeta !== "object") return null;
   const record = proofMeta as JsonRecord;
   return asTrimmedString(record.ops_status);
+}
+
+function parseIsoMs(value: string): number | null {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function dbErrorResponse(message: string) {
@@ -253,7 +267,27 @@ export async function GET() {
       (openShiftsResult.data || []).map((shift) => shift.courier_user_id).filter(Boolean),
     ),
   ];
-  const allCourierIdsForNames = [...new Set([...dropCourierIds, ...shiftCourierIds])];
+  const shiftCourierRoleById = new Map<string, string>();
+  if (shiftCourierIds.length > 0) {
+    const { data: shiftCourierProfiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role, full_name")
+      .in("id", shiftCourierIds);
+    const roleBreakdown: Record<string, number> = {};
+    for (const profile of shiftCourierProfiles || []) {
+      const key = profile.role || "unknown";
+      roleBreakdown[key] = (roleBreakdown[key] || 0) + 1;
+      shiftCourierRoleById.set(profile.id, profile.role || "unknown");
+    }
+  }
+
+  const filteredOpenShifts = (openShiftsResult.data || []).filter(
+    (shift) => shiftCourierRoleById.get(shift.courier_user_id) === "courier",
+  );
+  const filteredShiftCourierIds = [
+    ...new Set(filteredOpenShifts.map((shift) => shift.courier_user_id)),
+  ];
+  const allCourierIdsForNames = [...new Set([...dropCourierIds, ...filteredShiftCourierIds])];
 
   const courierMap = new Map(
     (couriersResult.data || []).map((courier) => [courier.id, courier.full_name || "Без имени"]),
@@ -273,11 +307,14 @@ export async function GET() {
     }
   }
 
-  const unitsForDropsMap = new Map<string, { barcode: string; status: string; cell_id: string | null }>();
+  const unitsForDropsMap = new Map<
+    string,
+    { barcode: string; status: string; cell_id: string | null; meta: unknown }
+  >();
   if (dropUnitIds.length > 0) {
     const unitsForDropsResult = await supabaseAdmin
       .from("units")
-      .select("id, barcode, status, cell_id")
+      .select("id, barcode, status, cell_id, meta")
       .in("id", dropUnitIds);
     if (unitsForDropsResult.error) return dbErrorResponse(unitsForDropsResult.error.message);
     for (const unit of unitsForDropsResult.data || []) {
@@ -285,7 +322,35 @@ export async function GET() {
         barcode: unit.barcode || "",
         status: unit.status || "",
         cell_id: unit.cell_id,
+        meta: unit.meta || null,
       });
+    }
+  }
+
+  const latestBinMoveByUnitId = new Map<string, string>();
+  if (dropUnitIds.length > 0) {
+    const binCellsResult = await supabaseAdmin
+      .from("warehouse_cells_map")
+      .select("id")
+      .eq("warehouse_id", warehouseId)
+      .eq("cell_type", "bin");
+    if (binCellsResult.error) return dbErrorResponse(binCellsResult.error.message);
+    const binCellIds = (binCellsResult.data || []).map((cell) => cell.id).filter(Boolean);
+
+    if (binCellIds.length > 0) {
+      const unitMovesResult = await supabaseAdmin
+        .from("unit_moves")
+        .select("unit_id, created_at")
+        .eq("warehouse_id", warehouseId)
+        .in("unit_id", dropUnitIds)
+        .in("to_cell_id", binCellIds)
+        .order("created_at", { ascending: false });
+      if (unitMovesResult.error) return dbErrorResponse(unitMovesResult.error.message);
+      for (const move of unitMovesResult.data || []) {
+        if (!latestBinMoveByUnitId.has(move.unit_id)) {
+          latestBinMoveByUnitId.set(move.unit_id, move.created_at);
+        }
+      }
     }
   }
 
@@ -293,21 +358,50 @@ export async function GET() {
     .map((event) => {
       const lat = toFiniteNumber(event.lat);
       const lng = toFiniteNumber(event.lng);
+      const unitInfo = unitsForDropsMap.get(event.unit_id);
+      const dropMs = parseIsoMs(event.happened_at);
+      const movedToBinAt = latestBinMoveByUnitId.get(event.unit_id);
+      const movedToBinMs = movedToBinAt ? parseIsoMs(movedToBinAt) : null;
+      const isReturnedToBin =
+        dropMs !== null && movedToBinMs !== null && movedToBinMs >= dropMs;
+      const unitMeta =
+        unitInfo?.meta && typeof unitInfo.meta === "object"
+          ? (unitInfo.meta as Record<string, unknown>)
+          : {};
+      const opsStatus =
+        extractOpsStatus(event.proof_meta) ||
+        (typeof unitMeta.ops_status === "string" && unitMeta.ops_status.trim()
+          ? unitMeta.ops_status.trim()
+          : null);
+      const color = resolveDropColor({
+        opsStatus,
+        overrideColorKey: unitMeta.drop_point_color_override,
+      });
+
       return {
         id: event.id,
         task_id: event.task_id,
         unit_id: event.unit_id,
-        unit_barcode: unitsForDropsMap.get(event.unit_id)?.barcode || "",
+        unit_barcode: unitInfo?.barcode || "",
         courier_user_id: event.courier_user_id,
         courier_name: courierMap.get(event.courier_user_id) || "Неизвестный курьер",
         happened_at: event.happened_at,
         note: event.note || null,
-        ops_status: extractOpsStatus(event.proof_meta),
+        ops_status: opsStatus,
+        color_key: color.color_key,
+        color_hex: color.color_hex,
+        is_returned_to_bin: isReturnedToBin,
         lat,
         lng,
       };
     })
-    .filter((point) => point.lat !== null && point.lng !== null);
+    .filter(
+    (point) =>
+      point.lat !== null &&
+      point.lng !== null &&
+      !point.is_returned_to_bin &&
+      !(point.lat === 0 && point.lng === 0),
+  );
 
   const latestDropByUnitId = new Map<string, (typeof dropPoints)[number]>();
   for (const point of dropPoints) {
@@ -326,6 +420,8 @@ export async function GET() {
     courier_name: point.courier_name,
     note: point.note,
     ops_status: point.ops_status,
+    color_key: point.color_key,
+    color_hex: point.color_hex,
     lat: point.lat,
     lng: point.lng,
   }));
@@ -334,12 +430,12 @@ export async function GET() {
     string,
     { lat: number | null; lng: number | null; recorded_at: string; accuracy_m: number | null }
   >();
-  if (shiftCourierIds.length > 0) {
+  if (filteredShiftCourierIds.length > 0) {
     const latestLocationsResult = await supabaseAdmin
       .from("courier_locations")
       .select("courier_user_id, lat, lng, recorded_at, accuracy_m")
       .eq("warehouse_id", warehouseId)
-      .in("courier_user_id", shiftCourierIds)
+      .in("courier_user_id", filteredShiftCourierIds)
       .order("recorded_at", { ascending: false });
     if (latestLocationsResult.error) return dbErrorResponse(latestLocationsResult.error.message);
 
@@ -355,7 +451,7 @@ export async function GET() {
     }
   }
 
-  const liveCouriers = (openShiftsResult.data || []).map((shift) => ({
+  const liveCouriers = filteredOpenShifts.map((shift) => ({
     shift_id: shift.id,
     courier_user_id: shift.courier_user_id,
     courier_name: courierMap.get(shift.courier_user_id) || "Без имени",
@@ -371,8 +467,15 @@ export async function GET() {
     code: zone.code,
     priority: zone.priority,
     polygon: Array.isArray(zone.polygon) ? zone.polygon : [],
-    style: extractZoneStyle(zone.meta),
+    style:
+      (zone.code || "").trim().toLowerCase() === TARGET_WAREHOUSE_ZONE_CODE
+        ? TARGET_WAREHOUSE_ZONE_STYLE
+        : extractZoneStyle(zone.meta),
   }));
+
+  const targetZone = zones.find(
+    (zone) => (zone.code || "").trim().toLowerCase() === TARGET_WAREHOUSE_ZONE_CODE,
+  );
 
   return NextResponse.json({
     ok: true,
