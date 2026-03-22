@@ -2062,10 +2062,10 @@ export default function RoutePlanningClient({
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
   const [courierInsightsOpen, setCourierInsightsOpen] = useState(false);
   const [showCouriersOnMap, setShowCouriersOnMap] = useState(true);
-  const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(45);
+  const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(52);
   const [isResizing, setIsResizing] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
-  const [listsPickingHeightPct, setListsPickingHeightPct] = useState(50);
+  const [listsPickingHeightPct, setListsPickingHeightPct] = useState(40);
   const [isListsResizing, setIsListsResizing] = useState(false);
   const listsWrapRef = useRef<HTMLDivElement | null>(null);
 
