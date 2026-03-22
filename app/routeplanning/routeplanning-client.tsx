@@ -2061,6 +2061,7 @@ export default function RoutePlanningClient({
   const [searchDropped, setSearchDropped] = useState("");
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
   const [courierInsightsOpen, setCourierInsightsOpen] = useState(false);
+  const [colorsInfoOpen, setColorsInfoOpen] = useState(false);
   const [showCouriersOnMap, setShowCouriersOnMap] = useState(true);
   const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(52);
   const [isResizing, setIsResizing] = useState(false);
@@ -2485,7 +2486,32 @@ export default function RoutePlanningClient({
             ← В главное меню
           </button>
           <div className={styles.titleWrap}>
-            <h1 className={styles.title}>Route Planning</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h1 className={styles.title}>Route Planning</h1>
+              <button
+                type="button"
+                onClick={() => setColorsInfoOpen(true)}
+                title="Легенда цветов точек дропа"
+                aria-label="Легенда цветов точек дропа"
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  border: "1px solid #94a3b8",
+                  background: "#f8fafc",
+                  color: "#64748b",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                i
+              </button>
+            </div>
             <p className={styles.subtitle}>
               Split view: назначение из picking + live карта курьеров
             </p>
@@ -2872,6 +2898,118 @@ export default function RoutePlanningClient({
         onUnauthorized={handleUnauthorized}
         apiKey={mapsApiKey}
       />
+
+      {colorsInfoOpen && (
+        <div
+          className={styles.modalBackdrop}
+          onClick={() => setColorsInfoOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="colors-info-title"
+        >
+          <div
+            className={styles.modal}
+            style={{ maxWidth: 480 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h2 id="colors-info-title" className={styles.modalTitle}>
+                Легенда цветов точек дропа
+              </h2>
+              <button
+                type="button"
+                onClick={() => setColorsInfoOpen(false)}
+                aria-label="Закрыть"
+                style={{
+                  padding: 4,
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  color: "#64748b",
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ef4444",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Красный</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Проблемные возвраты: партнёр не принял заказ, клиент не принял, склад не выдал, кейс отменён, отчёта нет и т.д. Требует внимания OPS и решения по дальнейшим действиям.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#facc15",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Жёлтый</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Передан в сервисный центр (СЦ). Заказ в процессе ремонта или диагностики. OPS может изменить цвет на зелёный или красный после уточнения ситуации.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#7c3aed",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Фиолетовый</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Партнёр принял на возврат. Положительный статус — возврат одобрен, заказ будет доставлен обратно на склад.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#22c55e",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Зелёный</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    OPS вручную пометил точку как решённую (переход только с жёлтого). Ситуация уточнена, проблема закрыта или заказ принят положительно.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
