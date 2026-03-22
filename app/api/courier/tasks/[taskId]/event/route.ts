@@ -3,17 +3,74 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
 import { COURIER_ALLOWED_ROLES, mapEventToTaskStatus } from "@/app/api/courier/_shared/state";
 
-const DROPPED_ALLOWED_OPS_STATUSES = [
-  "partner_accepted_return",
-  "partner_rejected_return",
-  "sent_to_sc",
+const OPS_STATUS_RULES = {
+  partner_accepted_return: {
+    createsDropPoint: true,
+    requiresSignature: true,
+    requiresPhoto: true,
+    requiresComment: false,
+  },
+  partner_rejected_return: {
+    createsDropPoint: false,
+    requiresSignature: true,
+    requiresPhoto: true,
+    requiresComment: true,
+  },
+  sent_to_sc: {
+    createsDropPoint: true,
+    requiresSignature: true,
+    requiresPhoto: true,
+    requiresComment: false,
+  },
+  client_accepted: {
+    createsDropPoint: true,
+    requiresSignature: true,
+    requiresPhoto: false,
+    requiresComment: false,
+  },
+  client_rejected: {
+    createsDropPoint: false,
+    requiresSignature: false,
+    requiresPhoto: false,
+    requiresComment: true,
+  },
+  sent_to_client: {
+    createsDropPoint: true,
+    requiresSignature: true,
+    requiresPhoto: true,
+    requiresComment: false,
+  },
+  delivered_to_pudo: {
+    createsDropPoint: true,
+    requiresSignature: true,
+    requiresPhoto: false,
+    requiresComment: false,
+  },
+  postponed_1: {
+    createsDropPoint: false,
+    requiresSignature: false,
+    requiresPhoto: false,
+    requiresComment: false,
+  },
+  in_progress: {
+    createsDropPoint: false,
+    requiresSignature: false,
+    requiresPhoto: false,
+    requiresComment: false,
+  },
+} as const;
+
+type OpsStatusRule = (typeof OPS_STATUS_RULES)[keyof typeof OPS_STATUS_RULES];
+const ALLOWED_OPS_STATUSES = Object.keys(OPS_STATUS_RULES) as Array<keyof typeof OPS_STATUS_RULES>;
+
+const DROP_TO_DELIVERED_OPS_STATUSES = new Set<string>([
   "client_accepted",
-  "client_rejected",
-  "sent_to_client",
   "delivered_to_pudo",
-  "postponed_1",
-  "in_progress",
-] as const;
+]);
+const DROP_TO_RETURNED_OPS_STATUSES = new Set<string>([
+  "partner_accepted_return",
+  "sent_to_sc",
+]);
 
 function pickScenarioText(meta: unknown): string | null {
   if (!meta || typeof meta !== "object") return null;
@@ -49,33 +106,56 @@ export async function POST(
   if (!eventType || !eventId) {
     return NextResponse.json({ error: "eventType and eventId are required" }, { status: 400 });
   }
-  if (eventType === "dropped") {
+  const proofObj = proof && typeof proof === "object" ? (proof as Record<string, unknown>) : {};
+  const receiverSignature = proofObj.receiver_signature;
+  const actPhotoUrl = proofObj.act_photo_url ?? proofObj.act_photo_filename;
+  const isOpsStatusEvent = eventType === "dropped" || eventType === "ops_status_update";
+  let opsRule: OpsStatusRule | null = null;
+
+  if (isOpsStatusEvent) {
     if (!opsStatus) {
-      return NextResponse.json({ error: "opsStatus is required for dropped event" }, { status: 400 });
+      return NextResponse.json({ error: "opsStatus is required for this event" }, { status: 400 });
     }
-    if (!DROPPED_ALLOWED_OPS_STATUSES.includes(opsStatus as (typeof DROPPED_ALLOWED_OPS_STATUSES)[number])) {
+    if (!ALLOWED_OPS_STATUSES.includes(opsStatus as keyof typeof OPS_STATUS_RULES)) {
       return NextResponse.json(
         {
-          error: `Invalid opsStatus for dropped event. Allowed: ${DROPPED_ALLOWED_OPS_STATUSES.join(", ")}`,
+          error: `Invalid opsStatus. Allowed: ${ALLOWED_OPS_STATUSES.join(", ")}`,
         },
         { status: 400 },
       );
     }
-    // Require receiver signature and act photo for drop
-    const proofObj = proof && typeof proof === "object" ? (proof as Record<string, unknown>) : {};
-    const receiverSignature = proofObj.receiver_signature;
-    const actPhotoUrl = proofObj.act_photo_url ?? proofObj.act_photo_filename;
-    if (!receiverSignature || (typeof receiverSignature !== "string" && typeof receiverSignature !== "object")) {
+    opsRule = OPS_STATUS_RULES[opsStatus as keyof typeof OPS_STATUS_RULES];
+
+    if (eventType === "dropped" && !opsRule.createsDropPoint) {
       return NextResponse.json(
-        { error: "Подпись принимающей стороны обязательна при дропе" },
+        { error: "Selected opsStatus must not create drop point. Use ops_status_update event." },
         { status: 400 },
       );
     }
-    if (!actPhotoUrl || typeof actPhotoUrl !== "string" || !actPhotoUrl.trim()) {
+    if (eventType === "ops_status_update" && opsRule.createsDropPoint) {
       return NextResponse.json(
-        { error: "Фото акта обязательно при дропе" },
+        { error: "Selected opsStatus requires dropped event." },
         { status: 400 },
       );
+    }
+    if (opsRule.requiresComment && (!note || !note.trim())) {
+      return NextResponse.json({ error: "Комментарий обязателен для выбранного OPS статуса" }, { status: 400 });
+    }
+    if (opsRule.requiresSignature) {
+      if (!receiverSignature || (typeof receiverSignature !== "string" && typeof receiverSignature !== "object")) {
+        return NextResponse.json(
+          { error: "Подпись принимающей стороны обязательна для выбранного OPS статуса" },
+          { status: 400 },
+        );
+      }
+    }
+    if (opsRule.requiresPhoto) {
+      if (!actPhotoUrl || typeof actPhotoUrl !== "string" || !actPhotoUrl.trim()) {
+        return NextResponse.json(
+          { error: "Фото акта обязательно для выбранного OPS статуса" },
+          { status: 400 },
+        );
+      }
     }
   }
 
@@ -251,10 +331,10 @@ export async function POST(
     });
   }
 
-  // For dropped: upload signature to storage if base64, resolve act_photo_url
+  // For OPS status events: upload signature if base64, resolve act_photo_url
   let receiverSignatureUrl: string | null = null;
   let actPhotoUrlForMeta: string | null = null;
-  if (eventType === "dropped" && proof && typeof proof === "object") {
+  if (isOpsStatusEvent && proof && typeof proof === "object") {
     const proofObj = proof as Record<string, unknown>;
     const rs = proofObj.receiver_signature;
     const apo = proofObj.act_photo_url ?? proofObj.act_photo_filename;
@@ -298,7 +378,7 @@ export async function POST(
     ...(receiverSignatureUrl ? { receiver_signature_url: receiverSignatureUrl } : {}),
     ...(actPhotoUrlForMeta ? { act_photo_url: actPhotoUrlForMeta } : {}),
   };
-  if (eventType === "dropped" && opsStatus) {
+  if (isOpsStatusEvent && opsStatus) {
     const { data: unitForProof } = await supabaseAdmin
       .from("units")
       .select("meta")
@@ -337,20 +417,37 @@ export async function POST(
     return NextResponse.json({ error: insertError?.message || "Failed to insert event" }, { status: 500 });
   }
 
-  const nextStatus = mapEventToTaskStatus(eventType);
+  let nextStatus = mapEventToTaskStatus(eventType);
+  if (eventType === "ops_status_update") {
+    nextStatus = task.status;
+  } else if (eventType === "dropped" && opsStatus) {
+    if (DROP_TO_DELIVERED_OPS_STATUSES.has(opsStatus)) {
+      nextStatus = "delivered";
+    } else if (DROP_TO_RETURNED_OPS_STATUSES.has(opsStatus)) {
+      nextStatus = "returned";
+    } else {
+      nextStatus = "dropped";
+    }
+  }
   const now = new Date().toISOString();
+  const taskMeta = task.meta && typeof task.meta === "object" ? (task.meta as Record<string, unknown>) : {};
   const patch: Record<string, any> = {
     status: nextStatus,
     last_event_at: happenedAt,
     updated_at: now,
     current_lat: lat,
     current_lng: lng,
-    meta: { source: "api.courier.tasks.event", last_event_type: eventType, ...(opsStatus ? { ops_status: opsStatus } : {}) },
+    meta: {
+      ...taskMeta,
+      source: "api.courier.tasks.event",
+      last_event_type: eventType,
+      ...(opsStatus ? { ops_status: opsStatus } : {}),
+    },
   };
   if (effectiveShiftId && !task.shift_id) patch.shift_id = effectiveShiftId;
-  if (eventType === "delivered") patch.delivered_at = happenedAt;
+  if (eventType === "delivered" || nextStatus === "delivered") patch.delivered_at = happenedAt;
   if (eventType === "failed") patch.failed_at = happenedAt;
-  if (eventType === "returned") patch.returned_at = happenedAt;
+  if (eventType === "returned" || nextStatus === "returned") patch.returned_at = happenedAt;
   if (eventType === "arrived") patch.accepted_at = happenedAt;
   if (eventType === "failed") {
     patch.fail_reason = body?.failReason?.toString() || "unspecified";
@@ -365,7 +462,7 @@ export async function POST(
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
-  if (eventType === "dropped" && opsStatus) {
+  if (isOpsStatusEvent && opsStatus) {
     const { data: unitRow, error: unitFetchError } = await supabaseAdmin
       .from("units")
       .select("id, barcode, meta")
@@ -382,7 +479,7 @@ export async function POST(
       ...(unitRow.meta || {}),
       ops_status: opsStatus,
       ops_status_comment: note && note.trim() ? note.trim() : oldComment,
-      ops_status_source: "courier_drop",
+      ops_status_source: eventType === "dropped" ? "courier_drop" : "courier_status_update",
       ops_status_set_at: happenedAt,
       ops_status_set_by: auth.user.id,
     };
@@ -419,7 +516,10 @@ export async function POST(
       p_action: "ops.unit_status_update",
       p_entity_type: "unit",
       p_entity_id: task.unit_id,
-      p_summary: `OPS статус изменён курьером при дропе: ${oldStatusText} → ${newStatusText}`,
+      p_summary:
+        eventType === "dropped"
+          ? `OPS статус изменён курьером при дропе: ${oldStatusText} → ${newStatusText}`
+          : `OPS статус обновлён курьером: ${oldStatusText} → ${newStatusText}`,
       p_meta: {
         old_status: oldStatus,
         new_status: opsStatus,
@@ -427,7 +527,10 @@ export async function POST(
         new_status_text: newStatusText,
         comment: note || null,
         old_comment: oldComment,
-        source: "api.courier.tasks.event:dropped",
+        source:
+          eventType === "dropped"
+            ? "api.courier.tasks.event:dropped"
+            : "api.courier.tasks.event:ops_status_update",
         task_id: task.id,
         event_id: eventId,
         unit_barcode: unitRow.barcode,

@@ -1,9 +1,11 @@
-export type DropColorKey = "red" | "yellow" | "purple" | "green";
+export type DropColorKey = "red" | "yellow" | "purple" | "gray" | "black" | "green";
 
 export const DROP_COLOR_HEX: Record<DropColorKey, string> = {
   red: "#ef4444",
   yellow: "#facc15",
   purple: "#7c3aed",
+  gray: "#6b7280",
+  black: "#111827",
   green: "#22c55e",
 };
 
@@ -11,6 +13,8 @@ export const DROP_COLOR_LABEL: Record<DropColorKey, string> = {
   red: "Красный",
   yellow: "Желтый",
   purple: "Фиолетовый",
+  gray: "Серый",
+  black: "Черный",
   green: "Зеленый",
 };
 
@@ -20,6 +24,8 @@ export function normalizeDropColorKey(value: unknown): DropColorKey | null {
   if (normalized === "red") return "red";
   if (normalized === "yellow") return "yellow";
   if (normalized === "purple") return "purple";
+  if (normalized === "gray" || normalized === "grey") return "gray";
+  if (normalized === "black") return "black";
   if (normalized === "green") return "green";
   return null;
 }
@@ -28,6 +34,8 @@ export function mapOpsStatusToDropColorKey(opsStatus: string | null | undefined)
   const normalized = (opsStatus || "").trim().toLowerCase();
   if (normalized === "partner_accepted_return") return "purple";
   if (normalized === "sent_to_sc") return "yellow";
+  if (normalized === "client_accepted") return "gray";
+  if (normalized === "delivered_to_pudo") return "black";
   return "red";
 }
 

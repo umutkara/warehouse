@@ -9,6 +9,8 @@ type CourierOption = {
   full_name: string;
 };
 
+type DropColor = "red" | "yellow" | "purple" | "gray" | "black" | "green";
+
 type PickingUnit = {
   id: string;
   barcode: string;
@@ -35,7 +37,7 @@ type DroppedUnit = {
   courier_name: string;
   note: string | null;
   ops_status: string | null;
-  color_key: "red" | "yellow" | "purple" | "green";
+  color_key: DropColor;
   color_hex: string;
   lat: number | null;
   lng: number | null;
@@ -51,7 +53,7 @@ type DropPoint = {
   happened_at: string;
   note: string | null;
   ops_status: string | null;
-  color_key: "red" | "yellow" | "purple" | "green";
+  color_key: DropColor;
   color_hex: string;
   lat: number | null;
   lng: number | null;
@@ -128,10 +130,10 @@ type MapPanelProps = {
   dropPoints: DropPoint[];
   liveCouriers: LiveCourier[];
   showCouriers: boolean;
-  colorFilter: Set<"red" | "yellow" | "purple" | "green">;
-  onColorFilterChange: (color: "red" | "yellow" | "purple" | "green") => void;
+  colorFilter: Set<DropColor>;
+  onColorFilterChange: (color: DropColor) => void;
   onShowCouriersChange: (show: boolean) => void;
-  availableColors: Array<"red" | "yellow" | "purple" | "green">;
+  availableColors: DropColor[];
 };
 
 type ZoneEditorModalProps = {
@@ -235,7 +237,7 @@ type CourierInsightsDetailResponse = {
     happened_at: string;
     note: string | null;
     ops_status: string | null;
-    color_key: "red" | "yellow" | "purple" | "green" | null;
+    color_key: DropColor | null;
     color_hex: string | null;
     lat: number | null;
     lng: number | null;
@@ -279,17 +281,30 @@ declare global {
 
 const MAP_SCRIPT_ID = "routeplanning-google-maps-script";
 const TARGET_WAREHOUSE_ZONE_CODE = "geri-qaytarmalar-anbar";
-const DROP_COLOR_ORDER: Array<"red" | "yellow" | "purple" | "green"> = [
+const DROP_CLUSTER_ZOOM_THRESHOLD = 13;
+const DROP_COLOR_ORDER: DropColor[] = [
   "red",
   "yellow",
   "purple",
+  "gray",
+  "black",
   "green",
 ];
-const DROP_COLOR_LABEL: Record<"red" | "yellow" | "purple" | "green", string> = {
+const DROP_COLOR_LABEL: Record<DropColor, string> = {
   red: "Красный",
   yellow: "Желтый",
   purple: "Фиолетовый",
+  gray: "Серый",
+  black: "Черный",
   green: "Зеленый",
+};
+const DROP_COLOR_HEX: Record<DropColor, string> = {
+  red: "#ef4444",
+  yellow: "#eab308",
+  purple: "#a855f7",
+  gray: "#6b7280",
+  black: "#111827",
+  green: "#22c55e",
 };
 let googleMapsPromise: Promise<any> | null = null;
 const DEFAULT_ZONE_STYLE: ZoneStyle = {
@@ -412,6 +427,97 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function mercatorProject(lat: number, lng: number): { x: number; y: number } {
+  const sin = Math.sin((lat * Math.PI) / 180);
+  const clamped = Math.min(Math.max(sin, -0.9999), 0.9999);
+  return {
+    x: (lng + 180) / 360,
+    y: 0.5 - Math.log((1 + clamped) / (1 - clamped)) / (4 * Math.PI),
+  };
+}
+
+function clusterCellSizePx(zoom: number): number {
+  if (zoom <= 7) return 88;
+  if (zoom <= 9) return 72;
+  if (zoom <= 11) return 56;
+  return 44;
+}
+
+type DropRenderPoint = {
+  lat: number;
+  lng: number;
+  color_key: DropColor;
+  color_hex: string;
+  count: number;
+  sample: DropPoint;
+  clustered: boolean;
+};
+
+function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRenderPoint[] {
+  if (zoom >= DROP_CLUSTER_ZOOM_THRESHOLD) {
+    return dropPoints
+      .filter((drop) => drop.lat !== null && drop.lng !== null)
+      .map((drop) => ({
+        lat: drop.lat as number,
+        lng: drop.lng as number,
+        color_key: drop.color_key,
+        color_hex: drop.color_hex || DROP_COLOR_HEX[drop.color_key],
+        count: 1,
+        sample: drop,
+        clustered: false,
+      }));
+  }
+
+  const cellSize = clusterCellSizePx(zoom);
+  const worldPx = 256 * Math.pow(2, zoom);
+  const buckets = new Map<
+    string,
+    {
+      latSum: number;
+      lngSum: number;
+      count: number;
+      sample: DropPoint;
+      color_key: DropColor;
+      color_hex: string;
+    }
+  >();
+
+  for (const drop of dropPoints) {
+    if (drop.lat === null || drop.lng === null) continue;
+    const projected = mercatorProject(drop.lat, drop.lng);
+    const px = projected.x * worldPx;
+    const py = projected.y * worldPx;
+    const cellX = Math.floor(px / cellSize);
+    const cellY = Math.floor(py / cellSize);
+    const key = `${drop.color_key}:${cellX}:${cellY}`;
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.latSum += drop.lat;
+      existing.lngSum += drop.lng;
+      existing.count += 1;
+    } else {
+      buckets.set(key, {
+        latSum: drop.lat,
+        lngSum: drop.lng,
+        count: 1,
+        sample: drop,
+        color_key: drop.color_key,
+        color_hex: drop.color_hex || DROP_COLOR_HEX[drop.color_key],
+      });
+    }
+  }
+
+  return Array.from(buckets.values()).map((bucket) => ({
+    lat: bucket.latSum / bucket.count,
+    lng: bucket.lngSum / bucket.count,
+    color_key: bucket.color_key,
+    color_hex: bucket.color_hex,
+    count: bucket.count,
+    sample: bucket.sample,
+    clustered: bucket.count > 1,
+  }));
 }
 
 function buildCourierAvatarSvg(seed: string): string {
@@ -539,6 +645,7 @@ function RoutePlanningMap({
   const hasAutoFittedRef = useRef(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapsReady, setMapsReady] = useState(false);
+  const [mapZoom, setMapZoom] = useState<number>(11);
 
   const clearMapObjects = useCallback(() => {
     for (const marker of mapObjectsRef.current.markers) {
@@ -568,6 +675,7 @@ function RoutePlanningMap({
             clickableIcons: false,
           });
         }
+        setMapZoom(mapRef.current.getZoom() || 11);
         setMapsReady(true);
       })
       .catch((error: unknown) => {
@@ -584,6 +692,20 @@ function RoutePlanningMap({
   useEffect(() => {
     return () => clearMapObjects();
   }, [clearMapObjects]);
+
+  useEffect(() => {
+    if (!mapsReady || !mapRef.current) return;
+    const map = mapRef.current;
+    const listener = map.addListener("zoom_changed", () => {
+      const nextZoom = map.getZoom();
+      if (typeof nextZoom === "number") {
+        setMapZoom(nextZoom);
+      }
+    });
+    return () => {
+      listener?.remove?.();
+    };
+  }, [mapsReady]);
 
   useEffect(() => {
     if (!mapsReady || !mapRef.current || !window.google?.maps) return;
@@ -644,22 +766,43 @@ function RoutePlanningMap({
       }
     }
 
-    for (const drop of dropPoints) {
-      if (drop.lat === null || drop.lng === null) continue;
+    const effectiveZoom = typeof mapZoom === "number" ? mapZoom : map.getZoom() || 11;
+    const renderedDropPoints = buildDropRenderPoints(dropPoints, effectiveZoom);
+    for (const drop of renderedDropPoints) {
       const marker = new maps.Marker({
         map,
         position: { lat: drop.lat, lng: drop.lng },
-        title: `Дроп ${drop.unit_barcode || drop.unit_id}`,
+        title:
+          drop.count > 1
+            ? `${DROP_COLOR_LABEL[drop.color_key]}: ${drop.count} дропов`
+            : `Дроп ${drop.sample.unit_barcode || drop.sample.unit_id}`,
         icon: {
           path: maps.SymbolPath.CIRCLE,
-          scale: 5,
+          scale: drop.count > 1 ? Math.min(17, 9 + Math.log2(drop.count) * 2.4) : 5,
           fillColor: drop.color_hex || "#ef4444",
           fillOpacity: 1,
           strokeColor: "#ffffff",
-          strokeWeight: 1,
+          strokeWeight: drop.count > 1 ? 2 : 1,
         },
+        label:
+          drop.count > 1
+            ? {
+                text: String(drop.count),
+                color: "#ffffff",
+                fontWeight: "700",
+                fontSize: "12px",
+              }
+            : undefined,
+        zIndex: drop.count > 1 ? 1800 + drop.count : undefined,
       });
       mapObjectsRef.current.markers.push(marker);
+      if (drop.clustered) {
+        marker.addListener("click", () => {
+          const currentZoom = map.getZoom() || 11;
+          map.panTo(marker.getPosition());
+          map.setZoom(Math.min(currentZoom + 2, 18));
+        });
+      }
       bounds.extend(marker.getPosition());
       hasBounds = true;
     }
@@ -703,7 +846,7 @@ function RoutePlanningMap({
       map.fitBounds(bounds, 60);
       hasAutoFittedRef.current = true;
     }
-  }, [mapsReady, zones, dropPoints, liveCouriers, showCouriers, clearMapObjects]);
+  }, [mapsReady, mapZoom, zones, dropPoints, liveCouriers, showCouriers, clearMapObjects]);
 
   return (
     <div className={styles.mapCard}>
@@ -725,14 +868,7 @@ function RoutePlanningMap({
                     <span
                       className={styles.mapFilterChipDot}
                       style={{
-                        background:
-                          color === "red"
-                            ? "#ef4444"
-                            : color === "yellow"
-                              ? "#eab308"
-                              : color === "purple"
-                                ? "#a855f7"
-                                : "#22c55e",
+                        background: DROP_COLOR_HEX[color],
                       }}
                     />
                     {DROP_COLOR_LABEL[color]}
@@ -1564,7 +1700,7 @@ function CourierHistoryMap({
         <div className={styles.historyLegendRow}>
           <span className={styles.legend}>Синий: трек</span>
           <span className={styles.legend}>Зеленый: текущая точка</span>
-          <span className={styles.legend}>Красный/желтый/фиолетовый/зеленый: dropped</span>
+          <span className={styles.legend}>Дроп: красный/желтый/фиолетовый/серый/черный/зеленый</span>
           <span className={styles.legend}>Желтый: failed</span>
           <span className={styles.legend}>Фиолетовый: returned</span>
         </div>
@@ -2054,7 +2190,7 @@ export default function RoutePlanningClient({
   const [selectedCourierUserId, setSelectedCourierUserId] = useState("");
   const [selectedPickingUnitIds, setSelectedPickingUnitIds] = useState<Set<string>>(new Set());
   const [selectedDroppedUnitIds, setSelectedDroppedUnitIds] = useState<Set<string>>(new Set());
-  const [droppedColorFilter, setDroppedColorFilter] = useState<Set<"red" | "yellow" | "purple" | "green">>(
+  const [droppedColorFilter, setDroppedColorFilter] = useState<Set<DropColor>>(
     new Set(DROP_COLOR_ORDER),
   );
   const [searchPicking, setSearchPicking] = useState("");
@@ -2250,7 +2386,7 @@ export default function RoutePlanningClient({
     setSelectedCourierUserId("");
   }, []);
 
-  const toggleDroppedColorFilter = useCallback((color: "red" | "yellow" | "purple" | "green") => {
+  const toggleDroppedColorFilter = useCallback((color: DropColor) => {
     setDroppedColorFilter((prev) => {
       const next = new Set(prev);
       if (next.has(color)) {
@@ -2952,21 +3088,28 @@ export default function RoutePlanningClient({
               </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                Важно: не все OPS-статусы создают точку дропа. Для статусов
+                {" "}<strong>«Партнер не принял на возврат»</strong>,
+                {" "}<strong>«Клиент не принял»</strong>,
+                {" "}<strong>«Перенос»</strong> и <strong>«В работе»</strong>
+                {" "}точка не создается, заказ остается у курьера.
+              </p>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <span
                   style={{
                     width: 14,
                     height: 14,
                     borderRadius: "50%",
-                    background: "#ef4444",
+                    background: "#7c3aed",
                     flexShrink: 0,
                     marginTop: 4,
                   }}
                 />
                 <div>
-                  <strong>Красный</strong>
+                  <strong>Фиолетовый</strong>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Проблемные возвраты: партнёр не принял заказ, клиент не принял, склад не выдал, кейс отменён, отчёта нет и т.д. Требует внимания OPS и решения по дальнейшим действиям.
+                    Партнер принял на возврат. Заказ передан партнеру и уходит из рук курьера.
                   </p>
                 </div>
               </div>
@@ -2984,7 +3127,7 @@ export default function RoutePlanningClient({
                 <div>
                   <strong>Жёлтый</strong>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Передан в сервисный центр (СЦ). Заказ в процессе ремонта или диагностики. OPS может изменить цвет на зелёный или красный после уточнения ситуации.
+                    Передан в СЦ. Заказ дропнут и передан в сервисный центр.
                   </p>
                 </div>
               </div>
@@ -2994,15 +3137,51 @@ export default function RoutePlanningClient({
                     width: 14,
                     height: 14,
                     borderRadius: "50%",
-                    background: "#7c3aed",
+                    background: "#6b7280",
                     flexShrink: 0,
                     marginTop: 4,
                   }}
                 />
                 <div>
-                  <strong>Фиолетовый</strong>
+                  <strong>Серый</strong>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Партнёр принял на возврат. Положительный статус — возврат одобрен, заказ будет доставлен обратно на склад.
+                    Клиент принял. Финальная успешная выдача клиенту.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#111827",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Чёрный</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Товар доставлен на ПУДО. Заказ дропнут в точке выдачи.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ef4444",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Красный</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Проблемные/исключительные дропы и старые данные, требующие внимания OPS.
                   </p>
                 </div>
               </div>
@@ -3020,7 +3199,7 @@ export default function RoutePlanningClient({
                 <div>
                   <strong>Зелёный</strong>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    OPS вручную пометил точку как решённую (переход только с жёлтого). Ситуация уточнена, проблема закрыта или заказ принят положительно.
+                    Ручная отметка OPS после разбора (переход с жёлтого).
                   </p>
                 </div>
               </div>
