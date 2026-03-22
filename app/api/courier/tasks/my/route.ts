@@ -136,7 +136,11 @@ export async function GET(req: Request) {
     query = query.not("status", "in", "(delivered,failed,returned,canceled)");
   }
 
-  const { data: tasks, error: tasksError } = await query;
+  const { data: rawTasks, error: tasksError } = await query;
+  const tasks = (rawTasks || []).filter((t) => {
+    const meta = t.meta && typeof t.meta === "object" ? (t.meta as Record<string, unknown>) : {};
+    return meta.hidden_from_courier !== true;
+  });
   if (tasksError) {
     return NextResponse.json({ error: tasksError.message }, { status: 500 });
   }

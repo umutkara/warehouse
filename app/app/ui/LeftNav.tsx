@@ -226,7 +226,6 @@ export default function LeftNav({ role }: { role: string }) {
   const canWork = ["worker", "manager", "head", "admin"].includes(role);
   const canOps = ["ops", "manager", "head", "admin"].includes(role);
   const canMerchantRejections = ["ops", "logistics", "manager", "head", "admin", "compliance"].includes(role);
-  const canCourierStats = ["ops", "head", "admin"].includes(role);
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
   const canLogistics = ["logistics", "admin", "head"].includes(role);
   const isLogisticsOnly = role === "logistics";
@@ -328,9 +327,6 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
               Буфер
             </NavButton>
-            <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
-              Route Planning
-            </NavButton>
           </>
         )}
 
@@ -356,11 +352,6 @@ export default function LeftNav({ role }: { role: string }) {
                 Мерчант не принял
               </NavButton>
             )}
-            {canCourierStats && (
-              <NavButton href="/app/courier-stats" icon={<Icons.SLA />} isCollapsed={!shouldExpand}>
-                Статистика курьеров
-              </NavButton>
-            )}
           </>
         )}
 
@@ -373,6 +364,9 @@ export default function LeftNav({ role }: { role: string }) {
             </NavButton>
             <NavButton href="/app/outbound" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
               OUT (В доставке)
+            </NavButton>
+            <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+              Route Planning
             </NavButton>
           </>
         )}
@@ -387,11 +381,6 @@ export default function LeftNav({ role }: { role: string }) {
         {!isHubWorker && (
           <NavButton href="/app/buffer" icon={<Icons.Buffer />} isCollapsed={!shouldExpand}>
             Буфер
-          </NavButton>
-        )}
-        {!isHubWorker && (
-          <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
-            Route Planning
           </NavButton>
         )}
         {canWork && !isLogisticsOnly && !isHubWorker && (

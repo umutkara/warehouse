@@ -2068,6 +2068,9 @@ export default function RoutePlanningClient({
   const [listsPickingHeightPct, setListsPickingHeightPct] = useState(40);
   const [isListsResizing, setIsListsResizing] = useState(false);
   const listsWrapRef = useRef<HTMLDivElement | null>(null);
+  const [mainAreaHeightPct, setMainAreaHeightPct] = useState(70);
+  const [isMainCouriersResizing, setIsMainCouriersResizing] = useState(false);
+  const mainCouriersWrapRef = useRef<HTMLDivElement | null>(null);
 
   const canEdit = dashboard?.can_edit ?? initialCanEdit;
   const effectiveRole = dashboard?.role || initialRole;
@@ -2120,6 +2123,9 @@ export default function RoutePlanningClient({
       const savedLists = localStorage.getItem("routeplanning-lists-picking-height");
       const nLists = Number(savedLists);
       if (Number.isFinite(nLists) && nLists >= 20 && nLists <= 80) setListsPickingHeightPct(nLists);
+      const savedMain = localStorage.getItem("routeplanning-main-area-height");
+      const nMain = Number(savedMain);
+      if (Number.isFinite(nMain) && nMain >= 35 && nMain <= 90) setMainAreaHeightPct(nMain);
     } catch {
       /* ignore */
     }
@@ -2383,6 +2389,24 @@ export default function RoutePlanningClient({
   );
   const handleListsResizeEnd = useCallback(() => setIsListsResizing(false), []);
 
+  const handleMainCouriersResizeStart = useCallback(() => setIsMainCouriersResizing(true), []);
+  const handleMainCouriersResizeMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isMainCouriersResizing || !mainCouriersWrapRef.current) return;
+      const rect = mainCouriersWrapRef.current.getBoundingClientRect();
+      const pct = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+      const clamped = Math.max(35, Math.min(90, pct));
+      setMainAreaHeightPct(clamped);
+      try {
+        localStorage.setItem("routeplanning-main-area-height", String(clamped));
+      } catch {
+        /* ignore */
+      }
+    },
+    [isMainCouriersResizing],
+  );
+  const handleMainCouriersResizeEnd = useCallback(() => setIsMainCouriersResizing(false), []);
+
   useEffect(() => {
     if (!isResizing) return;
     document.body.style.cursor = "col-resize";
@@ -2426,6 +2450,28 @@ export default function RoutePlanningClient({
       document.removeEventListener("mouseup", onUp);
     };
   }, [isListsResizing, handleListsResizeMove, handleListsResizeEnd]);
+
+  useEffect(() => {
+    if (!isMainCouriersResizing) return;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (e: MouseEvent) => handleMainCouriersResizeMove(e);
+    const onUp = () => {
+      handleMainCouriersResizeEnd();
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isMainCouriersResizing, handleMainCouriersResizeMove, handleMainCouriersResizeEnd]);
 
   return (
     <div className={styles.page}>
@@ -2474,10 +2520,19 @@ export default function RoutePlanningClient({
       {message && <div className={styles.message}>{message}</div>}
 
       <div
-        ref={splitContainerRef}
-        className={styles.split}
-        style={{ cursor: isResizing ? "col-resize" : undefined }}
+        ref={mainCouriersWrapRef}
+        className={styles.mainCouriersWrap}
+        style={{ cursor: isMainCouriersResizing ? "row-resize" : undefined }}
       >
+        <div
+          className={styles.mainArea}
+          style={{ height: `${mainAreaHeightPct}%` }}
+        >
+          <div
+            ref={splitContainerRef}
+            className={styles.split}
+            style={{ cursor: isResizing ? "col-resize" : undefined }}
+          >
         <div
           className={`${styles.pane} ${styles.paneLeft}`}
           style={{ width: `${leftPaneWidthPct}%` }}
@@ -2747,7 +2802,16 @@ export default function RoutePlanningClient({
           </div>
         </div>
       </div>
+        </div>
 
+        <div
+          className={`${styles.mainCouriersResizer} ${isMainCouriersResizing ? styles.mainCouriersResizerDragging : ""}`}
+          onMouseDown={handleMainCouriersResizeStart}
+          role="separator"
+          aria-label="Изменить высоту верхней и нижней области"
+        />
+
+        <div className={styles.couriersStripArea}>
       <div className={styles.couriersStrip}>
         <div className={styles.couriersStripHeader}>
           <h3 className={styles.couriersStripTitle}>
@@ -2788,6 +2852,8 @@ export default function RoutePlanningClient({
               </div>
             ))
           )}
+        </div>
+      </div>
         </div>
       </div>
 

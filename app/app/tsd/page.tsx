@@ -60,6 +60,15 @@ export default function TsdPage() {
   // Для режима Приемка
   const [binCell, setBinCell] = useState<CellInfo | null>(null);
   const [lastReceivedUnit, setLastReceivedUnit] = useState<{ barcode: string; binCode: string } | null>(null);
+  const [courierReturnGroups, setCourierReturnGroups] = useState<Array<{
+    courier_user_id: string;
+    courier_name: string;
+    handover_session_id: string;
+    handover_confirmed_at: string | null;
+    total_units: number;
+    items: Array<{ unit_barcode: string; unit_id: string }>;
+  }>>([]);
+  const [loadingCourierReturns, setLoadingCourierReturns] = useState(false);
   
   // Для режима Перемещение
   const [fromCell, setFromCell] = useState<CellInfo | null>(null);
@@ -250,6 +259,50 @@ export default function TsdPage() {
   useEffect(() => {
     if (mode === "shipping_new") {
       loadShippingNewTasks();
+    }
+  }, [mode]);
+
+  // Load courier return groups when in receiving mode (курьеры на приёмке)
+  async function loadCourierReturns() {
+    setLoadingCourierReturns(true);
+    try {
+      const res = await fetch("/api/ops/courier-returns", { cache: "no-store" });
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; pending_groups?: Array<{
+            courier_user_id: string;
+            courier_name: string;
+            handover_session_id: string;
+            handover_confirmed_at?: string | null;
+            total_units?: number;
+            items?: Array<{ unit_barcode?: string; unit_id: string }>;
+          }> }
+        | null;
+      if (res.ok && payload?.ok && Array.isArray(payload.pending_groups)) {
+        setCourierReturnGroups(
+          payload.pending_groups.map((g) => ({
+            courier_user_id: g.courier_user_id,
+            courier_name: g.courier_name,
+            handover_session_id: g.handover_session_id,
+            handover_confirmed_at: g.handover_confirmed_at ?? null,
+            total_units: g.total_units ?? g.items?.length ?? 0,
+            items: (g.items || []).map((i) => ({
+              unit_barcode: i.unit_barcode || i.unit_id,
+              unit_id: i.unit_id,
+            })),
+          }))
+        );
+      } else {
+        setCourierReturnGroups([]);
+      }
+    } catch {
+      setCourierReturnGroups([]);
+    } finally {
+      setLoadingCourierReturns(false);
+    }
+  }
+  useEffect(() => {
+    if (mode === "receiving") {
+      loadCourierReturns();
     }
   }, [mode]);
   
@@ -1180,6 +1233,7 @@ export default function TsdPage() {
         showOpsHintForUnit(parsed.code);
         setLastReceivedUnit({ barcode: parsed.code, binCode: binCell.code });
         setScanValue("");
+        loadCourierReturns(); // Обновить список курьеров (принятый заказ мог быть из handover)
         // BIN/REJECTED оставляем выбранным для приёма пачки
       }
     } catch (e: any) {
@@ -2399,6 +2453,7 @@ export default function TsdPage() {
     if (mode === "receiving") {
       setBinCell(null);
       setLastReceivedUnit(null);
+      setCourierReturnGroups([]);
     } else if (mode === "moving") {
       setFromCell(null);
       setUnits([]);
@@ -2721,6 +2776,77 @@ export default function TsdPage() {
         {/* Режим ПРИЕМКА */}
         {mode === "receiving" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* Курьеры на приёмке (закрыли смену, заказы к приёму) */}
+            {(courierReturnGroups.length > 0 || loadingCourierReturns) && (
+              <div
+                style={{
+                  padding: 14,
+                  background: "#f8fafc",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>
+                    Курьеры на приёмке
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadCourierReturns()}
+                    disabled={loadingCourierReturns}
+                  >
+                    {loadingCourierReturns ? "Загрузка…" : "Обновить"}
+                  </Button>
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                  После закрытия смены курьер появляется здесь. Отсканируйте заказы в BIN.
+                </div>
+                {loadingCourierReturns ? (
+                  <div style={{ fontSize: 13, color: "#64748b" }}>Загрузка…</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {courierReturnGroups.map((group) => (
+                      <div
+                        key={group.handover_session_id}
+                        style={{
+                          padding: 12,
+                          background: "#fff",
+                          borderRadius: 8,
+                          border: "1px solid #e2e8f0",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                            {group.courier_name}
+                          </span>
+                          <span style={{ fontSize: 13, color: "#64748b" }}>
+                            {group.total_units}{" "}
+                            {group.total_units === 1
+                              ? "заказ"
+                              : group.total_units >= 2 && group.total_units <= 4
+                                ? "заказа"
+                                : "заказов"}
+                          </span>
+                        </div>
+                        {group.handover_confirmed_at && (
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                            Handover: {new Date(group.handover_confirmed_at).toLocaleString("ru-RU")}
+                          </div>
+                        )}
+                        {group.items.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#475569" }}>
+                            Штрихкоды: {group.items.slice(0, 5).map((i) => i.unit_barcode).join(", ")}
+                            {group.items.length > 5 ? ` … +${group.items.length - 5}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* BIN / REJECTED */}
             <div
               style={{
