@@ -36,9 +36,6 @@ export async function requireCourierAuth(
   if (token) {
     const { data, error } = await supabaseAdmin.auth.getUser(token);
     if (error || !data?.user) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run2',hypothesisId:'H6',location:'app/api/courier/_shared/auth.ts:39',message:'bearer token rejected by supabaseAdmin.auth.getUser',data:{error:error?.message||null,tokenLength:token.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return {
         ok: false,
         response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),

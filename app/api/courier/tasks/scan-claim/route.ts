@@ -89,6 +89,9 @@ export async function POST(req: Request) {
         source: "api.courier.tasks.scan_claim",
         external_pickup: true,
         note,
+        courier_pickup_status: "confirmed",
+        courier_pickup_confirmed_at: now,
+        courier_pickup_confirmed_by: auth.user.id,
       },
     });
   }

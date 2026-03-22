@@ -68,6 +68,74 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: closeError.message }, { status: 500 });
   }
 
+  // Ensure warehouse receiving queue exists for dropped point returns.
+  const { data: existingHandover } = await supabaseAdmin
+    .from("warehouse_handover_sessions")
+    .select("id")
+    .eq("warehouse_id", auth.profile.warehouse_id)
+    .eq("shift_id", shift.id)
+    .maybeSingle();
+  let ensuredHandoverId = existingHandover?.id || null;
+  if (!ensuredHandoverId) {
+    const { data: insertedHandover } = await supabaseAdmin
+      .from("warehouse_handover_sessions")
+      .insert({
+        warehouse_id: auth.profile.warehouse_id,
+        shift_id: shift.id,
+        courier_user_id: shift.courier_user_id,
+        status: "draft",
+        note: note || null,
+        meta: { source: "api.courier.shift.close", auto_created: true },
+      })
+      .select("id")
+      .single();
+    ensuredHandoverId = insertedHandover?.id || null;
+  }
+
+  if (ensuredHandoverId) {
+    const { data: shiftTasks } = await supabaseAdmin
+      .from("courier_tasks")
+      .select("id, unit_id")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("courier_user_id", shift.courier_user_id)
+      .eq("shift_id", shift.id)
+      .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
+    const taskIds = (shiftTasks || []).map((task) => task.id).filter(Boolean);
+    if (taskIds.length > 0) {
+      const { data: droppedRows } = await supabaseAdmin
+        .from("courier_task_events")
+        .select("task_id")
+        .eq("warehouse_id", auth.profile.warehouse_id)
+        .eq("event_type", "dropped")
+        .in("task_id", taskIds);
+      const droppedTaskIdSet = new Set((droppedRows || []).map((row) => row.task_id).filter(Boolean));
+      const droppedTasks = (shiftTasks || []).filter((task) => droppedTaskIdSet.has(task.id));
+
+      if (droppedTasks.length > 0) {
+        const { data: existingItems } = await supabaseAdmin
+          .from("warehouse_handover_items")
+          .select("unit_id")
+          .eq("handover_session_id", ensuredHandoverId);
+        const existingUnitIds = new Set((existingItems || []).map((row) => row.unit_id).filter(Boolean));
+        const itemsToInsert = droppedTasks
+          .filter((task) => !existingUnitIds.has(task.unit_id))
+          .map((task) => ({
+            handover_session_id: ensuredHandoverId,
+            unit_id: task.unit_id,
+            task_id: task.id,
+            condition_status: "ok",
+            meta: {
+              source: "api.courier.shift.close",
+              queue_source: "point_to_warehouse",
+            },
+          }));
+        if (itemsToInsert.length > 0) {
+          await supabaseAdmin.from("warehouse_handover_items").insert(itemsToInsert);
+        }
+      }
+    }
+  }
+
   await supabaseAdmin.rpc("audit_log_event", {
     p_action: "courier.shift_close",
     p_entity_type: "courier_shift",

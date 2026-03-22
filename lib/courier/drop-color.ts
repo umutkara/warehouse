@@ -1,0 +1,51 @@
+export type DropColorKey = "red" | "yellow" | "purple" | "green";
+
+export const DROP_COLOR_HEX: Record<DropColorKey, string> = {
+  red: "#ef4444",
+  yellow: "#facc15",
+  purple: "#7c3aed",
+  green: "#22c55e",
+};
+
+export const DROP_COLOR_LABEL: Record<DropColorKey, string> = {
+  red: "Красный",
+  yellow: "Желтый",
+  purple: "Фиолетовый",
+  green: "Зеленый",
+};
+
+export function normalizeDropColorKey(value: unknown): DropColorKey | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "red") return "red";
+  if (normalized === "yellow") return "yellow";
+  if (normalized === "purple") return "purple";
+  if (normalized === "green") return "green";
+  return null;
+}
+
+export function mapOpsStatusToDropColorKey(opsStatus: string | null | undefined): DropColorKey {
+  const normalized = (opsStatus || "").trim().toLowerCase();
+  if (normalized === "partner_accepted_return") return "purple";
+  if (normalized === "sent_to_sc") return "yellow";
+  return "red";
+}
+
+export function resolveDropColor(input: {
+  opsStatus?: string | null;
+  overrideColorKey?: unknown;
+}): { color_key: DropColorKey; color_hex: string } {
+  const override = normalizeDropColorKey(input.overrideColorKey);
+  const colorKey = override || mapOpsStatusToDropColorKey(input.opsStatus);
+  return {
+    color_key: colorKey,
+    color_hex: DROP_COLOR_HEX[colorKey],
+  };
+}
+
+export function isAllowedOpsPointColorTransition(
+  currentColor: DropColorKey,
+  nextColor: DropColorKey,
+): boolean {
+  return currentColor === "yellow" && (nextColor === "red" || nextColor === "green");
+}

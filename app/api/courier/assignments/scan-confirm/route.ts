@@ -21,7 +21,9 @@ export async function POST(req: Request) {
     .eq("barcode", barcode)
     .maybeSingle();
   if (unitError) return NextResponse.json({ error: unitError.message }, { status: 500 });
-  if (!unit) return NextResponse.json({ error: "Unit not found by barcode" }, { status: 404 });
+  if (!unit) {
+    return NextResponse.json({ error: "Unit not found by barcode" }, { status: 404 });
+  }
 
   const { data: shipment, error: shipmentError } = await supabaseAdmin
     .from("outbound_shipments")

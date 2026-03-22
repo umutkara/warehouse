@@ -97,9 +97,6 @@ async function loadLatestScenarioByUnit(
 export async function GET(req: Request) {
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
   if (!auth.ok) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run1',hypothesisId:'H1',location:'app/api/courier/tasks/my/route.ts:9',message:'tasks.my auth failed',data:{status:auth.response.status},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return auth.response;
   }
 
@@ -125,6 +122,7 @@ export async function GET(req: Request) {
         fail_comment,
         current_lat,
         current_lng,
+        last_event_at,
         meta
       `,
     )
@@ -140,9 +138,6 @@ export async function GET(req: Request) {
 
   const { data: tasks, error: tasksError } = await query;
   if (tasksError) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run1',hypothesisId:'H3',location:'app/api/courier/tasks/my/route.ts:52',message:'tasks.my query failed',data:{error:tasksError.message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return NextResponse.json({ error: tasksError.message }, { status: 500 });
   }
 
@@ -204,8 +199,13 @@ export async function GET(req: Request) {
       const shipmentId = taskMeta?.shipment_id?.toString() || pool?.source_shipment_id?.toString() || null;
       const shipment = shipmentId ? shipmentById.get(shipmentId) : shipmentByUnitId.get(task.unit_id);
       const shipmentMeta = shipment?.meta && typeof shipment.meta === "object" ? shipment.meta : null;
+      const selfPickup =
+        taskMeta?.source === "api.courier.tasks.scan_claim" ||
+        Boolean(shipmentMeta?.external_pickup) ||
+        Boolean(unitMeta?.external_pickup);
       return {
         ...task,
+        self_pickup: selfPickup,
         scenario: resolveScenario(
           scenarioByUnit.get(task.unit_id),
           taskMeta,

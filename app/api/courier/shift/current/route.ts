@@ -5,14 +5,8 @@ import { ACTIVE_TASK_STATUSES, COURIER_ALLOWED_ROLES, WAREHOUSE_CONTROL_ROLES } 
 import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export async function GET(req: Request) {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run1',hypothesisId:'H2',location:'app/api/courier/shift/current/route.ts:8',message:'shift.current route entered',data:{hasAuthHeader:Boolean(req.headers.get("authorization") || req.headers.get("Authorization"))},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
   if (!auth.ok) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run1',hypothesisId:'H1',location:'app/api/courier/shift/current/route.ts:11',message:'shift.current auth failed',data:{status:auth.response.status},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return auth.response;
   }
 
@@ -33,9 +27,6 @@ export async function GET(req: Request) {
     .maybeSingle();
 
   if (shiftError) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c2b4c4eb-c483-476c-a9b3-e0a1e238982f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'911c50'},body:JSON.stringify({sessionId:'911c50',runId:'run1',hypothesisId:'H2',location:'app/api/courier/shift/current/route.ts:33',message:'shift.current query failed',data:{error:shiftError.message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return NextResponse.json({ error: shiftError.message }, { status: 500 });
   }
 
