@@ -2065,6 +2065,9 @@ export default function RoutePlanningClient({
   const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(45);
   const [isResizing, setIsResizing] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const [listsPickingHeightPct, setListsPickingHeightPct] = useState(50);
+  const [isListsResizing, setIsListsResizing] = useState(false);
+  const listsWrapRef = useRef<HTMLDivElement | null>(null);
 
   const canEdit = dashboard?.can_edit ?? initialCanEdit;
   const effectiveRole = dashboard?.role || initialRole;
@@ -2114,6 +2117,9 @@ export default function RoutePlanningClient({
       const saved = localStorage.getItem("routeplanning-left-pane-width");
       const n = Number(saved);
       if (Number.isFinite(n) && n >= 25 && n <= 75) setLeftPaneWidthPct(n);
+      const savedLists = localStorage.getItem("routeplanning-lists-picking-height");
+      const nLists = Number(savedLists);
+      if (Number.isFinite(nLists) && nLists >= 20 && nLists <= 80) setListsPickingHeightPct(nLists);
     } catch {
       /* ignore */
     }
@@ -2359,6 +2365,24 @@ export default function RoutePlanningClient({
   );
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
+  const handleListsResizeStart = useCallback(() => setIsListsResizing(true), []);
+  const handleListsResizeMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isListsResizing || !listsWrapRef.current) return;
+      const rect = listsWrapRef.current.getBoundingClientRect();
+      const pct = Math.round(((e.clientY - rect.top) / rect.height) * 100);
+      const clamped = Math.max(20, Math.min(80, pct));
+      setListsPickingHeightPct(clamped);
+      try {
+        localStorage.setItem("routeplanning-lists-picking-height", String(clamped));
+      } catch {
+        /* ignore */
+      }
+    },
+    [isListsResizing],
+  );
+  const handleListsResizeEnd = useCallback(() => setIsListsResizing(false), []);
+
   useEffect(() => {
     if (!isResizing) return;
     document.body.style.cursor = "col-resize";
@@ -2380,6 +2404,28 @@ export default function RoutePlanningClient({
       document.removeEventListener("mouseup", onUp);
     };
   }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  useEffect(() => {
+    if (!isListsResizing) return;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (e: MouseEvent) => handleListsResizeMove(e);
+    const onUp = () => {
+      handleListsResizeEnd();
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isListsResizing, handleListsResizeMove, handleListsResizeEnd]);
 
   return (
     <div className={styles.page}>
@@ -2515,10 +2561,18 @@ export default function RoutePlanningClient({
               </div>
             </div>
 
-            <div className={styles.listsWrap}>
-              <div className={styles.listCard}>
-                <div className={styles.listHeader}>
-                  <strong>Picking ({filteredPickingUnits.length})</strong>
+            <div
+              ref={listsWrapRef}
+              className={styles.listsWrap}
+              style={{ cursor: isListsResizing ? "row-resize" : undefined }}
+            >
+              <div
+                className={styles.listsWrapPicking}
+                style={{ height: `${listsPickingHeightPct}%` }}
+              >
+                <div className={styles.listCard}>
+                  <div className={styles.listHeader}>
+                    <strong>Picking ({filteredPickingUnits.length})</strong>
                   <input
                     className={styles.input}
                     style={{ maxWidth: 220 }}
@@ -2572,11 +2626,20 @@ export default function RoutePlanningClient({
                     })
                   )}
                 </div>
+                </div>
               </div>
 
-              <div className={styles.listCard}>
-                <div className={styles.listHeader}>
-                  <strong>Dropped ({filteredDroppedUnits.length})</strong>
+              <div
+                className={`${styles.listsWrapResizer} ${isListsResizing ? styles.listsWrapResizerDragging : ""}`}
+                onMouseDown={handleListsResizeStart}
+                role="separator"
+                aria-label="Изменить высоту карточек"
+              />
+
+              <div className={styles.listsWrapDropped}>
+                <div className={styles.listCard}>
+                  <div className={styles.listHeader}>
+                    <strong>Dropped ({filteredDroppedUnits.length})</strong>
                   <input
                     className={styles.input}
                     style={{ maxWidth: 220 }}
@@ -2649,6 +2712,7 @@ export default function RoutePlanningClient({
                       );
                     })
                   )}
+                </div>
                 </div>
               </div>
             </div>

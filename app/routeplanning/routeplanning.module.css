@@ -259,9 +259,39 @@
 .listsWrap {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.listsWrapPicking {
+  flex-shrink: 0;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.listsWrapDropped {
+  flex: 1;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.listsWrapResizer {
+  flex-shrink: 0;
+  height: 8px;
+  cursor: row-resize;
+  background: linear-gradient(180deg, transparent 2px, #e2e8f0 2px, #e2e8f0 6px, transparent 6px);
+  transition: background 0.15s;
+}
+
+.listsWrapResizer:hover,
+.listsWrapResizer.listsWrapResizerDragging {
+  background: linear-gradient(180deg, transparent 1px, #3b82f6 1px, #3b82f6 7px, transparent 7px);
+}
+
+.listsWrapDropped {
+  flex: 1;
+  min-height: 120px;
 }
 
 .listCard {
