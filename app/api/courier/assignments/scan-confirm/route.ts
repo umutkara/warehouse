@@ -3,6 +3,27 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
 import { COURIER_ALLOWED_ROLES } from "@/app/api/courier/_shared/state";
 
+const DEFAULT_DROP_TO_WAREHOUSE_SCENARIO = "Отвезите заказ на склад";
+
+function resolveExistingScenario(
+  shipmentMeta: Record<string, unknown>,
+  unitMeta: Record<string, unknown>,
+  scenarioFromPicking: string | null,
+): string | null {
+  const fromShipment =
+    (typeof shipmentMeta?.scenario === "string" && shipmentMeta.scenario.trim()) ||
+    (typeof shipmentMeta?.ops_scenario === "string" && shipmentMeta.ops_scenario.trim()) ||
+    (typeof shipmentMeta?.picking_scenario === "string" && shipmentMeta.picking_scenario.trim());
+  if (fromShipment) return fromShipment.trim();
+  const fromUnit =
+    typeof unitMeta?.ops_scenario === "string" && unitMeta.ops_scenario.trim()
+      ? unitMeta.ops_scenario.trim()
+      : null;
+  if (fromUnit) return fromUnit;
+  if (scenarioFromPicking) return scenarioFromPicking;
+  return null;
+}
+
 export async function POST(req: Request) {
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
   if (!auth.ok) return auth.response;
@@ -16,7 +37,7 @@ export async function POST(req: Request) {
 
   const { data: unit, error: unitError } = await supabaseAdmin
     .from("units")
-    .select("id, barcode")
+    .select("id, barcode, meta")
     .eq("warehouse_id", auth.profile.warehouse_id)
     .eq("barcode", barcode)
     .maybeSingle();
@@ -40,12 +61,47 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No pending assignment found for this barcode" }, { status: 404 });
   }
 
+  let scenarioFromPicking: string | null = null;
+  const { data: taskUnits } = await supabaseAdmin
+    .from("picking_task_units")
+    .select("unit_id, picking_task_id")
+    .eq("unit_id", shipment.unit_id);
+  const taskIds = [...new Set((taskUnits || []).map((r) => r.picking_task_id).filter(Boolean))];
+  if (taskIds.length > 0) {
+    const { data: tasks } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("id, scenario")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .in("id", taskIds);
+    const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+    for (const row of taskUnits || []) {
+      const task = taskById.get(row.picking_task_id);
+      if (task?.scenario?.trim()) {
+        scenarioFromPicking = task.scenario.trim();
+        break;
+      }
+    }
+  }
+  if (!scenarioFromPicking) {
+    const { data: legacyTask } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("scenario")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("unit_id", shipment.unit_id)
+      .not("scenario", "is", null)
+      .limit(1)
+      .maybeSingle();
+    if (legacyTask?.scenario?.trim()) scenarioFromPicking = legacyTask.scenario.trim();
+  }
+
   const now = new Date().toISOString();
   const existingMeta =
     shipment.meta && typeof shipment.meta === "object"
       ? (shipment.meta as Record<string, any>)
       : {};
-  const mergedMeta = {
+  const unitMeta = (unit as any)?.meta && typeof (unit as any).meta === "object" ? (unit as any).meta : {};
+  const existingScenario = resolveExistingScenario(existingMeta, unitMeta, scenarioFromPicking);
+  const mergedMeta: Record<string, unknown> = {
     ...existingMeta,
     courier_pickup_confirmed_at: now,
     courier_pickup_confirmed_by: auth.user.id,
@@ -55,6 +111,10 @@ export async function POST(req: Request) {
     courier_pickup_rejected_by: null,
     courier_pickup_reject_note: null,
   };
+  if (!existingScenario) {
+    mergedMeta.scenario = DEFAULT_DROP_TO_WAREHOUSE_SCENARIO;
+    mergedMeta.ops_scenario = DEFAULT_DROP_TO_WAREHOUSE_SCENARIO;
+  }
   const { error: updateError } = await supabaseAdmin
     .from("outbound_shipments")
     .update({
@@ -85,6 +145,8 @@ export async function POST(req: Request) {
     .limit(1)
     .maybeSingle();
 
+  const taskScenario = existingScenario || DEFAULT_DROP_TO_WAREHOUSE_SCENARIO;
+
   let taskId = existingTask?.id || null;
   if (existingTask) {
     await supabaseAdmin
@@ -102,6 +164,7 @@ export async function POST(req: Request) {
           scanned_barcode: barcode,
           pickup_confirmed: true,
           note,
+          scenario: taskScenario,
         },
       })
       .eq("id", existingTask.id);
@@ -124,6 +187,7 @@ export async function POST(req: Request) {
           scanned_barcode: barcode,
           pickup_confirmed: true,
           note,
+          scenario: taskScenario,
         },
       })
       .select("id")
