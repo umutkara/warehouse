@@ -1,6 +1,31 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
+function buildBarcodeCandidates(rawBarcode: string): string[] {
+  const barcode = rawBarcode.trim();
+  const out = new Set<string>();
+  if (!barcode) return [];
+  out.add(barcode);
+
+  const digitsOnly = /^\d+$/.test(barcode);
+  if (!digitsOnly) return Array.from(out);
+
+  if (barcode.startsWith("00") && barcode.length > 4) {
+    out.add(barcode.slice(2, -2));
+  }
+  if (!barcode.startsWith("00")) {
+    out.add(`00${barcode}`);
+    out.add(`00${barcode}01`);
+  } else {
+    out.add(`${barcode}01`);
+  }
+  if (!barcode.endsWith("01")) {
+    out.add(`${barcode}01`);
+  }
+
+  return Array.from(out).filter(Boolean);
+}
+
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
   const url = new URL(req.url);
@@ -24,14 +49,34 @@ export async function GET(req: Request) {
   }
 
   // Находим unit по штрихкоду и складу.
-  const { data: unit, error: uErr } = await supabase
+  const barcodeCandidates = buildBarcodeCandidates(barcode);
+  const { data: exactUnit, error: exactErr } = await supabase
     .from("units")
     .select("id, barcode, cell_id, status, created_at")
     .eq("warehouse_id", profile.warehouse_id)
     .eq("barcode", barcode)
     .maybeSingle();
+  let unit = exactUnit;
+  let uErr = exactErr;
+  if (!unit && !uErr && barcodeCandidates.length > 1) {
+    const { data: fallbackUnits, error: fallbackErr } = await supabase
+      .from("units")
+      .select("id, barcode, cell_id, status, created_at")
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("barcode", barcodeCandidates)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    uErr = fallbackErr;
+    unit = fallbackUnits?.[0] ?? null;
+  }
 
   if (uErr || !unit) {
+    const { data: similarUnits } = await supabase
+      .from("units")
+      .select("barcode")
+      .eq("warehouse_id", profile.warehouse_id)
+      .ilike("barcode", `%${barcode}%`)
+      .limit(5);
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 

@@ -3,6 +3,31 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasAnyRole } from "@/app/api/_shared/role-access";
 
+function buildBarcodeCandidates(rawBarcode: string): string[] {
+  const barcode = rawBarcode.trim();
+  const out = new Set<string>();
+  if (!barcode) return [];
+  out.add(barcode);
+
+  const digitsOnly = /^\d+$/.test(barcode);
+  if (!digitsOnly) return Array.from(out);
+
+  if (barcode.startsWith("00") && barcode.length > 4) {
+    out.add(barcode.slice(2, -2));
+  }
+  if (!barcode.startsWith("00")) {
+    out.add(`00${barcode}`);
+    out.add(`00${barcode}01`);
+  } else {
+    out.add(`${barcode}01`);
+  }
+  if (!barcode.endsWith("01")) {
+    out.add(`${barcode}01`);
+  }
+
+  return Array.from(out).filter(Boolean);
+}
+
 /**
  * GET /api/units/list
  * Returns list of units with filters
@@ -40,6 +65,7 @@ export async function GET(req: Request) {
     const opsFilter = searchParams.get("ops") || "all";
     const canUseKeywordSearch = hasAnyRole(profile.role, ["ops", "admin"]);
     const normalizedSearchQuery = searchQuery.trim();
+    const barcodeCandidates = buildBarcodeCandidates(normalizedSearchQuery);
 
     // Calculate date threshold based on filter
     let dateThreshold: string | null = null;
@@ -130,7 +156,51 @@ export async function GET(req: Request) {
     const { count: totalCount } = await countQuery;
 
     const { data: units, error: unitsError } = await query;
-
+    let effectiveUnits = units || [];
+    // If there is a numeric-like search query, load targeted barcode matches
+    // from the full warehouse scope to avoid default 1000-row ceiling.
+    if (
+      canUseKeywordSearch &&
+      normalizedSearchQuery &&
+      barcodeCandidates.length > 0
+    ) {
+      let barcodeQuery = supabaseAdmin
+        .from("units")
+        .select(`
+          id,
+          barcode,
+          status,
+          product_name,
+          partner_name,
+          price,
+          cell_id,
+          created_at,
+          meta,
+          warehouse_cells!units_cell_id_fkey(code, cell_type)
+        `)
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("barcode", barcodeCandidates);
+      if (statusFilter && statusFilter !== "all" && statusFilter !== "on_warehouse" && statusFilter !== "bin" && statusFilter !== "shipping") {
+        barcodeQuery = barcodeQuery.eq("status", statusFilter);
+      }
+      if (dateThreshold) {
+        barcodeQuery = barcodeQuery.lt("created_at", dateThreshold);
+      }
+      if (opsFilter && opsFilter !== "all") {
+        if (opsFilter === "no_status") {
+          barcodeQuery = (barcodeQuery as any).is("meta->>ops_status", null);
+        } else {
+          barcodeQuery = barcodeQuery.contains("meta", { ops_status: opsFilter });
+        }
+      }
+      const { data: barcodeHits } = await barcodeQuery.limit(100);
+      if (Array.isArray(barcodeHits) && barcodeHits.length > 0) {
+        const mapById = new Map<string, any>();
+        effectiveUnits.forEach((u: any) => mapById.set(u.id, u));
+        barcodeHits.forEach((u: any) => mapById.set(u.id, u));
+        effectiveUnits = Array.from(mapById.values());
+      }
+    }
     if (unitsError) {
       console.error("Units list error:", unitsError);
       return NextResponse.json(
@@ -140,7 +210,7 @@ export async function GET(req: Request) {
     }
 
     // По факту: ячейку для отображения берём из warehouse_cells_map; при рассинхроне — по status (rejected/ff)
-    const cellIds = [...new Set((units || []).map((u: any) => u.cell_id).filter(Boolean))];
+    const cellIds = [...new Set(effectiveUnits.map((u: any) => u.cell_id).filter(Boolean))];
     const cellsMap = new Map<string, { code: string; cell_type: string }>();
     if (cellIds.length > 0) {
       const { data: cells } = await supabaseAdmin
@@ -173,7 +243,7 @@ export async function GET(req: Request) {
     }
 
     // stay_start: last time unit "entered" warehouse (reset after return). If never returned = created_at.
-    const allUnitIds = (units || []).map((u: any) => u.id);
+    const allUnitIds = effectiveUnits.map((u: any) => u.id);
     const lastReturnedAtByUnitId = new Map<string, string>();
     if (allUnitIds.length > 0) {
       const batchSize = 100;
@@ -198,7 +268,7 @@ export async function GET(req: Request) {
     }
 
     // For shipped/out units: get latest out_at so age stops at leave
-    const shippedOutUnits = (units || []).filter((u: any) => u.status === "shipped" || u.status === "out");
+    const shippedOutUnits = effectiveUnits.filter((u: any) => u.status === "shipped" || u.status === "out");
     const shippedOutIds = shippedOutUnits.map((u: any) => u.id);
     const outAtByUnitId = new Map<string, string>();
     if (shippedOutIds.length > 0) {
@@ -222,7 +292,7 @@ export async function GET(req: Request) {
     }
 
     // Age = time on warehouse in current stay (from stay_start to end). stay_start resets after return.
-    const unitsWithAge = (units || []).map((unit: any) => {
+    const unitsWithAge = effectiveUnits.map((unit: any) => {
       const stayStart = lastReturnedAtByUnitId.get(unit.id) || unit.created_at;
       const stayStartTime = new Date(stayStart).getTime();
       const isLeftWarehouse = unit.status === "shipped" || unit.status === "out";
