@@ -373,6 +373,9 @@ export default function LeftNav({ role }: { role: string }) {
 
         {/* Common section */}
         {!isHubWorker && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
+        <NavButton href="/app/units" icon={<Icons.Units />} isCollapsed={!shouldExpand}>
+          Заказы
+        </NavButton>
         {!isHubWorker && (
           <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
             Дубли
