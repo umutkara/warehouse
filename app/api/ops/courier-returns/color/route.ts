@@ -42,6 +42,10 @@ export async function PATCH(req: Request) {
   const unitId =
     typeof body?.unitId === "string" && body.unitId.trim() ? body.unitId.trim() : null;
   const nextColor = normalizeDropColorKey(body?.colorKey);
+  const scenario =
+    typeof body?.scenario === "string" && body.scenario.trim()
+      ? body.scenario.trim().slice(0, 500)
+      : null;
   if (!unitId || !nextColor) {
     return NextResponse.json({ error: "unitId and colorKey are required" }, { status: 400 });
   }
@@ -62,18 +66,21 @@ export async function PATCH(req: Request) {
   });
   if (!isAllowedOpsPointColorTransition(current.color_key, nextColor)) {
     return NextResponse.json(
-      { error: "Only yellow -> red/green transitions are allowed", current: current.color_key },
+      { error: "Only yellow → red/green/blue transitions are allowed", current: current.color_key },
       { status: 400 },
     );
   }
 
-  const updatedMeta = {
+  const updatedMeta: Record<string, unknown> = {
     ...unitMeta,
     drop_point_color_override: nextColor,
     drop_point_color_updated_at: new Date().toISOString(),
     drop_point_color_updated_by: userData.user.id,
     drop_point_color_source: "api.ops.courier-returns.color",
   };
+  if (scenario !== null) {
+    updatedMeta.ops_scenario = scenario;
+  }
   const { error: updateError } = await supabaseAdmin
     .from("units")
     .update({ meta: updatedMeta })
@@ -86,5 +93,6 @@ export async function PATCH(req: Request) {
     unit_id: unit.id,
     color_key: nextColor,
     color_hex: resolveDropColor({ opsStatus: extractOpsStatus(updatedMeta), overrideColorKey: nextColor }).color_hex,
+    scenario: scenario ?? undefined,
   });
 }

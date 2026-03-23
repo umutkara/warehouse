@@ -271,6 +271,26 @@ export default function OpsShippingPage() {
   const [modalUnitDetails, setModalUnitDetails] = useState<UnitDetails | null>(null);
   const [loadingModal, setLoadingModal] = useState(false);
 
+  // Service mode: yellow dropped units
+  const [yellowUnits, setYellowUnits] = useState<Array<{
+    unit_id: string;
+    unit_barcode: string;
+    current_status: string;
+    dropped_at: string;
+    courier_name: string;
+    ops_status: string | null;
+    scenario: string | null;
+    color_key: string;
+    color_hex: string;
+  }>>([]);
+  const [loadingYellowUnits, setLoadingYellowUnits] = useState(false);
+  const [selectedServiceUnitIds, setSelectedServiceUnitIds] = useState<Set<string>>(new Set());
+  const [serviceTargetColor, setServiceTargetColor] = useState<"blue" | "green">("blue");
+  const [serviceScenario, setServiceScenario] = useState("");
+  const [serviceError, setServiceError] = useState<string | null>(null);
+  const [serviceSuccess, setServiceSuccess] = useState<string | null>(null);
+  const [assigningColor, setAssigningColor] = useState(false);
+
   // Compute final scenario string
   const scenarioString = scenarioCategory && scenarioDestination
     ? `${SCENARIO_FROM} → ${scenarioCategory} → ${scenarioDestination}`
@@ -343,6 +363,103 @@ export default function OpsShippingPage() {
 
     return () => controller.abort();
   }, [mode]);
+
+  // Load yellow dropped units when service mode is selected.
+  useEffect(() => {
+    if (mode !== "service") return;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    setLoadingYellowUnits(true);
+    setServiceError(null);
+    fetch("/api/ops/service-tasks/yellow-units", { cache: "no-store", signal })
+      .then((res) => res.json())
+      .then((json) => {
+        if (signal.aborted) return;
+        if (json.ok) setYellowUnits(json.units || []);
+        else setServiceError(json.error || "Ошибка загрузки");
+      })
+      .catch((e) => {
+        if (e?.name !== "AbortError") {
+          setServiceError("Ошибка загрузки жёлтых заказов");
+          setYellowUnits([]);
+        }
+      })
+      .finally(() => {
+        if (!signal.aborted) setLoadingYellowUnits(false);
+      });
+    return () => controller.abort();
+  }, [mode]);
+
+  async function loadYellowUnits() {
+    setLoadingYellowUnits(true);
+    setServiceError(null);
+    try {
+      const res = await fetch("/api/ops/service-tasks/yellow-units", { cache: "no-store" });
+      const json = await res.json();
+      if (json.ok) setYellowUnits(json.units || []);
+      else setServiceError(json.error || "Ошибка загрузки");
+    } catch {
+      setServiceError("Ошибка загрузки жёлтых заказов");
+      setYellowUnits([]);
+    } finally {
+      setLoadingYellowUnits(false);
+    }
+  }
+
+  function handleToggleServiceUnit(unitId: string) {
+    setSelectedServiceUnitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  }
+
+  function handleSelectAllServiceUnits() {
+    const ids = new Set(yellowUnits.map((u) => u.unit_id));
+    const allSelected = ids.size > 0 && [...ids].every((id) => selectedServiceUnitIds.has(id));
+    if (allSelected) {
+      setSelectedServiceUnitIds((prev) => new Set([...prev].filter((id) => !ids.has(id))));
+    } else {
+      setSelectedServiceUnitIds((prev) => new Set([...prev, ...ids]));
+    }
+  }
+
+  async function handleServiceAssign() {
+    const ids = [...selectedServiceUnitIds];
+    if (ids.length === 0) return;
+    setAssigningColor(true);
+    setServiceError(null);
+    setServiceSuccess(null);
+    let okCount = 0;
+    const errs: string[] = [];
+    for (const unitId of ids) {
+      try {
+        const res = await fetch("/api/ops/courier-returns/color", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            unitId,
+            colorKey: serviceTargetColor,
+            scenario: serviceScenario.trim() || undefined,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.ok) okCount++;
+        else errs.push(json.error || "Ошибка");
+      } catch {
+        errs.push("Сетевая ошибка");
+      }
+    }
+    setAssigningColor(false);
+    if (okCount > 0) {
+      setServiceSuccess(`Обновлено: ${okCount} из ${ids.length} заказов`);
+      setSelectedServiceUnitIds(new Set());
+      setServiceScenario("");
+      loadYellowUnits();
+    }
+    if (errs.length > 0) setServiceError(errs.slice(0, 3).join("; "));
+  }
 
   // Load available units from storage/shipping. Optional signal for mount-only load (avoids duplicate calls).
   // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
@@ -1082,28 +1199,155 @@ export default function OpsShippingPage() {
     );
   }
 
-  // Service mode: placeholder for future functionality
+  // Service mode: yellow dropped units → assign to blue/green with scenario
   if (mode === "service") {
+    const POINT_B_LABEL = "СКЛАД";
     return (
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: 24 }}>
         <div style={{ marginBottom: 24 }}>
           <ModeSelectorSlider value="service" onChange={setMode} compact />
         </div>
-        <div
-          style={{
-            padding: 64,
-            textAlign: "center",
-            color: "#6b7280",
-            background: "#f9fafb",
-            borderRadius: 12,
-            border: "1px dashed #d1d5db",
-          }}
-        >
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🔄</div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 8 }}>
-            Создание заданий от сервиса
+        <h1 style={{ marginBottom: 24 }}>Создание заданий от сервиса</h1>
+        <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 24 }}>
+          Жёлтые заказы (дропнул курьер). Перевод на синий или зелёный. Точка А — сценарий OPS, точка Б — {POINT_B_LABEL}.
+        </p>
+
+        {serviceError && (
+          <Alert variant="error" style={{ marginBottom: 16 }}>{serviceError}</Alert>
+        )}
+        {serviceSuccess && (
+          <Alert variant="success" style={{ marginBottom: 16 }}>{serviceSuccess}</Alert>
+        )}
+
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <label style={{ fontWeight: 600, fontSize: 16 }}>🟡 Жёлтые заказы (дропы)</label>
+            <Button variant="secondary" size="sm" onClick={loadYellowUnits} disabled={loadingYellowUnits}>
+              {loadingYellowUnits ? "Загрузка..." : "Обновить"}
+            </Button>
           </div>
-          <div style={{ fontSize: 14 }}>Раздел в разработке</div>
+
+          {loadingYellowUnits ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
+              Загрузка...
+            </div>
+          ) : yellowUnits.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#666", border: "1px solid #ddd", borderRadius: 8 }}>
+              Нет жёлтых заказов
+            </div>
+          ) : (
+            <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", maxHeight: 320, overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead style={{ position: "sticky", top: 0, background: "#f5f5f5", zIndex: 1 }}>
+                  <tr>
+                    <th style={{ padding: "10px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 600 }}>
+                      <input
+                        type="checkbox"
+                        checked={yellowUnits.length > 0 && yellowUnits.every((u) => selectedServiceUnitIds.has(u.unit_id))}
+                        onChange={handleSelectAllServiceUnits}
+                        style={{ cursor: "pointer", width: 16, height: 16 }}
+                      />
+                    </th>
+                    <th style={{ padding: "10px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Штрихкод</th>
+                    <th style={{ padding: "10px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>Курьер</th>
+                    <th style={{ padding: "10px", textAlign: "left", borderBottom: "1px solid #ddd", fontWeight: 600 }}>OPS статус</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {yellowUnits.map((u) => (
+                    <tr
+                      key={u.unit_id}
+                      style={{
+                        borderBottom: "1px solid #eee",
+                        background: selectedServiceUnitIds.has(u.unit_id) ? "#fef9c3" : "transparent",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => handleToggleServiceUnit(u.unit_id)}
+                    >
+                      <td style={{ padding: "10px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedServiceUnitIds.has(u.unit_id)}
+                          onChange={() => handleToggleServiceUnit(u.unit_id)}
+                          style={{ cursor: "pointer", width: 16, height: 16 }}
+                        />
+                      </td>
+                      <td style={{ padding: "10px", fontWeight: 600 }}>{u.unit_barcode}</td>
+                      <td style={{ padding: "10px", fontSize: 13 }}>{u.courier_name}</td>
+                      <td style={{ padding: "10px", fontSize: 12, color: "#666" }}>
+                        {OPS_STATUS_LABELS[u.ops_status as OpsStatusCode] || u.ops_status || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {selectedServiceUnitIds.size > 0 && (
+            <div style={{ marginTop: 16, padding: 16, background: "#f0f9ff", borderRadius: 8 }}>
+              <div style={{ fontWeight: 600, marginBottom: 12 }}>Перевести в цвет</div>
+              <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setServiceTargetColor("blue")}
+                  style={{
+                    padding: "10px 20px",
+                    border: serviceTargetColor === "blue" ? "2px solid #2563eb" : "1px solid #ddd",
+                    borderRadius: 8,
+                    background: serviceTargetColor === "blue" ? "#eff6ff" : "#fff",
+                    color: "#2563eb",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Синий
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServiceTargetColor("green")}
+                  style={{
+                    padding: "10px 20px",
+                    border: serviceTargetColor === "green" ? "2px solid #22c55e" : "1px solid #ddd",
+                    borderRadius: 8,
+                    background: serviceTargetColor === "green" ? "#f0fdf4" : "#fff",
+                    color: "#22c55e",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Зелёный
+                </button>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontWeight: 600, marginBottom: 6 }}>Точка А (сценарий OPS)</label>
+                <input
+                  type="text"
+                  value={serviceScenario}
+                  onChange={(e) => setServiceScenario(e.target.value)}
+                  placeholder="Например: СЦ Масазир"
+                  style={{
+                    width: "100%",
+                    maxWidth: 400,
+                    padding: "10px 12px",
+                    border: "1px solid #ddd",
+                    borderRadius: 6,
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
+                Точка Б: <strong>{POINT_B_LABEL}</strong> (закреплена за складом)
+              </div>
+              <Button
+                onClick={handleServiceAssign}
+                disabled={assigningColor}
+                variant="primary"
+              >
+                {assigningColor ? "Обновление..." : `Перевести ${selectedServiceUnitIds.size} заказов в ${serviceTargetColor === "blue" ? "синий" : "зелёный"}`}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
