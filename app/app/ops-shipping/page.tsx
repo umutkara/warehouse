@@ -175,7 +175,63 @@ type ManualInputCategory = "Мерчант" | "Сервис" | "Азерпочт
 type DropdownCategory = keyof typeof SCENARIO_TO_OPTIONS;
 type ScenarioCategory = ManualInputCategory | DropdownCategory | "";
 
+type OpsShippingMode = "shipping" | "service" | null;
+
+function ModeSelectorSlider({
+  value,
+  onChange,
+  compact,
+}: {
+  value: OpsShippingMode;
+  onChange: (m: "shipping" | "service") => void;
+  compact?: boolean;
+}) {
+  const options = [
+    { id: "shipping" as const, label: "Создание заданий на отгрузку", icon: "📦" },
+    { id: "service" as const, label: "Создание заданий от сервиса", icon: "🔄" },
+  ];
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 4,
+        padding: compact ? 3 : 6,
+        background: "linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)",
+        borderRadius: 12,
+        boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
+      }}
+    >
+      {options.map((opt) => {
+        const selected = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onChange(opt.id)}
+            style={{
+              flex: 1,
+              padding: compact ? "8px 14px" : "14px 20px",
+              border: "none",
+              borderRadius: 10,
+              background: selected ? "#fff" : "transparent",
+              boxShadow: selected ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              fontWeight: 600,
+              fontSize: compact ? 13 : 14,
+              transition: "all 0.2s ease",
+              color: selected ? "#111" : "#4b5563",
+            }}
+          >
+            {opt.icon} {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function OpsShippingPage() {
+  const [mode, setMode] = useState<OpsShippingMode>(null);
   const [availableUnits, setAvailableUnits] = useState<UnitWithCell[]>([]);
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
   const [pickingCells, setPickingCells] = useState<Cell[]>([]);
@@ -255,9 +311,11 @@ export default function OpsShippingPage() {
     return Array.from(codes).sort();
   }, [tasks]);
 
-  // Load picking cells, available units and tasks on mount.
+  // Load picking cells, available units and tasks only when shipping mode is selected.
   // AbortController prevents duplicate API calls when effect runs twice (e.g. React Strict Mode).
   useEffect(() => {
+    if (mode !== "shipping") return;
+
     const controller = new AbortController();
     const signal = controller.signal;
 
@@ -284,7 +342,7 @@ export default function OpsShippingPage() {
     loadTasks(signal);
 
     return () => controller.abort();
-  }, []);
+  }, [mode]);
 
   // Load available units from storage/shipping. Optional signal for mount-only load (avoids duplicate calls).
   // Optional cacheBust: when true, appends ?_t= to force fresh response after create/import.
@@ -1014,8 +1072,49 @@ export default function OpsShippingPage() {
     }
   }
 
+  // Initial screen: user must select mode before any data loads
+  if (mode === null) {
+    return (
+      <div style={{ maxWidth: 640, margin: "80px auto", padding: 24 }}>
+        <h1 style={{ marginBottom: 32, textAlign: "center", fontSize: 22 }}>Создание заданий</h1>
+        <ModeSelectorSlider value={null} onChange={setMode} />
+      </div>
+    );
+  }
+
+  // Service mode: placeholder for future functionality
+  if (mode === "service") {
+    return (
+      <div style={{ maxWidth: 1440, margin: "0 auto", padding: 24 }}>
+        <div style={{ marginBottom: 24 }}>
+          <ModeSelectorSlider value="service" onChange={setMode} compact />
+        </div>
+        <div
+          style={{
+            padding: 64,
+            textAlign: "center",
+            color: "#6b7280",
+            background: "#f9fafb",
+            borderRadius: 12,
+            border: "1px dashed #d1d5db",
+          }}
+        >
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🔄</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 8 }}>
+            Создание заданий от сервиса
+          </div>
+          <div style={{ fontSize: 14 }}>Раздел в разработке</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Shipping mode: main content
   return (
     <div style={{ maxWidth: 1440, margin: "0 auto", padding: 24 }}>
+      <div style={{ marginBottom: 24 }}>
+        <ModeSelectorSlider value="shipping" onChange={setMode} compact />
+      </div>
       <h1 style={{ marginBottom: 24 }}>Создание заданий на отгрузку</h1>
 
       {error && (

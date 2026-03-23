@@ -44,52 +44,73 @@ async function getStorageShippingUnits(_req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Get all units for the warehouse (cell_id = where unit actually lies).
+  // Optimization: fetch cell IDs for storage/shipping/rejected first, then filter units in DB.
+  // warehouse_cells_map is per-warehouse; filter by warehouse_id to get correct cells for this warehouse.
+  // Paginate cells fetch — Supabase returns max 1000 per request.
+  const cellsPageSize = 1000;
+  const cellsMaxPages = 20;
+  const storageShippingCells: { id: string; code: string; cell_type: string }[] = [];
+  for (let page = 0; page < cellsMaxPages; page++) {
+    const from = page * cellsPageSize;
+    const to = from + cellsPageSize - 1;
+    const { data: pageCells, error: cellsError } = await supabaseAdmin
+      .from("warehouse_cells_map")
+      .select("id, code, cell_type")
+      .eq("warehouse_id", profile.warehouse_id)
+      .in("cell_type", ["storage", "shipping", "rejected"])
+      .order("id")
+      .range(from, to);
+
+    if (cellsError) {
+      console.error("Error loading storage/shipping cells:", cellsError);
+      return NextResponse.json({ error: cellsError.message }, { status: 400 });
+    }
+    if (!pageCells?.length) break;
+    storageShippingCells.push(...pageCells);
+    if (pageCells.length < cellsPageSize) break;
+  }
+
+  const allowedCellIds = storageShippingCells.map((c: any) => c.id).filter(Boolean);
+  const cellsMap = new Map<string, { id: string; code: string; cell_type: string }>();
+  storageShippingCells.forEach((c: any) => {
+    if (c?.id) cellsMap.set(c.id, { id: c.id, code: c.code, cell_type: c.cell_type });
+  });
+
+  if (allowedCellIds.length === 0) {
+    return NextResponse.json({ ok: true, units: [] });
+  }
+
+  // Fetch only units in storage/shipping/rejected cells (filtered in DB by cell_id).
   // Supabase returns max 1000 per request — paginate so we don't miss units beyond the first page.
   const unitsPageSize = 1000;
   const unitsMaxPages = 50;
   let units: { id: string; barcode: string; status: string; cell_id: string | null; created_at: string; meta: any }[] = [];
-  for (let page = 0; page < unitsMaxPages; page++) {
-    const from = page * unitsPageSize;
-    const to = from + unitsPageSize - 1;
-    const { data: pageUnits, error: unitsError } = await supabaseAdmin
-      .from("units")
-      .select("id, barcode, status, cell_id, created_at, meta")
-      .eq("warehouse_id", profile.warehouse_id)
-      .not("cell_id", "is", null)
-      .order("created_at", { ascending: false })
-      .range(from, to);
+  const cellIdChunkSize = 200;
+  for (let ci = 0; ci < allowedCellIds.length; ci += cellIdChunkSize) {
+    const cellChunk = allowedCellIds.slice(ci, ci + cellIdChunkSize);
+    for (let page = 0; page < unitsMaxPages; page++) {
+      const from = page * unitsPageSize;
+      const to = from + unitsPageSize - 1;
+      const { data: pageUnits, error: unitsError } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, cell_id, created_at, meta")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("cell_id", cellChunk)
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
-    if (unitsError) {
-      console.error("Error loading units:", unitsError);
-      return NextResponse.json({ error: unitsError.message }, { status: 400 });
+      if (unitsError) {
+        console.error("Error loading units:", unitsError);
+        return NextResponse.json({ error: unitsError.message }, { status: 400 });
+      }
+      if (!pageUnits?.length) break;
+      units.push(...pageUnits);
+      if (pageUnits.length < unitsPageSize) break;
     }
-    if (!pageUnits?.length) break;
-    units.push(...pageUnits);
-    if (pageUnits.length < unitsPageSize) break;
   }
 
   if (units.length === 0) {
     return NextResponse.json({ ok: true, units: [] });
-  }
-
-  // Cell info from warehouse_cells_map WITH warehouse_id — same as by-barcode and cells/get:
-  // view is per-warehouse, so we must filter by warehouse_id to get the correct cell code for this warehouse.
-  const cellIds = [...new Set(units.map((u: any) => u.cell_id).filter(Boolean))] as string[];
-  const cellsMap = new Map<string, { id: string; code: string; cell_type: string }>();
-  const cellChunkSize = 200;
-  for (let i = 0; i < cellIds.length; i += cellChunkSize) {
-    const chunk = cellIds.slice(i, i + cellChunkSize);
-    const { data: cells, error: cellsError } = await supabaseAdmin
-      .from("warehouse_cells_map")
-      .select("id, code, cell_type")
-      .eq("warehouse_id", profile.warehouse_id)
-      .in("id", chunk);
-    if (!cellsError && cells?.length) {
-      cells.forEach((c: any) => {
-        if (c?.id) cellsMap.set(c.id, { id: c.id, code: c.code, cell_type: c.cell_type });
-      });
-    }
   }
 
   // Get all picking tasks that are open or in_progress. Supabase returns max 1000 per request — fetch in pages so we don't miss units from tasks beyond the first 1000.

@@ -9,7 +9,7 @@ type CourierOption = {
   full_name: string;
 };
 
-type DropColor = "red" | "yellow" | "purple" | "gray" | "black" | "green";
+type DropColor = "red" | "yellow" | "purple" | "gray" | "black" | "green" | "blue";
 
 type PickingUnit = {
   id: string;
@@ -289,6 +289,7 @@ const DROP_COLOR_ORDER: DropColor[] = [
   "gray",
   "black",
   "green",
+  "blue",
 ];
 const DROP_COLOR_LABEL: Record<DropColor, string> = {
   red: "Красный",
@@ -297,6 +298,7 @@ const DROP_COLOR_LABEL: Record<DropColor, string> = {
   gray: "Серый",
   black: "Черный",
   green: "Зеленый",
+  blue: "Синий",
 };
 const DROP_COLOR_HEX: Record<DropColor, string> = {
   red: "#ef4444",
@@ -305,6 +307,7 @@ const DROP_COLOR_HEX: Record<DropColor, string> = {
   gray: "#6b7280",
   black: "#111827",
   green: "#22c55e",
+  blue: "#2563eb",
 };
 let googleMapsPromise: Promise<any> | null = null;
 const DEFAULT_ZONE_STYLE: ZoneStyle = {
@@ -1700,7 +1703,7 @@ function CourierHistoryMap({
         <div className={styles.historyLegendRow}>
           <span className={styles.legend}>Синий: трек</span>
           <span className={styles.legend}>Зеленый: текущая точка</span>
-          <span className={styles.legend}>Дроп: красный/желтый/фиолетовый/серый/черный/зеленый</span>
+          <span className={styles.legend}>Дроп: красный/желтый/фиолетовый/серый/черный/зеленый/синий</span>
           <span className={styles.legend}>Желтый: failed</span>
           <span className={styles.legend}>Фиолетовый: returned</span>
         </div>
@@ -3199,7 +3202,27 @@ export default function RoutePlanningClient({
                 <div>
                   <strong>Зелёный</strong>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Ручная отметка OPS после разбора (переход с жёлтого).
+                    Брак не выявлен. Заказ нужно забрать с сервисного центра и отвезти на склад.
+                    Добавляется OPS после жёлтого.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#2563eb",
+                    flexShrink: 0,
+                    marginTop: 4,
+                  }}
+                />
+                <div>
+                  <strong>Синий</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                    Если брак выявлен. Добавляется OPS вручную после жёлтого (функционал добавления
+                    — позже).
                   </p>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-export type DropColorKey = "red" | "yellow" | "purple" | "gray" | "black" | "green";
+export type DropColorKey = "red" | "yellow" | "purple" | "gray" | "black" | "green" | "blue";
 
 export const DROP_COLOR_HEX: Record<DropColorKey, string> = {
   red: "#ef4444",
@@ -7,6 +7,7 @@ export const DROP_COLOR_HEX: Record<DropColorKey, string> = {
   gray: "#6b7280",
   black: "#111827",
   green: "#22c55e",
+  blue: "#2563eb",
 };
 
 export const DROP_COLOR_LABEL: Record<DropColorKey, string> = {
@@ -16,6 +17,7 @@ export const DROP_COLOR_LABEL: Record<DropColorKey, string> = {
   gray: "Серый",
   black: "Черный",
   green: "Зеленый",
+  blue: "Синий",
 };
 
 export function normalizeDropColorKey(value: unknown): DropColorKey | null {
@@ -27,6 +29,7 @@ export function normalizeDropColorKey(value: unknown): DropColorKey | null {
   if (normalized === "gray" || normalized === "grey") return "gray";
   if (normalized === "black") return "black";
   if (normalized === "green") return "green";
+  if (normalized === "blue") return "blue";
   return null;
 }
 
@@ -55,5 +58,8 @@ export function isAllowedOpsPointColorTransition(
   currentColor: DropColorKey,
   nextColor: DropColorKey,
 ): boolean {
-  return currentColor === "yellow" && (nextColor === "red" || nextColor === "green");
+  return (
+    currentColor === "yellow" &&
+    (nextColor === "red" || nextColor === "green" || nextColor === "blue")
+  );
 }
