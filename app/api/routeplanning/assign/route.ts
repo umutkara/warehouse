@@ -86,10 +86,17 @@ async function reassignDroppedUnit(params: {
   unitId: string;
   courierUserId: string;
   courierName: string;
-  shiftId: string;
+  assignedByUserId?: string;
 }): Promise<SingleAssignResult> {
   const now = new Date().toISOString();
-  const { warehouseId, unitId, courierUserId, courierName, shiftId } = params;
+  const { warehouseId, unitId, courierUserId, courierName, assignedByUserId } = params;
+
+  const { data: unitRow } = await supabaseAdmin
+    .from("units")
+    .select("barcode")
+    .eq("id", unitId)
+    .eq("warehouse_id", warehouseId)
+    .maybeSingle();
 
   const { data: shipment, error: shipmentError } = await supabaseAdmin
     .from("outbound_shipments")
@@ -120,6 +127,9 @@ async function reassignDroppedUnit(params: {
     ...shipmentMeta,
     reassigned_from_routeplanning_at: now,
     reassigned_from_routeplanning_to: courierUserId,
+    assigned_from_logistics: true,
+    courier_pickup_confirmed_at: null,
+    courier_pickup_rejected_at: null,
   };
   const { error: shipmentUpdateError } = await supabaseAdmin
     .from("outbound_shipments")
@@ -135,93 +145,21 @@ async function reassignDroppedUnit(params: {
     return { unit_id: unitId, ok: false, status: 500, error: shipmentUpdateError.message };
   }
 
-  const { data: existingTask, error: taskFetchError } = await supabaseAdmin
-    .from("courier_tasks")
-    .select("id, meta")
-    .eq("warehouse_id", warehouseId)
-    .eq("unit_id", unitId)
-    .not("status", "in", "(delivered,failed,returned,canceled)")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (taskFetchError) {
-    return { unit_id: unitId, ok: false, status: 500, error: taskFetchError.message };
-  }
-
-  let taskId: string | null = null;
-  if (existingTask) {
-    const taskMeta =
-      existingTask.meta && typeof existingTask.meta === "object"
-        ? (existingTask.meta as Record<string, unknown>)
-        : {};
-    const { error: taskUpdateError } = await supabaseAdmin
-      .from("courier_tasks")
-      .update({
-        courier_user_id: courierUserId,
-        shift_id: shiftId,
-        status: "claimed",
-        claimed_at: now,
-        last_event_at: now,
-        updated_at: now,
-        meta: {
-          ...taskMeta,
-          source: "api.routeplanning.assign.dropped",
-          assigned_via: "routeplanning",
-          assigned_reassigned_at: now,
-        },
-      })
-      .eq("id", existingTask.id);
-    if (taskUpdateError) {
-      return { unit_id: unitId, ok: false, status: 500, error: taskUpdateError.message };
-    }
-    taskId = existingTask.id;
-  } else {
-    const { data: insertedTask, error: taskInsertError } = await supabaseAdmin
-      .from("courier_tasks")
-      .insert({
-        warehouse_id: warehouseId,
-        pool_id: null,
-        shift_id: shiftId,
-        unit_id: unitId,
-        courier_user_id: courierUserId,
-        zone_id: null,
-        status: "claimed",
-        claimed_at: now,
-        last_event_at: now,
-        meta: {
-          source: "api.routeplanning.assign.dropped",
-          assigned_via: "routeplanning",
-        },
-      })
-      .select("id")
-      .single();
-    if (taskInsertError || !insertedTask?.id) {
-      return {
-        unit_id: unitId,
-        ok: false,
-        status: 500,
-        error: taskInsertError?.message || "Failed to create courier task",
-      };
-    }
-    taskId = insertedTask.id;
-  }
-
-  const { error: eventInsertError } = await supabaseAdmin.from("courier_task_events").insert({
-    warehouse_id: warehouseId,
-    task_id: taskId,
-    unit_id: unitId,
-    courier_user_id: courierUserId,
-    shift_id: shiftId,
-    event_id: `reassign-dropped-${taskId}-${Date.now()}`,
-    event_type: "claimed",
-    happened_at: now,
-    note: "Reassigned from dropped points list by logistics",
-    proof_meta: {},
-    meta: { source: "api.routeplanning.assign.dropped" },
+  await supabaseAdmin.rpc("audit_log_event", {
+    p_action: "logistics.dropped_reassigned",
+    p_entity_type: "unit",
+    p_entity_id: unitId,
+    p_summary: `Логист назначил dropped на курьера: ${unitRow?.barcode || unitId} → ${courierName}`,
+    p_meta: {
+      source: "api.routeplanning.assign.dropped",
+      unit_id: unitId,
+      unit_barcode: unitRow?.barcode,
+      courier_user_id: courierUserId,
+      courier_name: courierName,
+      shipment_id: shipment.id,
+      assigned_by: assignedByUserId,
+    },
   });
-  if (eventInsertError) {
-    return { unit_id: unitId, ok: false, status: 500, error: eventInsertError.message };
-  }
 
   return { unit_id: unitId, ok: true, status: 200, error: null };
 }
@@ -304,7 +242,7 @@ export async function POST(req: Request) {
             unitId,
             courierUserId,
             courierName: courierProfile.full_name || "Без имени",
-            shiftId: openShift.id,
+            assignedByUserId: auth.user.id,
           })
         : shipSingleUnit(req, unitId, courierUserId),
     ),

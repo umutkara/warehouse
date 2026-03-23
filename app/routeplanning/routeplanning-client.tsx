@@ -41,6 +41,8 @@ type DroppedUnit = {
   color_hex: string;
   lat: number | null;
   lng: number | null;
+  zone_id: string | null;
+  zone_code: string | null;
 };
 
 type DropPoint = {
@@ -122,6 +124,7 @@ type RoutePlanningClientProps = {
   initialRole: string;
   initialCanEdit: boolean;
   mapsApiKey: string;
+  variant?: "default" | "fullscreen";
 };
 
 type MapPanelProps = {
@@ -152,6 +155,38 @@ type CourierInsightsModalProps = {
   onUnauthorized: () => void;
   apiKey: string;
 };
+
+type AllOrdersModalProps = {
+  open: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+  orders: Array<{ unit_id: string; barcode: string }>;
+  canEdit: boolean;
+};
+
+const OPS_STATUS_LABELS: Record<string, string> = {
+  partner_accepted_return: "Партнер принял на возврат",
+  partner_rejected_return: "Партнер не принял на возврат",
+  sent_to_sc: "Передан в СЦ",
+  delivered_to_rc: "Товар доставлен на РЦ",
+  client_accepted: "Клиент принял",
+  client_rejected: "Клиент не принял",
+  sent_to_client: "Товар отправлен клиенту",
+  delivered_to_pudo: "Товар доставлен на ПУДО",
+  case_cancelled_cc: "Кейс отменен (Направлен КК)",
+  postponed_1: "Перенос",
+  postponed_2: "Перенос 2",
+  warehouse_did_not_issue: "Склад не выдал",
+  in_progress: "В работе",
+  no_report: "Отчета нет",
+};
+
+function getOpsStatusText(s: string | null | undefined): string {
+  if (!s) return "не назначен";
+  return OPS_STATUS_LABELS[s] || s;
+}
+
+const VALID_OPS_STATUSES = Object.keys(OPS_STATUS_LABELS);
 
 type CourierCardSummary = {
   courier_user_id: string;
@@ -2179,10 +2214,314 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
   );
 }
 
+function AllOrdersModal({
+  open,
+  onClose,
+  onRefresh,
+  orders,
+  canEdit,
+}: AllOrdersModalProps) {
+  const [search, setSearch] = useState("");
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [unit, setUnit] = useState<{
+    id: string;
+    barcode: string;
+    meta?: { ops_status?: string; ops_status_comment?: string };
+    photos?: Array<{ url: string; filename: string }>;
+  } | null>(null);
+  const [history, setHistory] = useState<Array<{ event_type: string; created_at: string; details: Record<string, unknown> }>>([]);
+  const [loadingUnit, setLoadingUnit] = useState(false);
+  const [opsStatus, setOpsStatus] = useState("");
+  const [opsStatusComment, setOpsStatusComment] = useState("");
+  const [savingOps, setSavingOps] = useState(false);
+  const [activeTab, setActiveTab] = useState<"ops" | "history" | "photos">("ops");
+
+  const filteredOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        o.barcode.toLowerCase().includes(q) ||
+        o.unit_id.toLowerCase().includes(q),
+    );
+  }, [orders, search]);
+
+  const loadUnit = useCallback(async (unitId: string) => {
+    setLoadingUnit(true);
+    setUnit(null);
+    setHistory([]);
+    setSelectedUnitId(unitId);
+    try {
+      const [unitRes, histRes] = await Promise.all([
+        fetch(`/api/units/${unitId}`, { cache: "no-store" }),
+        fetch(`/api/units/${unitId}/history`, { cache: "no-store" }),
+      ]);
+      const unitJson = await unitRes.json();
+      const histJson = await histRes.json();
+      if (unitRes.ok && unitJson.ok) {
+        setUnit(unitJson.unit);
+        setOpsStatus(unitJson.unit.meta?.ops_status || "");
+        setOpsStatusComment(unitJson.unit.meta?.ops_status_comment || "");
+      }
+      if (histRes.ok && histJson.history) {
+        setHistory(histJson.history);
+      }
+    } catch (e) {
+      console.error("Load unit error:", e);
+    } finally {
+      setLoadingUnit(false);
+    }
+  }, []);
+
+  const handleSaveOpsStatus = useCallback(async () => {
+    if (!selectedUnitId || !opsStatus) return;
+    setSavingOps(true);
+    try {
+      const res = await fetch("/api/units/ops-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitId: selectedUnitId,
+          status: opsStatus,
+          comment: opsStatusComment.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setUnit((prev) =>
+          prev
+            ? {
+                ...prev,
+                meta: {
+                  ...prev.meta,
+                  ops_status: opsStatus,
+                  ops_status_comment: opsStatusComment.trim() || undefined,
+                },
+              }
+            : prev,
+        );
+        const histRes = await fetch(`/api/units/${selectedUnitId}/history`, { cache: "no-store" });
+        const histJson = await histRes.json();
+        if (histRes.ok && histJson.history) setHistory(histJson.history);
+        onRefresh();
+      } else {
+        alert(json.error || "Ошибка обновления OPS статуса");
+      }
+    } catch (e) {
+      alert("Ошибка сети");
+    } finally {
+      setSavingOps(false);
+    }
+  }, [selectedUnitId, opsStatus, opsStatusComment, onRefresh]);
+
+  const renderHistoryEvent = (event: { event_type: string; created_at: string; details: Record<string, unknown> }, idx: number) => {
+    const date = new Date(event.created_at).toLocaleString("ru-RU");
+    const key = `hist-${idx}-${event.event_type}-${event.created_at}`;
+    if (event.event_type === "move") {
+      const { from_cell, to_cell } = event.details;
+      return (
+        <div key={key} className={styles.allOrdersHistoryItem}>
+          <span>📦</span>
+          <div>
+            <div className={styles.allOrdersHistoryTitle}>Перемещение</div>
+            <div className={styles.allOrdersHistoryText}>{from_cell || "—"} → {to_cell || "—"}</div>
+            <div className={styles.allOrdersHistoryMeta}>{date}</div>
+          </div>
+        </div>
+      );
+    }
+    if (event.event_type === "audit") {
+      const { action, summary, meta } = event.details;
+      const isOps = String(action || "").includes("ops");
+      if (isOps && meta) {
+        const { old_status_text, new_status_text, comment } = meta as Record<string, string>;
+        return (
+          <div key={key} className={styles.allOrdersHistoryItem}>
+            <span>📋</span>
+            <div>
+              <div className={styles.allOrdersHistoryTitle}>OPS статус изменён</div>
+              <div className={styles.allOrdersHistoryText}>
+                {old_status_text || "—"} → {new_status_text || "—"}
+              </div>
+              {comment && <div style={{ fontSize: 12, marginTop: 4 }}>{comment}</div>}
+              <div className={styles.allOrdersHistoryMeta}>{date}</div>
+            </div>
+          </div>
+        );
+      }
+    }
+    return (
+      <div key={key} className={styles.allOrdersHistoryItem}>
+        <span>📝</span>
+        <div>
+          <div className={styles.allOrdersHistoryTitle}>{String((event.details as any)?.summary || event.event_type)}</div>
+          <div className={styles.allOrdersHistoryMeta}>{date}</div>
+        </div>
+      </div>
+    );
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div
+        className={styles.modal}
+        style={{ maxWidth: 900, width: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.modalHeader}>
+          <h2 className={styles.modalTitle}>Все заказы</h2>
+          <button type="button" className={styles.secondaryButton} onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+        <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 16 }}>
+          <div className={styles.allOrdersSidebar}>
+            <input
+              type="text"
+              className={styles.input}
+              placeholder="Поиск по barcode"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className={styles.allOrdersList}>
+              {filteredOrders.length === 0 ? (
+                <div className={styles.empty}>Нет заказов</div>
+              ) : (
+                filteredOrders.map((o) => (
+                  <div
+                    key={o.unit_id}
+                    className={`${styles.unitRow} ${selectedUnitId === o.unit_id ? styles.unitRowSelected : ""}`}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => loadUnit(o.unit_id)}
+                  >
+                    <div className={styles.unitBarcode}>#{o.barcode || o.unit_id}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className={styles.allOrdersDetail}>
+            {loadingUnit ? (
+              <div className={styles.empty}>Загрузка...</div>
+            ) : !unit ? (
+              <div className={styles.empty}>Выберите заказ</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <strong>#{unit.barcode}</strong>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    {(["ops", "history", "photos"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className={activeTab === tab ? styles.refreshButton : styles.secondaryButton}
+                        style={{ padding: "6px 12px", fontSize: 13 }}
+                        onClick={() => setActiveTab(tab)}
+                      >
+                        {tab === "ops" ? "OPS статус" : tab === "history" ? "История" : "Фото"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {activeTab === "ops" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                        OPS статус
+                      </label>
+                      <select
+                        className={styles.input}
+                        value={opsStatus}
+                        onChange={(e) => setOpsStatus(e.target.value)}
+                        disabled={!canEdit}
+                        style={{ width: "100%" }}
+                      >
+                        <option value="">— Выберите —</option>
+                        {VALID_OPS_STATUSES.map((code) => (
+                          <option key={code} value={code}>
+                            {getOpsStatusText(code)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                        Комментарий
+                      </label>
+                      <textarea
+                        className={styles.input}
+                        value={opsStatusComment}
+                        onChange={(e) => setOpsStatusComment(e.target.value)}
+                        disabled={!canEdit}
+                        rows={2}
+                        style={{ width: "100%", resize: "vertical" }}
+                      />
+                    </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className={styles.refreshButton}
+                        disabled={savingOps || !opsStatus}
+                        onClick={handleSaveOpsStatus}
+                      >
+                        {savingOps ? "Сохранение..." : "Сохранить OPS статус"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {activeTab === "history" && (
+                  <div className={styles.allOrdersHistoryList}>
+                    {history.length === 0 ? (
+                      <div className={styles.empty}>Нет истории</div>
+                    ) : (
+                      history.map((evt, idx) => renderHistoryEvent(evt, idx))
+                    )}
+                  </div>
+                )}
+                {activeTab === "photos" && (
+                  <div className={styles.allOrdersPhotosGrid}>
+                    {!unit.photos || unit.photos.length === 0 ? (
+                      <div className={styles.empty}>Нет фотографий</div>
+                    ) : (
+                      unit.photos.map((photo, idx) => (
+                        <a
+                          key={idx}
+                          href={photo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "block",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 8,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <img
+                            src={photo.url}
+                            alt={`Фото ${idx + 1}`}
+                            style={{ width: 120, height: 120, objectFit: "cover" }}
+                          />
+                        </a>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RoutePlanningClient({
   initialRole,
   initialCanEdit,
   mapsApiKey,
+  variant = "default",
 }: RoutePlanningClientProps) {
   const router = useRouter();
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
@@ -2196,10 +2535,13 @@ export default function RoutePlanningClient({
   const [droppedColorFilter, setDroppedColorFilter] = useState<Set<DropColor>>(
     new Set(DROP_COLOR_ORDER),
   );
+  const [droppedZoneFilter, setDroppedZoneFilter] = useState<Set<string>>(new Set());
   const [searchPicking, setSearchPicking] = useState("");
+  const [pickingCellFilter, setPickingCellFilter] = useState<Set<string>>(new Set());
   const [searchDropped, setSearchDropped] = useState("");
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
   const [courierInsightsOpen, setCourierInsightsOpen] = useState(false);
+  const [allOrdersOpen, setAllOrdersOpen] = useState(false);
   const [colorsInfoOpen, setColorsInfoOpen] = useState(false);
   const [showCouriersOnMap, setShowCouriersOnMap] = useState(true);
   const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(52);
@@ -2324,33 +2666,85 @@ export default function RoutePlanningClient({
   const filteredPickingUnits = useMemo(() => {
     const units = dashboard?.picking_units || [];
     const q = searchPicking.trim().toLowerCase();
-    if (!q) return units;
     return units.filter((unit) => {
+      if (pickingCellFilter.size > 0) {
+        const cellKey = unit.cell_id || "__no_cell__";
+        if (!pickingCellFilter.has(cellKey)) return false;
+      }
+      if (!q) return true;
       const barcode = unit.barcode.toLowerCase();
       const cellCode = unit.cell?.code?.toLowerCase() || "";
       const scenario = unit.scenario?.toLowerCase() || "";
       return barcode.includes(q) || cellCode.includes(q) || scenario.includes(q);
     });
-  }, [dashboard?.picking_units, searchPicking]);
+  }, [dashboard?.picking_units, searchPicking, pickingCellFilter]);
+
+  const availablePickingCells = useMemo(() => {
+    const cells = new Map<string, string>();
+    for (const u of dashboard?.picking_units || []) {
+      const key = u.cell_id || "__no_cell__";
+      const label = u.cell?.code || "Без ячейки";
+      if (!cells.has(key)) cells.set(key, label);
+    }
+    return Array.from(cells.entries()).map(([key, label]) => ({ key, label }));
+  }, [dashboard?.picking_units]);
+
+  const togglePickingCellFilter = useCallback(
+    (cellKey: string) => {
+      setPickingCellFilter((prev) => {
+        const allKeys = availablePickingCells.map((c) => c.key);
+        const next = new Set(prev);
+        if (next.has(cellKey)) {
+          next.delete(cellKey);
+          return next.size === 0 ? new Set<string>() : next;
+        }
+        if (next.size === 0) {
+          for (const k of allKeys) if (k !== cellKey) next.add(k);
+          return next;
+        }
+        next.add(cellKey);
+        return next.size === allKeys.length ? new Set<string>() : next;
+      });
+    },
+    [availablePickingCells],
+  );
 
   const filteredDroppedUnits = useMemo(() => {
     const units = dashboard?.dropped_units || [];
     const q = searchDropped.trim().toLowerCase();
     return units.filter((unit) => {
       if (!droppedColorFilter.has(unit.color_key)) return false;
+      if (droppedZoneFilter.size > 0) {
+        const unitZoneKey = unit.zone_code || "__no_zone__";
+        if (!droppedZoneFilter.has(unitZoneKey)) return false;
+      }
       if (!q) return true;
       const barcode = unit.unit_barcode.toLowerCase();
       const courierName = unit.courier_name.toLowerCase();
       const opsStatus = (unit.ops_status || "").toLowerCase();
       return barcode.includes(q) || courierName.includes(q) || opsStatus.includes(q);
     });
-  }, [dashboard?.dropped_units, droppedColorFilter, searchDropped]);
+  }, [dashboard?.dropped_units, droppedColorFilter, droppedZoneFilter, searchDropped]);
 
-  const filteredDropPoints = useMemo(
-    () =>
-      (dashboard?.drop_points || []).filter((point) => droppedColorFilter.has(point.color_key)),
-    [dashboard?.drop_points, droppedColorFilter],
-  );
+  const unitZoneMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of dashboard?.dropped_units || []) {
+      m.set(u.unit_id, u.zone_code || "__no_zone__");
+    }
+    return m;
+  }, [dashboard?.dropped_units]);
+
+  const filteredDropPoints = useMemo(() => {
+    const points = dashboard?.drop_points || [];
+    return points.filter((point) => {
+      if (!droppedColorFilter.has(point.color_key)) return false;
+      if (droppedZoneFilter.size > 0) {
+        const zoneKey = unitZoneMap.get(point.unit_id) ?? "__no_zone__";
+        if (!droppedZoneFilter.has(zoneKey)) return false;
+      }
+      return true;
+    });
+  }, [dashboard?.drop_points, droppedColorFilter, droppedZoneFilter, unitZoneMap]);
   const availableDroppedColors = useMemo(
     () =>
       DROP_COLOR_ORDER.filter((color) =>
@@ -2358,6 +2752,45 @@ export default function RoutePlanningClient({
       ),
     [dashboard?.dropped_units],
   );
+
+  const allOrdersList = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Array<{ unit_id: string; barcode: string }> = [];
+    for (const u of dashboard?.picking_units || []) {
+      if (!seen.has(u.id)) {
+        seen.add(u.id);
+        result.push({ unit_id: u.id, barcode: u.barcode || u.id });
+      }
+    }
+    for (const u of dashboard?.dropped_units || []) {
+      if (!seen.has(u.unit_id)) {
+        seen.add(u.unit_id);
+        result.push({ unit_id: u.unit_id, barcode: u.unit_barcode || u.unit_id });
+      }
+    }
+    result.sort((a, b) => (a.barcode || "").localeCompare(b.barcode || ""));
+    return result;
+  }, [dashboard?.picking_units, dashboard?.dropped_units]);
+
+  const availableDroppedZones = useMemo(() => {
+    const zones = dashboard?.zones || [];
+    const unitZoneCodes = new Set<string>();
+    for (const unit of dashboard?.dropped_units || []) {
+      unitZoneCodes.add(unit.zone_code || "__no_zone__");
+    }
+    const result: Array<{ key: string; label: string }> = [];
+    if (unitZoneCodes.has("__no_zone__")) {
+      result.push({ key: "__no_zone__", label: "Без зоны" });
+    }
+    for (const zone of zones) {
+      const code = (zone.code || "").trim() || null;
+      const key = code || "__no_zone__";
+      if (unitZoneCodes.has(key) && !result.some((r) => r.key === key)) {
+        result.push({ key, label: zone.name || zone.code || key });
+      }
+    }
+    return result;
+  }, [dashboard?.dropped_units, dashboard?.zones]);
 
   const togglePickingUnit = useCallback((unitId: string) => {
     setSelectedPickingUnitIds((prev) => {
@@ -2400,6 +2833,26 @@ export default function RoutePlanningClient({
       return next.size > 0 ? next : new Set([color]);
     });
   }, []);
+
+  const toggleDroppedZoneFilter = useCallback(
+    (zoneKey: string) => {
+      setDroppedZoneFilter((prev) => {
+        const allKeys = availableDroppedZones.map((z) => z.key);
+        const next = new Set(prev);
+        if (next.has(zoneKey)) {
+          next.delete(zoneKey);
+          return next.size === 0 ? new Set<string>() : next;
+        }
+        if (next.size === 0) {
+          for (const k of allKeys) if (k !== zoneKey) next.add(k);
+          return next;
+        }
+        next.add(zoneKey);
+        return next.size === allKeys.length ? new Set<string>() : next;
+      });
+    },
+    [availableDroppedZones],
+  );
 
   const assignSelectedUnits = useCallback(async (source: "picking" | "dropped") => {
     if (!canEdit) return;
@@ -2623,6 +3076,137 @@ export default function RoutePlanningClient({
     };
   }, [isMainCouriersResizing, handleMainCouriersResizeMove, handleMainCouriersResizeEnd]);
 
+  if (variant === "fullscreen") {
+    return (
+      <div className={styles.pageFullscreen}>
+        <div className={styles.fullscreenHeader}>
+          <a href="/routeplanning" className={styles.backButton} style={{ textDecoration: "none", color: "inherit" }}>
+            ← Route Planning
+          </a>
+          <span className={styles.fullscreenTitle}>Dropped — карта</span>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => setAllOrdersOpen(true)}
+          >
+            Все заказы ({allOrdersList.length})
+          </button>
+          <button
+            type="button"
+            className={styles.refreshButton}
+            onClick={() => void loadDashboard(false)}
+            disabled={loading}
+          >
+            Обновить
+          </button>
+        </div>
+        {error && <div className={styles.error}>{error}</div>}
+        <div
+          ref={splitContainerRef}
+          className={styles.split}
+          style={{ flex: 1, cursor: isResizing ? "col-resize" : undefined }}
+        >
+          <div
+            className={`${styles.pane} ${styles.paneLeft}`}
+            style={{ width: `${leftPaneWidthPct}%` }}
+          >
+            <div className={styles.paneInner}>
+              <h2 className={styles.sectionTitle}>Dropped ({filteredDroppedUnits.length})</h2>
+              <input
+                className={styles.input}
+                value={searchDropped}
+                onChange={(e) => setSearchDropped(e.target.value)}
+                placeholder="Поиск по barcode/courier/ops"
+              />
+              <div className={styles.actions} style={{ padding: "8px 0", flexWrap: "wrap" }}>
+                {availableDroppedColors.map((color) => (
+                  <label key={color} className={styles.legend}>
+                    <input
+                      type="checkbox"
+                      checked={droppedColorFilter.has(color)}
+                      onChange={() => toggleDroppedColorFilter(color)}
+                      style={{ marginRight: 6 }}
+                    />
+                    {DROP_COLOR_LABEL[color]}
+                  </label>
+                ))}
+              </div>
+              {availableDroppedZones.length > 0 ? (
+                <div className={styles.actions} style={{ padding: "8px 0", flexWrap: "wrap" }}>
+                  <span className={styles.hint} style={{ marginRight: 8 }}>Зоны:</span>
+                  {availableDroppedZones.map(({ key, label }) => (
+                    <label key={key} className={styles.legend}>
+                      <input
+                        type="checkbox"
+                        checked={
+                          droppedZoneFilter.size === 0 ? true : droppedZoneFilter.has(key)
+                        }
+                        onChange={() => toggleDroppedZoneFilter(key)}
+                        style={{ marginRight: 6 }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              <div className={styles.listBody} style={{ flex: 1, overflow: "auto" }}>
+                {loading && !dashboard ? (
+                  <div className={styles.empty}>Загрузка...</div>
+                ) : filteredDroppedUnits.length === 0 ? (
+                  <div className={styles.empty}>Нет данных о дропах</div>
+                ) : (
+                  filteredDroppedUnits.map((unit) => (
+                    <div key={`${unit.unit_id}-${unit.dropped_at}`} className={styles.unitRow}>
+                      <div className={styles.unitBarcode}>#{unit.unit_barcode || unit.unit_id}</div>
+                      <div className={styles.unitMeta}>
+                        {unit.courier_name} • {formatDate(unit.dropped_at)}
+                      </div>
+                      <span
+                        className={styles.chip}
+                        style={{ background: unit.color_hex, color: "#fff" }}
+                      >
+                        {DROP_COLOR_LABEL[unit.color_key]}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+          <div
+            className={`${styles.splitResizer} ${isResizing ? styles.splitResizerDragging : ""}`}
+            onMouseDown={handleResizeStart}
+            role="separator"
+            aria-label="Изменить размер панелей"
+          />
+          <div className={`${styles.pane} ${styles.paneRight}`}>
+            <div className={styles.paneInner}>
+              <h2 className={styles.sectionTitle}>Карта</h2>
+              <RoutePlanningMap
+                apiKey={mapsApiKey}
+                zones={dashboard?.zones || []}
+                dropPoints={filteredDropPoints}
+                liveCouriers={dashboard?.live_couriers || []}
+                showCouriers={showCouriersOnMap}
+                colorFilter={droppedColorFilter}
+                onColorFilterChange={toggleDroppedColorFilter}
+                onShowCouriersChange={setShowCouriersOnMap}
+                availableColors={DROP_COLOR_ORDER}
+              />
+            </div>
+          </div>
+        </div>
+        <AllOrdersModal
+          open={allOrdersOpen}
+          onClose={() => setAllOrdersOpen(false)}
+          onRefresh={() => void loadDashboard(true)}
+          orders={allOrdersList}
+          canEdit={canEdit}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.toolbar}>
@@ -2668,6 +3252,13 @@ export default function RoutePlanningClient({
         </div>
 
         <div className={styles.toolbarRight}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => setAllOrdersOpen(true)}
+          >
+            Все заказы ({allOrdersList.length})
+          </button>
           <span className={styles.badge}>Роль: {getRoleLabel(effectiveRole)}</span>
           {canEdit ? (
             <button
@@ -2815,6 +3406,24 @@ export default function RoutePlanningClient({
                     placeholder="Поиск по barcode/cell/scenario"
                   />
                 </div>
+                {availablePickingCells.length > 0 ? (
+                  <div className={styles.actions} style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
+                    <span className={styles.hint} style={{ marginRight: 8 }}>Ячейки:</span>
+                    {availablePickingCells.map(({ key, label }) => (
+                      <label key={key} className={styles.legend} style={{ marginRight: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={
+                            pickingCellFilter.size === 0 ? true : pickingCellFilter.has(key)
+                          }
+                          onChange={() => togglePickingCellFilter(key)}
+                          style={{ marginRight: 6 }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
                 <div className={styles.listBody}>
                   {loading && !dashboard ? (
                     <div className={styles.empty}>Загрузка picking...</div>
@@ -2883,21 +3492,41 @@ export default function RoutePlanningClient({
                   />
                 </div>
                 <div className={styles.actions} style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
-                  {availableDroppedColors.length === 0 ? (
-                    <span className={styles.hint}>Нет цветных точек для фильтра</span>
-                  ) : (
-                    availableDroppedColors.map((color) => (
-                      <label key={color} className={styles.legend}>
-                        <input
-                          type="checkbox"
-                          checked={droppedColorFilter.has(color)}
-                          onChange={() => toggleDroppedColorFilter(color)}
-                          style={{ marginRight: 6 }}
-                        />
-                        {DROP_COLOR_LABEL[color]}
-                      </label>
-                    ))
-                  )}
+                  <div style={{ marginBottom: 6 }}>
+                    {availableDroppedColors.length === 0 ? (
+                      <span className={styles.hint}>Нет цветных точек для фильтра</span>
+                    ) : (
+                      availableDroppedColors.map((color) => (
+                        <label key={color} className={styles.legend} style={{ marginRight: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={droppedColorFilter.has(color)}
+                            onChange={() => toggleDroppedColorFilter(color)}
+                            style={{ marginRight: 6 }}
+                          />
+                          {DROP_COLOR_LABEL[color]}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  {availableDroppedZones.length > 0 ? (
+                    <div>
+                      <span className={styles.hint} style={{ marginRight: 8 }}>Зоны:</span>
+                      {availableDroppedZones.map(({ key, label }) => (
+                        <label key={key} className={styles.legend} style={{ marginRight: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={
+                              droppedZoneFilter.size === 0 ? true : droppedZoneFilter.has(key)
+                            }
+                            onChange={() => toggleDroppedZoneFilter(key)}
+                            style={{ marginRight: 6 }}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <div className={styles.listBody}>
                   {loading && !dashboard ? (
@@ -2962,7 +3591,33 @@ export default function RoutePlanningClient({
 
         <div className={`${styles.pane} ${styles.paneRight}`}>
           <div className={styles.paneInner}>
-            <h2 className={styles.sectionTitle}>Карта маршрутов и дропов</h2>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <h2 className={styles.sectionTitle}>Карта маршрутов и дропов</h2>
+              <a
+                href="/routeplanning/fullscreen"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Открыть во весь экран"
+                aria-label="Открыть во весь экран"
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  border: "1px solid #94a3b8",
+                  background: "#f8fafc",
+                  color: "#64748b",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  textDecoration: "none",
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+              </a>
+            </div>
             <RoutePlanningMap
               apiKey={mapsApiKey}
               zones={dashboard?.zones || []}
@@ -3054,6 +3709,13 @@ export default function RoutePlanningClient({
         onClose={() => setCourierInsightsOpen(false)}
         onUnauthorized={handleUnauthorized}
         apiKey={mapsApiKey}
+      />
+      <AllOrdersModal
+        open={allOrdersOpen}
+        onClose={() => setAllOrdersOpen(false)}
+        onRefresh={() => void loadDashboard(true)}
+        orders={allOrdersList}
+        canEdit={canEdit}
       />
 
       {colorsInfoOpen && (

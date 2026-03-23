@@ -72,6 +72,29 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   return Math.max(min, Math.min(max, parsed));
 }
 
+function pointInPolygon(
+  lat: number,
+  lng: number,
+  polygon: Array<{ lat?: number; lng?: number } | [number, number]>,
+): boolean {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const pi = polygon[i];
+    const pj = polygon[j];
+    const xi = Array.isArray(pi) ? pi[0] : (pi as { lat?: number; lng?: number }).lng ?? (pi as [number, number])[0];
+    const yi = Array.isArray(pi) ? pi[1] : (pi as { lat?: number; lng?: number }).lat ?? (pi as [number, number])[1];
+    const xj = Array.isArray(pj) ? pj[0] : (pj as { lat?: number; lng?: number }).lng ?? (pj as [number, number])[0];
+    const yj = Array.isArray(pj) ? pj[1] : (pj as { lat?: number; lng?: number }).lat ?? (pj as [number, number])[1];
+    if (xi == null || yi == null || xj == null || yj == null) continue;
+    const intersects =
+      (yi > lat) !== (yj > lat) &&
+      lng < ((xj - xi) * (lat - yi)) / (Math.abs(yj - yi) < 1e-12 ? 1e-12 : yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
 function extractZoneStyle(meta: unknown) {
   if (!meta || typeof meta !== "object") return DEFAULT_ZONE_STYLE;
   const record = meta as JsonRecord;
@@ -410,21 +433,43 @@ export async function GET() {
     }
   }
 
-  const droppedUnits = Array.from(latestDropByUnitId.values()).map((point) => ({
-    unit_id: point.unit_id,
-    unit_barcode: point.unit_barcode,
-    current_status: unitsForDropsMap.get(point.unit_id)?.status || "",
-    current_cell_id: unitsForDropsMap.get(point.unit_id)?.cell_id || null,
-    dropped_at: point.happened_at,
-    courier_user_id: point.courier_user_id,
-    courier_name: point.courier_name,
-    note: point.note,
-    ops_status: point.ops_status,
-    color_key: point.color_key,
-    color_hex: point.color_hex,
-    lat: point.lat,
-    lng: point.lng,
+  const zoneList = (zonesResult.data || []).map((z) => ({
+    id: z.id,
+    code: (z.code || "").trim() || null,
+    name: z.name || "",
+    polygon: Array.isArray(z.polygon) ? z.polygon : [],
   }));
+
+  const droppedUnits = Array.from(latestDropByUnitId.values()).map((point) => {
+    let zone_id: string | null = null;
+    let zone_code: string | null = null;
+    if (point.lat != null && point.lng != null) {
+      for (const zone of zoneList) {
+        if (zone.polygon.length >= 3 && pointInPolygon(point.lat, point.lng, zone.polygon)) {
+          zone_id = zone.id;
+          zone_code = zone.code;
+          break;
+        }
+      }
+    }
+    return {
+      unit_id: point.unit_id,
+      unit_barcode: point.unit_barcode,
+      current_status: unitsForDropsMap.get(point.unit_id)?.status || "",
+      current_cell_id: unitsForDropsMap.get(point.unit_id)?.cell_id || null,
+      dropped_at: point.happened_at,
+      courier_user_id: point.courier_user_id,
+      courier_name: point.courier_name,
+      note: point.note,
+      ops_status: point.ops_status,
+      color_key: point.color_key,
+      color_hex: point.color_hex,
+      lat: point.lat,
+      lng: point.lng,
+      zone_id,
+      zone_code,
+    };
+  });
 
   const latestLocationByCourierId = new Map<
     string,

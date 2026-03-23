@@ -8,6 +8,32 @@
   background: linear-gradient(180deg, #edf1f6 0%, #e7ebf2 100%);
 }
 
+.pageFullscreen {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: linear-gradient(180deg, #edf1f6 0%, #e7ebf2 100%);
+}
+
+.fullscreenHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #d6dce5;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.fullscreenTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -988,4 +1014,72 @@
   .historyMapCanvasWrap {
     height: 220px;
   }
+}
+
+.allOrdersSidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.allOrdersList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.allOrdersDetail {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.allOrdersHistoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.allOrdersHistoryItem {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.allOrdersHistoryTitle {
+  font-weight: 600;
+  font-size: 13px;
+  color: #111827;
+}
+
+.allOrdersHistoryText {
+  font-size: 12px;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.allOrdersHistoryMeta {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.allOrdersPhotosGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
