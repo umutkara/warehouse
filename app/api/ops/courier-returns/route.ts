@@ -165,22 +165,23 @@ export async function GET() {
     if (!session) continue;
 
     const droppedEvent = latestDroppedEventByUnitId.get(item.unit_id);
-    if (!droppedEvent) continue;
-
     const sessionMs = parseMs(session.confirmed_at || session.started_at);
+
     const binMoveMs = parseMs(latestBinMoveByUnitId.get(item.unit_id));
-    if (binMoveMs > 0 && binMoveMs >= sessionMs) {
+    if (binMoveMs > 0 && sessionMs > 0 && binMoveMs >= sessionMs) {
       continue;
     }
 
     const unit = unitById.get(item.unit_id);
     const unitMeta =
       unit?.meta && typeof unit.meta === "object" ? (unit.meta as Record<string, unknown>) : {};
-    const opsStatus = extractOpsStatus(droppedEvent.proof_meta);
+    const opsStatus = droppedEvent ? extractOpsStatus(droppedEvent.proof_meta) : null;
     const color = resolveDropColor({
-      opsStatus,
+      opsStatus: opsStatus ?? undefined,
       overrideColorKey: unitMeta.drop_point_color_override,
     });
+
+    const droppedAt = droppedEvent?.happened_at ?? session.started_at ?? session.confirmed_at ?? "";
 
     if (!grouped.has(session.courier_user_id)) {
       grouped.set(session.courier_user_id, {
@@ -199,7 +200,7 @@ export async function GET() {
       unit_barcode: unit?.barcode || item.unit_id,
       current_status: unit?.status || null,
       current_cell_id: unit?.cell_id || null,
-      dropped_at: droppedEvent.happened_at,
+      dropped_at: droppedAt,
       ops_status: opsStatus,
       color_key: color.color_key,
       color_hex: color.color_hex,

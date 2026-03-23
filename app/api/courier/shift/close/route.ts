@@ -39,19 +39,20 @@ export async function POST(req: Request) {
     .in("status", [...ACTIVE_TASK_STATUSES]);
 
   if (activeError) {
+    console.error("[shift/close] active tasks fetch error:", activeError);
     return NextResponse.json({ error: activeError.message }, { status: 500 });
   }
-  if ((activeTasks?.length || 0) > 0 && !(force && canForce)) {
-    return NextResponse.json(
-      {
-        error: "Active tasks remain. Resolve tasks or use force close with warehouse role.",
-        active_task_count: activeTasks?.length || 0,
-      },
-      { status: 409 },
-    );
-  }
 
+  const activeCount = activeTasks?.length || 0;
   const now = new Date().toISOString();
+
+  console.log("[shift/close] Closing shift", {
+    shiftId: shift.id,
+    courierUserId: shift.courier_user_id,
+    activeTaskCount: activeCount,
+  });
+
+  // Allow close even with active tasks — all orders are queued for warehouse receiving.
   const { error: closeError } = await supabaseAdmin
     .from("courier_shifts")
     .update({
@@ -77,29 +78,38 @@ export async function POST(req: Request) {
     .maybeSingle();
   let ensuredHandoverId = existingHandover?.id || null;
   if (!ensuredHandoverId) {
-    const { data: insertedHandover } = await supabaseAdmin
+    const { data: insertedHandover, error: insertHandoverErr } = await supabaseAdmin
       .from("warehouse_handover_sessions")
       .insert({
         warehouse_id: auth.profile.warehouse_id,
         shift_id: shift.id,
         courier_user_id: shift.courier_user_id,
         status: "draft",
+        started_at: now,
         note: note || null,
         meta: { source: "api.courier.shift.close", auto_created: true },
       })
       .select("id")
       .single();
+    if (insertHandoverErr) {
+      console.error("[shift/close] handover session insert error:", insertHandoverErr);
+      return NextResponse.json({ error: "Failed to create handover session: " + insertHandoverErr.message }, { status: 500 });
+    }
     ensuredHandoverId = insertedHandover?.id || null;
   }
 
   if (ensuredHandoverId) {
-    const { data: shiftTasks } = await supabaseAdmin
+    const { data: shiftTasks, error: shiftTasksErr } = await supabaseAdmin
       .from("courier_tasks")
       .select("id, unit_id")
       .eq("warehouse_id", auth.profile.warehouse_id)
       .eq("courier_user_id", shift.courier_user_id)
       .eq("shift_id", shift.id)
       .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
+
+    if (shiftTasksErr) {
+      console.error("[shift/close] shiftTasks fetch error:", shiftTasksErr);
+    }
 
     const allOnHandTasks = (shiftTasks || []).filter((task) => task.unit_id);
     if (allOnHandTasks.length > 0) {
@@ -108,8 +118,13 @@ export async function POST(req: Request) {
         .select("unit_id")
         .eq("handover_session_id", ensuredHandoverId);
       const existingUnitIds = new Set((existingItems || []).map((row) => row.unit_id).filter(Boolean));
+      const seenUnitIds = new Set<string>();
       const itemsToInsert = allOnHandTasks
-        .filter((task) => !existingUnitIds.has(task.unit_id))
+        .filter((task) => {
+          if (existingUnitIds.has(task.unit_id) || seenUnitIds.has(task.unit_id)) return false;
+          seenUnitIds.add(task.unit_id);
+          return true;
+        })
         .map((task) => ({
           handover_session_id: ensuredHandoverId,
           unit_id: task.unit_id,
@@ -121,7 +136,15 @@ export async function POST(req: Request) {
           },
         }));
       if (itemsToInsert.length > 0) {
-        await supabaseAdmin.from("warehouse_handover_items").insert(itemsToInsert);
+        const { error: insertErr } = await supabaseAdmin.from("warehouse_handover_items").insert(itemsToInsert);
+        if (insertErr) {
+          console.error("[shift/close] handover items insert error:", insertErr);
+        } else {
+          console.log("[shift/close] Queued units for warehouse receiving", {
+            handoverId: ensuredHandoverId,
+            itemCount: itemsToInsert.length,
+          });
+        }
       }
     }
   }
@@ -136,6 +159,7 @@ export async function POST(req: Request) {
       courier_user_id: shift.courier_user_id,
       forced: force && canForce,
       note,
+      active_task_count: activeCount,
     },
   });
 

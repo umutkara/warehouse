@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   const courierUserId =
     requestedCourierUserId && canInspectAnyCourier ? requestedCourierUserId : auth.user.id;
 
-  const { data: shift, error: shiftError } = await supabaseAdmin
+  let { data: shift, error: shiftError } = await supabaseAdmin
     .from("courier_shifts")
     .select("id, status, started_at, closed_at, warehouse_id, courier_user_id")
     .eq("warehouse_id", auth.profile.warehouse_id)
@@ -28,6 +28,19 @@ export async function GET(req: Request) {
 
   if (shiftError) {
     return NextResponse.json({ error: shiftError.message }, { status: 500 });
+  }
+
+  if (!shift) {
+    const { data: lastClosed } = await supabaseAdmin
+      .from("courier_shifts")
+      .select("id, status, started_at, closed_at, warehouse_id, courier_user_id")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("courier_user_id", courierUserId)
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    shift = lastClosed ?? null;
   }
 
   if (!shift) {
