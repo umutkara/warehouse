@@ -1182,7 +1182,7 @@ export default function TsdPage() {
 
     try {
       if (parsed.type === "cell") {
-        // Это BIN/REJECTED-ячейка
+        // Это BIN-ячейка (приемка у курьера — только BIN)
         const cellInfo = await loadCellInfo(parsed.code);
         if (!cellInfo) {
           setError(`Ячейка "${parsed.code}" не найдена`);
@@ -1190,9 +1190,8 @@ export default function TsdPage() {
           return;
         }
 
-        // Проверяем, что это BIN или REJECTED
-        if (!["bin", "rejected"].includes(cellInfo.cell_type)) {
-          setError(`Ячейка "${parsed.code}" не является BIN/REJECTED. Приемка только в BIN или REJECTED ячейки.`);
+        if (cellInfo.cell_type !== "bin") {
+          setError(`Ячейка "${parsed.code}" не является BIN. Приемка только в BIN ячейки.`);
           setScanValue("");
           return;
         }
@@ -1203,7 +1202,7 @@ export default function TsdPage() {
       } else {
         // Это штрихкод unit
         if (!binCell) {
-          setError("Сначала отсканируйте BIN/REJECTED ячейку");
+          setError("Сначала отсканируйте BIN ячейку");
           setScanValue("");
           return;
         }
@@ -1234,7 +1233,7 @@ export default function TsdPage() {
         setLastReceivedUnit({ barcode: parsed.code, binCode: binCell.code });
         setScanValue("");
         loadCourierReturns(); // Обновить список курьеров (принятый заказ мог быть из handover)
-        // BIN/REJECTED оставляем выбранным для приёма пачки
+        // BIN остаётся выбранным для приёма пачки
       }
     } catch (e: any) {
       setError(e.message || "Ошибка обработки скана");
@@ -2847,7 +2846,7 @@ export default function TsdPage() {
               </div>
             )}
 
-            {/* BIN / REJECTED */}
+            {/* BIN — ячейка приёмки у курьера */}
             <div
               style={{
                 padding: 16,
@@ -2857,7 +2856,7 @@ export default function TsdPage() {
                 borderColor: binCell ? "#ffc107" : "#ddd",
               }}
             >
-              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>BIN/REJECTED (ячейка приёмки)</div>
+              <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>BIN (ячейка приёмки)</div>
               {binCell ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
@@ -4563,10 +4562,10 @@ export default function TsdPage() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Инструкция:</div>
           {mode === "receiving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Отсканируйте BIN/REJECTED ячейку (или введите код)</li>
+              <li>Отсканируйте BIN ячейку (или введите код)</li>
               <li>Отсканируйте штрихкод заказа</li>
-              <li>Заказ будет создан (если нового нет) и размещён в выбранную ячейку</li>
-              <li>BIN/REJECTED останется выбранным для приёма пачки заказов</li>
+              <li>Заказ будет создан (если нового нет) и размещён в выбранную BIN ячейку</li>
+              <li>BIN останется выбранным для приёма пачки заказов</li>
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>

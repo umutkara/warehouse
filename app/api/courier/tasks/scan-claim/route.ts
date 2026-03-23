@@ -10,8 +10,15 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const barcode = body?.barcode?.toString().trim();
   const note = body?.note?.toString() || null;
+  const giverSignature = typeof body?.giver_signature === "string" ? body.giver_signature.trim() || null : null;
   if (!barcode) {
     return NextResponse.json({ error: "barcode is required" }, { status: 400 });
+  }
+  if (!giverSignature) {
+    return NextResponse.json(
+      { error: "giver_signature is required for self-pickup (подпись передающего)" },
+      { status: 400 },
+    );
   }
 
   const { data: foundUnit, error: unitError } = await supabaseAdmin
@@ -139,6 +146,7 @@ export async function POST(req: Request) {
           source: "api.courier.tasks.scan_claim",
           scanned_barcode: barcode,
           note,
+          ...(giverSignature ? { giver_signature: giverSignature } : {}),
         },
       })
       .eq("id", existingTask.id);
@@ -162,6 +170,7 @@ export async function POST(req: Request) {
           source: "api.courier.tasks.scan_claim",
           scanned_barcode: barcode,
           note,
+          ...(giverSignature ? { giver_signature: giverSignature } : {}),
         },
       })
       .select("id")
@@ -184,7 +193,10 @@ export async function POST(req: Request) {
       event_type: "claimed",
       happened_at: now,
       note: note || `Scanned barcode ${barcode}`,
-      meta: { source: "api.courier.tasks.scan_claim" },
+      meta: {
+        source: "api.courier.tasks.scan_claim",
+        ...(giverSignature ? { giver_signature: giverSignature } : {}),
+      },
     });
 
   if (foundUnit) {

@@ -18,6 +18,7 @@ These invariants are mandatory for the critical warehouse process. Any code chan
 12. **INV-12 (Cancel rollback + tolerance):** Cancel flow marks task as `canceled`, attempts to return all units to snapshot source cells, logs successful returns, and tolerates per-unit move failures.
 13. **INV-13 (BIN ingress policy in scan flow):** `/api/units/move-by-scan` forbids moving to `bin` from non-`bin` cells (including `rejected`/`ff`).
 14. **INV-14 (Return flow):** Returning unit from `out` to `bin` via `/api/units/move` is supported and normalized.
+15. **INV-15 (Courier handover receiving):** `/api/receiving/scan` (приемка у курьера) accepts units only into BIN cells. REJECTED is not allowed for this flow.
 
 ## Required test mapping
 

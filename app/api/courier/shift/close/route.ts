@@ -100,38 +100,28 @@ export async function POST(req: Request) {
       .eq("courier_user_id", shift.courier_user_id)
       .eq("shift_id", shift.id)
       .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
-    const taskIds = (shiftTasks || []).map((task) => task.id).filter(Boolean);
-    if (taskIds.length > 0) {
-      const { data: droppedRows } = await supabaseAdmin
-        .from("courier_task_events")
-        .select("task_id")
-        .eq("warehouse_id", auth.profile.warehouse_id)
-        .eq("event_type", "dropped")
-        .in("task_id", taskIds);
-      const droppedTaskIdSet = new Set((droppedRows || []).map((row) => row.task_id).filter(Boolean));
-      const droppedTasks = (shiftTasks || []).filter((task) => droppedTaskIdSet.has(task.id));
 
-      if (droppedTasks.length > 0) {
-        const { data: existingItems } = await supabaseAdmin
-          .from("warehouse_handover_items")
-          .select("unit_id")
-          .eq("handover_session_id", ensuredHandoverId);
-        const existingUnitIds = new Set((existingItems || []).map((row) => row.unit_id).filter(Boolean));
-        const itemsToInsert = droppedTasks
-          .filter((task) => !existingUnitIds.has(task.unit_id))
-          .map((task) => ({
-            handover_session_id: ensuredHandoverId,
-            unit_id: task.unit_id,
-            task_id: task.id,
-            condition_status: "ok",
-            meta: {
-              source: "api.courier.shift.close",
-              queue_source: "point_to_warehouse",
-            },
-          }));
-        if (itemsToInsert.length > 0) {
-          await supabaseAdmin.from("warehouse_handover_items").insert(itemsToInsert);
-        }
+    const allOnHandTasks = (shiftTasks || []).filter((task) => task.unit_id);
+    if (allOnHandTasks.length > 0) {
+      const { data: existingItems } = await supabaseAdmin
+        .from("warehouse_handover_items")
+        .select("unit_id")
+        .eq("handover_session_id", ensuredHandoverId);
+      const existingUnitIds = new Set((existingItems || []).map((row) => row.unit_id).filter(Boolean));
+      const itemsToInsert = allOnHandTasks
+        .filter((task) => !existingUnitIds.has(task.unit_id))
+        .map((task) => ({
+          handover_session_id: ensuredHandoverId,
+          unit_id: task.unit_id,
+          task_id: task.id,
+          condition_status: "ok",
+          meta: {
+            source: "api.courier.shift.close",
+            queue_source: "all_on_hand",
+          },
+        }));
+      if (itemsToInsert.length > 0) {
+        await supabaseAdmin.from("warehouse_handover_items").insert(itemsToInsert);
       }
     }
   }

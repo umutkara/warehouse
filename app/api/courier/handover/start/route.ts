@@ -61,31 +61,17 @@ export async function POST(req: Request) {
     .eq("shift_id", shift.id)
     .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
 
-  const taskIds = (taskUnits || []).map((row) => row.id).filter(Boolean);
-  const droppedTaskIds = new Set<string>();
-  if (taskIds.length > 0) {
-    const { data: droppedRows } = await supabaseAdmin
-      .from("courier_task_events")
-      .select("task_id")
-      .eq("warehouse_id", auth.profile.warehouse_id)
-      .eq("event_type", "dropped")
-      .in("task_id", taskIds);
-    for (const row of droppedRows || []) {
-      if (row.task_id) droppedTaskIds.add(row.task_id);
-    }
-  }
-
-  const pointToWarehouseUnits = (taskUnits || []).filter((row) => droppedTaskIds.has(row.id));
-  if (pointToWarehouseUnits.length) {
+  const allOnHandUnits = (taskUnits || []).filter((row) => row.unit_id);
+  if (allOnHandUnits.length > 0) {
     await supabaseAdmin.from("warehouse_handover_items").insert(
-      pointToWarehouseUnits.map((row) => ({
+      allOnHandUnits.map((row) => ({
         handover_session_id: session.id,
         unit_id: row.unit_id,
         task_id: row.id,
         condition_status: "ok",
         meta: {
           source: "api.courier.handover.start",
-          queue_source: "point_to_warehouse",
+          queue_source: "all_on_hand",
         },
       })),
     );
@@ -94,6 +80,6 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     handover: session,
-    prefilled_items: pointToWarehouseUnits.length,
+    prefilled_items: allOnHandUnits.length,
   });
 }

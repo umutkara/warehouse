@@ -76,10 +76,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Ячейка не найдена", ok: false }, { status: 404 });
     }
 
-    // Check cell_type === 'bin' or 'rejected'
-    if (!["bin", "rejected"].includes(targetCell.cell_type)) {
+    // Check cell_type === 'bin' only (приемка у курьера — только в BIN)
+    if (targetCell.cell_type !== "bin") {
       return NextResponse.json(
-        { error: "Приемка разрешена только в BIN или REJECTED ячейки", ok: false },
+        { error: "Приемка разрешена только в BIN ячейки", ok: false },
         { status: 400 }
       );
     }
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (transfer) {
-        const newStatus = targetCell.cell_type === "rejected" ? "rejected" : "bin";
+        const newStatus = "bin";
 
         const { error: unitUpdateError } = await supabaseAdmin
           .from("units")
@@ -271,7 +271,7 @@ export async function POST(req: Request) {
     let unitId: string;
 
     // SCENARIO A: unit НЕ найден - создаём новый
-    const targetStatus = targetCell.cell_type === "rejected" ? "rejected" : "receiving";
+    const targetStatus = "receiving";
     if (!existingUnit) {
       // Создаём unit через admin client (обходит проблему "stack depth limit exceeded" при прямом insert из-за RLS)
       // Admin client использует service role key и обходит RLS политики
@@ -338,11 +338,10 @@ export async function POST(req: Request) {
       activeShipment &&
       (activeShipment.status === "out" ||
         (activeShipment.status === "returned" &&
-          (activeShipment.return_reason === "Автоматический возврат при приемке в bin" ||
-            activeShipment.return_reason === "Автоматический возврат при приемке в rejected")));
+          activeShipment.return_reason === "Автоматический возврат при приемке в bin")));
 
     // Prepare move note and meta
-    const targetCellLabel = targetCell.cell_type === "rejected" ? "REJECTED" : "BIN";
+    const targetCellLabel = "BIN";
     let moveNote = `Принято в ${targetCellLabel}`;
     let moveMeta: any = { source: "tsd" };
     let returnReason = "";
