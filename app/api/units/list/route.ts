@@ -1,32 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { hasAnyRole } from "@/app/api/_shared/role-access";
-
-function buildBarcodeCandidates(rawBarcode: string): string[] {
-  const barcode = rawBarcode.trim();
-  const out = new Set<string>();
-  if (!barcode) return [];
-  out.add(barcode);
-
-  const digitsOnly = /^\d+$/.test(barcode);
-  if (!digitsOnly) return Array.from(out);
-
-  if (barcode.startsWith("00") && barcode.length > 4) {
-    out.add(barcode.slice(2, -2));
-  }
-  if (!barcode.startsWith("00")) {
-    out.add(`00${barcode}`);
-    out.add(`00${barcode}01`);
-  } else {
-    out.add(`${barcode}01`);
-  }
-  if (!barcode.endsWith("01")) {
-    out.add(`${barcode}01`);
-  }
-
-  return Array.from(out).filter(Boolean);
-}
+import { buildBarcodeCandidates, normalizeBarcodeDigits } from "@/lib/barcode/normalization";
 
 /**
  * GET /api/units/list
@@ -63,9 +38,8 @@ export async function GET(req: Request) {
     const searchQuery = searchParams.get("search") || "";
     const statusFilter = searchParams.get("status") || "all";
     const opsFilter = searchParams.get("ops") || "all";
-    const canUseKeywordSearch = hasAnyRole(profile.role, ["ops", "admin"]);
     const normalizedSearchQuery = searchQuery.trim();
-    const barcodeCandidates = buildBarcodeCandidates(normalizedSearchQuery);
+    const barcodeCandidates = buildBarcodeCandidates(normalizeBarcodeDigits(normalizedSearchQuery));
 
     // Calculate date threshold based on filter
     let dateThreshold: string | null = null;
@@ -130,12 +104,6 @@ export async function GET(req: Request) {
       }
     }
 
-    // Search is allowed only for ops/admin. Others can still pass ?search=... but it is ignored.
-    // For ops/admin we apply keyword filtering after loading units to support scenario search.
-    if (normalizedSearchQuery && !canUseKeywordSearch) {
-      // no-op: intentionally ignore search for unauthorized roles
-    }
-
     // Apply age filter
     if (dateThreshold) {
       query = query.lt("created_at", dateThreshold);
@@ -159,11 +127,7 @@ export async function GET(req: Request) {
     let effectiveUnits = units || [];
     // If there is a numeric-like search query, load targeted barcode matches
     // from the full warehouse scope to avoid default 1000-row ceiling.
-    if (
-      canUseKeywordSearch &&
-      normalizedSearchQuery &&
-      barcodeCandidates.length > 0
-    ) {
+    if (normalizedSearchQuery && barcodeCandidates.length > 0) {
       let barcodeQuery = supabaseAdmin
         .from("units")
         .select(`
@@ -365,7 +329,7 @@ export async function GET(req: Request) {
     }
 
     let responseUnits = unitsWithAge;
-    if (canUseKeywordSearch && normalizedSearchQuery) {
+    if (normalizedSearchQuery) {
       const keywords = normalizedSearchQuery
         .toLowerCase()
         .split(/\s+/)
@@ -376,7 +340,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const total = canUseKeywordSearch && normalizedSearchQuery
+    const total = normalizedSearchQuery
       ? responseUnits.length
       : typeof totalCount === "number"
       ? totalCount

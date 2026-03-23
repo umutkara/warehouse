@@ -1,35 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
-
-function buildBarcodeCandidates(rawBarcode: string): string[] {
-  const barcode = rawBarcode.trim();
-  const out = new Set<string>();
-  if (!barcode) return [];
-  out.add(barcode);
-
-  const digitsOnly = /^\d+$/.test(barcode);
-  if (!digitsOnly) return Array.from(out);
-
-  if (barcode.startsWith("00") && barcode.length > 4) {
-    out.add(barcode.slice(2, -2));
-  }
-  if (!barcode.startsWith("00")) {
-    out.add(`00${barcode}`);
-    out.add(`00${barcode}01`);
-  } else {
-    out.add(`${barcode}01`);
-  }
-  if (!barcode.endsWith("01")) {
-    out.add(`${barcode}01`);
-  }
-
-  return Array.from(out).filter(Boolean);
-}
+import { buildBarcodeCandidates, normalizeBarcodeDigits } from "@/lib/barcode/normalization";
 
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
   const url = new URL(req.url);
-  const barcode = (url.searchParams.get("barcode") ?? "").trim();
+  const barcode = normalizeBarcodeDigits(url.searchParams.get("barcode") ?? "");
 
   if (!barcode) {
     return NextResponse.json({ error: "Не указан barcode" }, { status: 400 });
@@ -71,12 +47,6 @@ export async function GET(req: Request) {
   }
 
   if (uErr || !unit) {
-    const { data: similarUnits } = await supabase
-      .from("units")
-      .select("barcode")
-      .eq("warehouse_id", profile.warehouse_id)
-      .ilike("barcode", `%${barcode}%`)
-      .limit(5);
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 
