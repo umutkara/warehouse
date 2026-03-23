@@ -2319,12 +2319,14 @@ function AllOrdersModal({
     const key = `hist-${idx}-${event.event_type}-${event.created_at}`;
     if (event.event_type === "move") {
       const { from_cell, to_cell } = event.details;
+      const fromCellText = String(from_cell || "—");
+      const toCellText = String(to_cell || "—");
       return (
         <div key={key} className={styles.allOrdersHistoryItem}>
           <span>📦</span>
           <div>
             <div className={styles.allOrdersHistoryTitle}>Перемещение</div>
-            <div className={styles.allOrdersHistoryText}>{from_cell || "—"} → {to_cell || "—"}</div>
+            <div className={styles.allOrdersHistoryText}>{fromCellText} → {toCellText}</div>
             <div className={styles.allOrdersHistoryMeta}>{date}</div>
           </div>
         </div>

@@ -338,7 +338,7 @@ export async function POST(req: Request) {
       activeShipment &&
       (activeShipment.status === "out" ||
         (activeShipment.status === "returned" &&
-          activeShipment.return_reason === "Автоматический возврат при приемке в bin")));
+          activeShipment.return_reason === "Автоматический возврат при приемке в bin"));
 
     // Prepare move note and meta
     const targetCellLabel = "BIN";
