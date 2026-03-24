@@ -203,12 +203,23 @@ export async function GET(req: Request) {
       const shipmentId = taskMeta?.shipment_id?.toString() || pool?.source_shipment_id?.toString() || null;
       const shipment = shipmentId ? shipmentById.get(shipmentId) : shipmentByUnitId.get(task.unit_id);
       const shipmentMeta = shipment?.meta && typeof shipment.meta === "object" ? shipment.meta : null;
+      const pickupStatus =
+        typeof shipmentMeta?.courier_pickup_status === "string"
+          ? shipmentMeta.courier_pickup_status
+          : null;
+      const pickupConfirmed =
+        pickupStatus === "confirmed" ||
+        (typeof shipmentMeta?.courier_pickup_confirmed_at === "string" &&
+          shipmentMeta.courier_pickup_confirmed_at.trim().length > 0);
       const selfPickup =
         taskMeta?.source === "api.courier.tasks.scan_claim" ||
         Boolean(shipmentMeta?.external_pickup) ||
         Boolean(unitMeta?.external_pickup);
       return {
         ...task,
+        shipment_id: shipment?.id || shipmentId,
+        pickup_status: pickupStatus,
+        pickup_confirmed: pickupConfirmed,
         self_pickup: selfPickup,
         scenario: resolveScenario(
           scenarioByUnit.get(task.unit_id),

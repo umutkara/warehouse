@@ -33,8 +33,16 @@ export async function POST(req: Request) {
     ? body.shipmentIds.map((id: unknown) => id?.toString()).filter(Boolean)
     : [];
   const note = body?.note?.toString() || null;
+  const giverSignature =
+    typeof body?.giver_signature === "string" ? body.giver_signature.trim() || null : null;
   if (shipmentIds.length === 0) {
     return NextResponse.json({ error: "shipmentIds are required" }, { status: 400 });
+  }
+  if (!giverSignature) {
+    return NextResponse.json(
+      { error: "giver_signature is required for pickup confirmation" },
+      { status: 400 },
+    );
   }
 
   const { data: shipments, error: shipmentsError } = await supabaseAdmin
@@ -124,6 +132,7 @@ export async function POST(req: Request) {
       courier_pickup_confirmed_at: now,
       courier_pickup_confirmed_by: auth.user.id,
       courier_pickup_note: note,
+      courier_pickup_giver_signature: giverSignature,
       courier_pickup_status: "confirmed",
       courier_pickup_rejected_at: null,
       courier_pickup_rejected_by: null,
@@ -174,6 +183,7 @@ export async function POST(req: Request) {
             shipment_id: shipment.id,
             pickup_confirmed: true,
             note,
+            giver_signature: giverSignature,
             scenario: taskScenario,
           },
         })
@@ -189,7 +199,10 @@ export async function POST(req: Request) {
         event_type: "claimed",
         happened_at: now,
         note: note || "Pickup confirmed by courier",
-        meta: { source: "api.courier.assignments.confirm" },
+        meta: {
+          source: "api.courier.assignments.confirm",
+          giver_signature: giverSignature,
+        },
       });
     } else {
       const { data: insertedTask } = await supabaseAdmin
@@ -209,6 +222,7 @@ export async function POST(req: Request) {
             shipment_id: shipment.id,
             pickup_confirmed: true,
             note,
+            giver_signature: giverSignature,
             scenario: taskScenario,
           },
         })
@@ -226,7 +240,10 @@ export async function POST(req: Request) {
           event_type: "claimed",
           happened_at: now,
           note: note || "Pickup confirmed by courier",
-          meta: { source: "api.courier.assignments.confirm" },
+          meta: {
+            source: "api.courier.assignments.confirm",
+            giver_signature: giverSignature,
+          },
         });
       }
     }
@@ -244,6 +261,7 @@ export async function POST(req: Request) {
         courier_name: auth.profile.full_name || auth.user.id,
         shipment_id: shipment.id,
         unit_barcode: barcodeByUnitId.get(shipment.unit_id),
+        giver_signature_logged: true,
       },
     });
   }

@@ -66,6 +66,40 @@ export async function POST(req: Request) {
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+
+    const { data: courierTasks, error: taskFetchError } = await supabaseAdmin
+      .from("courier_tasks")
+      .select("id, meta")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("courier_user_id", auth.user.id)
+      .eq("unit_id", shipment.unit_id)
+      .not("status", "in", "(delivered,failed,returned,canceled)");
+    if (taskFetchError) {
+      return NextResponse.json({ error: taskFetchError.message }, { status: 500 });
+    }
+    for (const task of courierTasks || []) {
+      const taskMeta =
+        task.meta && typeof task.meta === "object" ? (task.meta as Record<string, unknown>) : {};
+      const { error: taskUpdateError } = await supabaseAdmin
+        .from("courier_tasks")
+        .update({
+          meta: {
+            ...taskMeta,
+            hidden_from_courier: true,
+            hidden_from_courier_at: now,
+            hidden_from_courier_by: auth.user.id,
+            hidden_from_courier_reason: note,
+            pickup_rejected: true,
+          },
+          updated_at: now,
+        })
+        .eq("id", task.id)
+        .eq("warehouse_id", auth.profile.warehouse_id);
+      if (taskUpdateError) {
+        return NextResponse.json({ error: taskUpdateError.message }, { status: 500 });
+      }
+    }
+
     rejectedIds.push(shipment.id);
 
     const { data: unitRow } = await supabaseAdmin

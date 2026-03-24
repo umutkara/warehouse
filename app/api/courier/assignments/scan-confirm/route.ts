@@ -31,8 +31,16 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const barcode = body?.barcode?.toString().trim();
   const note = body?.note?.toString() || null;
+  const giverSignature =
+    typeof body?.giver_signature === "string" ? body.giver_signature.trim() || null : null;
   if (!barcode) {
     return NextResponse.json({ error: "barcode is required" }, { status: 400 });
+  }
+  if (!giverSignature) {
+    return NextResponse.json(
+      { error: "giver_signature is required for pickup confirmation" },
+      { status: 400 },
+    );
   }
 
   const { data: unit, error: unitError } = await supabaseAdmin
@@ -106,6 +114,7 @@ export async function POST(req: Request) {
     courier_pickup_confirmed_at: now,
     courier_pickup_confirmed_by: auth.user.id,
     courier_pickup_note: note,
+    courier_pickup_giver_signature: giverSignature,
     courier_pickup_status: "confirmed",
     courier_pickup_rejected_at: null,
     courier_pickup_rejected_by: null,
@@ -164,6 +173,7 @@ export async function POST(req: Request) {
           scanned_barcode: barcode,
           pickup_confirmed: true,
           note,
+          giver_signature: giverSignature,
           scenario: taskScenario,
         },
       })
@@ -206,7 +216,10 @@ export async function POST(req: Request) {
       event_type: "claimed",
       happened_at: now,
       note: note || `Pickup confirmed by scan: ${barcode}`,
-      meta: { source: "api.courier.assignments.scan_confirm" },
+        meta: {
+          source: "api.courier.assignments.scan_confirm",
+          giver_signature: giverSignature,
+        },
     });
   }
 
@@ -222,6 +235,7 @@ export async function POST(req: Request) {
       shipment_id: shipment.id,
       unit_barcode: barcode,
       scanned_barcode: barcode,
+      giver_signature_logged: true,
     },
   });
 
