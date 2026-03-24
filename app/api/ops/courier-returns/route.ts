@@ -65,33 +65,28 @@ export async function GET() {
   if (itemsError) {
     return NextResponse.json({ error: itemsError.message }, { status: 500 });
   }
-  if (!handoverItems?.length) {
-    return NextResponse.json({ ok: true, pending_groups: [] });
-  }
 
-  const unitIds = [...new Set(handoverItems.map((item) => item.unit_id).filter(Boolean))];
-  if (!unitIds.length) {
-    return NextResponse.json({ ok: true, pending_groups: [] });
-  }
+  const unitIds = handoverItems?.length
+    ? [...new Set(handoverItems.map((item) => item.unit_id).filter(Boolean))]
+    : [];
 
-  const [unitsResult, droppedEventsResult, binCellsResult] = await Promise.all([
-    supabaseAdmin
-      .from("units")
-      .select("id, barcode, status, cell_id, meta")
-      .in("id", unitIds),
-    supabaseAdmin
-      .from("courier_task_events")
-      .select("id, task_id, unit_id, happened_at, proof_meta")
-      .eq("warehouse_id", warehouseId)
-      .eq("event_type", "dropped")
-      .in("unit_id", unitIds)
-      .order("happened_at", { ascending: false }),
-    supabaseAdmin
-      .from("warehouse_cells_map")
-      .select("id")
-      .eq("warehouse_id", warehouseId)
-      .eq("cell_type", "bin"),
-  ]);
+  const [unitsResult, droppedEventsResult, binCellsResult] = unitIds.length
+    ? await Promise.all([
+        supabaseAdmin.from("units").select("id, barcode, status, cell_id, meta").in("id", unitIds),
+        supabaseAdmin
+          .from("courier_task_events")
+          .select("id, task_id, unit_id, happened_at, proof_meta")
+          .eq("warehouse_id", warehouseId)
+          .eq("event_type", "dropped")
+          .in("unit_id", unitIds)
+          .order("happened_at", { ascending: false }),
+        supabaseAdmin.from("warehouse_cells_map").select("id").eq("warehouse_id", warehouseId).eq("cell_type", "bin"),
+      ])
+    : [
+        { data: [] as Array<{ id: string; barcode?: string; status?: string; cell_id?: string; meta?: unknown }>, error: null },
+        { data: [] as Array<{ unit_id: string; happened_at: string; proof_meta?: unknown }>, error: null },
+        await supabaseAdmin.from("warehouse_cells_map").select("id").eq("warehouse_id", warehouseId).eq("cell_type", "bin"),
+      ];
 
   if (unitsResult.error) return NextResponse.json({ error: unitsResult.error.message }, { status: 500 });
   if (droppedEventsResult.error) {
@@ -101,7 +96,7 @@ export async function GET() {
 
   const binCellIds = (binCellsResult.data || []).map((cell) => cell.id).filter(Boolean);
   const unitMovesResult =
-    binCellIds.length > 0
+    binCellIds.length > 0 && unitIds.length > 0
       ? await supabaseAdmin
           .from("unit_moves")
           .select("unit_id, created_at")
@@ -159,6 +154,18 @@ export async function GET() {
     }
   >();
 
+  for (const session of sessions || []) {
+    if (!session.courier_user_id) continue;
+    if (grouped.has(session.courier_user_id)) continue;
+    grouped.set(session.courier_user_id, {
+      courier_user_id: session.courier_user_id,
+      courier_name: courierNameById.get(session.courier_user_id) || "Без имени",
+      handover_session_id: session.id,
+      handover_confirmed_at: session.confirmed_at,
+      items: [],
+    });
+  }
+
   for (const item of handoverItems || []) {
     if (!item.unit_id) continue;
     const session = sessionById.get(item.handover_session_id);
@@ -213,7 +220,6 @@ export async function GET() {
       total_units: group.items.length,
       items: group.items.sort((a, b) => parseMs(b.dropped_at) - parseMs(a.dropped_at)),
     }))
-    .filter((group) => group.total_units > 0)
     .sort(
       (a, b) =>
         parseMs(b.handover_confirmed_at || "") - parseMs(a.handover_confirmed_at || ""),
