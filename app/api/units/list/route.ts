@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { buildBarcodeCandidates, normalizeBarcodeDigits } from "@/lib/barcode/normalization";
+import { getActivePickingTargetCellIdByUnitId } from "@/lib/units/active-picking-target-cell";
 
 /**
  * GET /api/units/list
@@ -173,8 +174,18 @@ export async function GET(req: Request) {
       );
     }
 
-    // По факту: ячейку для отображения берём из warehouse_cells_map; при рассинхроне — по status (rejected/ff)
-    const cellIds = [...new Set(effectiveUnits.map((u: any) => u.cell_id).filter(Boolean))];
+    // По факту: ячейку для отображения берём из warehouse_cells_map; при рассинхроне — по status (rejected/ff).
+    // Если cell_id пустой, но есть активная picking-задача с target — показываем эту ячейку (как на карте / в find).
+    const unitIdsNoPhysicalCell = effectiveUnits
+      .filter((u: any) => !u.cell_id)
+      .map((u: any) => u.id);
+    const pickingTargetCellIdByUnitId = await getActivePickingTargetCellIdByUnitId(
+      profile.warehouse_id,
+      unitIdsNoPhysicalCell,
+    );
+    const physicalCellIds = [...new Set(effectiveUnits.map((u: any) => u.cell_id).filter(Boolean))];
+    const taskTargetCellIds = [...new Set(pickingTargetCellIdByUnitId.values())];
+    const cellIds = [...new Set([...physicalCellIds, ...taskTargetCellIds])];
     const cellsMap = new Map<string, { code: string; cell_type: string }>();
     if (cellIds.length > 0) {
       const { data: cells } = await supabaseAdmin
@@ -197,7 +208,9 @@ export async function GET(req: Request) {
       if (c.cell_type === "ff") ffCell = ffCell ?? c;
     });
     function getDisplayCell(unit: any): { code: string; cell_type: string } | null {
-      const raw = unit.cell_id ? cellsMap.get(unit.cell_id) : null;
+      const resolvedCellId =
+        unit.cell_id || pickingTargetCellIdByUnitId.get(unit.id) || null;
+      const raw = resolvedCellId ? cellsMap.get(resolvedCellId) : null;
       if (raw) return raw;
       if (unit.status === "rejected" && rejectedCell) return rejectedCell;
       if (unit.status === "ff" && ffCell) return ffCell;

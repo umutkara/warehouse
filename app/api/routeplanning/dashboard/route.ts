@@ -7,10 +7,10 @@ import {
   ROUTE_PLANNING_VIEW_ROLES,
 } from "@/lib/routeplanning/access";
 import { resolveDropColor } from "@/lib/courier/drop-color";
+import { getOperationalPickingUnitsForWarehouse } from "@/lib/logistics/operational-picking-units";
 
 const ACTIVE_COURIER_TASK_STATUSES = ["claimed", "in_route", "arrived", "dropped"] as const;
 const OPEN_SHIFT_STATUSES = ["open", "closing"] as const;
-const MAX_PICKING_UNITS = 500;
 const MAX_DROP_EVENTS = 700;
 const TARGET_WAREHOUSE_ZONE_CODE = "geri-qaytarmalar-anbar";
 const TARGET_WAREHOUSE_ZONE_STYLE = {
@@ -39,16 +39,6 @@ function asTrimmedString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function extractScenario(meta: unknown): string | null {
-  if (!meta || typeof meta !== "object") return null;
-  const record = meta as JsonRecord;
-  return (
-    asTrimmedString(record.scenario) ??
-    asTrimmedString(record.picking_scenario) ??
-    asTrimmedString(record.ops_scenario)
-  );
 }
 
 function extractOpsStatus(proofMeta: unknown): string | null {
@@ -142,20 +132,12 @@ export async function GET() {
   const canEdit = canEditRoutePlanning(role);
 
   const [
-    pickingCellsResult,
     couriersResult,
     zonesResult,
     openShiftsResult,
     dropEventsResult,
     activeTaskRowsResult,
   ] = await Promise.all([
-    supabaseAdmin
-      .from("warehouse_cells")
-      .select("id, code, meta")
-      .eq("warehouse_id", warehouseId)
-      .eq("cell_type", "picking")
-      .eq("is_active", true)
-      .order("code", { ascending: true }),
     supabaseAdmin
       .from("profiles")
       .select("id, full_name, role")
@@ -191,25 +173,11 @@ export async function GET() {
       .in("status", [...ACTIVE_COURIER_TASK_STATUSES]),
   ]);
 
-  if (pickingCellsResult.error) return dbErrorResponse(pickingCellsResult.error.message);
   if (couriersResult.error) return dbErrorResponse(couriersResult.error.message);
   if (zonesResult.error) return dbErrorResponse(zonesResult.error.message);
   if (openShiftsResult.error) return dbErrorResponse(openShiftsResult.error.message);
   if (dropEventsResult.error) return dbErrorResponse(dropEventsResult.error.message);
   if (activeTaskRowsResult.error) return dbErrorResponse(activeTaskRowsResult.error.message);
-
-  const pickingCells = pickingCellsResult.data || [];
-  const pickingCellIds = pickingCells.map((cell) => cell.id);
-  const pickingCellsMap = new Map(
-    pickingCells.map((cell) => [
-      cell.id,
-      {
-        id: cell.id,
-        code: cell.code,
-        meta: cell.meta ?? null,
-      },
-    ]),
-  );
 
   const activeTaskCountByCourier = new Map<string, number>();
   for (const row of activeTaskRowsResult.data || []) {
@@ -221,64 +189,24 @@ export async function GET() {
     );
   }
 
-  let pickingUnitsRows: Array<{
-    id: string;
-    barcode: string | null;
-    status: string | null;
-    cell_id: string | null;
-    created_at: string;
-    meta: unknown;
-  }> = [];
+  const opPicking = await getOperationalPickingUnitsForWarehouse(warehouseId);
+  if (!opPicking.ok) return dbErrorResponse(opPicking.error);
 
-  if (pickingCellIds.length > 0) {
-    const pickingUnitsResult = await supabaseAdmin
-      .from("units")
-      .select("id, barcode, status, cell_id, created_at, meta")
-      .eq("warehouse_id", warehouseId)
-      .in("cell_id", pickingCellIds)
-      .order("created_at", { ascending: false })
-      .limit(MAX_PICKING_UNITS);
-
-    if (pickingUnitsResult.error) return dbErrorResponse(pickingUnitsResult.error.message);
-
-    pickingUnitsRows =
-      (pickingUnitsResult.data as Array<{
-        id: string;
-        barcode: string | null;
-        status: string | null;
-        cell_id: string | null;
-        created_at: string;
-        meta: unknown;
-      }>) || [];
-  }
-
-  const pickingUnitIds = pickingUnitsRows.map((unit) => unit.id);
-  const shippedOutSet = new Set<string>();
-  if (pickingUnitIds.length > 0) {
-    const shippedOutResult = await supabaseAdmin
-      .from("outbound_shipments")
-      .select("unit_id")
-      .in("unit_id", pickingUnitIds)
-      .eq("status", "out");
-
-    if (shippedOutResult.error) return dbErrorResponse(shippedOutResult.error.message);
-
-    for (const shipment of shippedOutResult.data || []) {
-      if (shipment.unit_id) shippedOutSet.add(shipment.unit_id);
-    }
-  }
-
-  const pickingUnits = pickingUnitsRows
-    .filter((unit) => !shippedOutSet.has(unit.id))
-    .map((unit) => ({
-      id: unit.id,
-      barcode: unit.barcode || "",
-      status: unit.status || "",
-      cell_id: unit.cell_id,
-      created_at: unit.created_at,
-      scenario: extractScenario(unit.meta),
-      cell: unit.cell_id ? pickingCellsMap.get(unit.cell_id) || null : null,
-    }));
+  const pickingUnits = opPicking.units.map((unit) => ({
+    id: unit.id,
+    barcode: unit.barcode,
+    status: unit.status,
+    cell_id: unit.cell_id,
+    created_at: unit.created_at,
+    scenario: unit.scenario,
+    cell: unit.cell
+      ? {
+          id: unit.cell.id,
+          code: unit.cell.code,
+          meta: (unit.cell.meta as { description?: string } | null | undefined) ?? null,
+        }
+      : null,
+  }));
 
   const dropEvents = dropEventsResult.data || [];
   const dropUnitIds = [...new Set(dropEvents.map((event) => event.unit_id).filter(Boolean))];
