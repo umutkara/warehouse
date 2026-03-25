@@ -73,7 +73,7 @@ export async function GET(req: Request) {
 
   // Filter: show all "open" tasks AND all "in_progress" tasks (visible to everyone)
   // This allows multiple users to see tasks even if they're in progress by others
-  // For "Отгрузка (НОВАЯ)" mode, all tasks should be visible to coordinate work
+  // For TSD "Отгрузка" (shipping_new) mode, all tasks should be visible to coordinate work
   const filteredTasks = tasks.filter((t: any) => {
     if (t.status === "open") return true;
     if (t.status === "in_progress") return true; // Show all in_progress tasks to everyone

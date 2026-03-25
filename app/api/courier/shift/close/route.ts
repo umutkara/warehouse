@@ -30,12 +30,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Same "on hands" scope as GET /api/courier/tasks/my — do not filter by shift_id,
+  // otherwise tasks with null/other shift_id never reach warehouse_handover_items.
   const { data: activeTasks, error: activeError } = await supabaseAdmin
     .from("courier_tasks")
     .select("id, status")
     .eq("warehouse_id", auth.profile.warehouse_id)
     .eq("courier_user_id", shift.courier_user_id)
-    .eq("shift_id", shift.id)
     .in("status", [...ACTIVE_TASK_STATUSES]);
 
   if (activeError) {
@@ -104,7 +105,6 @@ export async function POST(req: Request) {
       .select("id, unit_id")
       .eq("warehouse_id", auth.profile.warehouse_id)
       .eq("courier_user_id", shift.courier_user_id)
-      .eq("shift_id", shift.id)
       .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
 
     if (shiftTasksErr) {
@@ -133,6 +133,8 @@ export async function POST(req: Request) {
           meta: {
             source: "api.courier.shift.close",
             queue_source: "all_on_hand",
+            source_kind: "expected",
+            receiving_status: "pending",
           },
         }));
       if (itemsToInsert.length > 0) {

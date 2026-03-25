@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  findResolvableHandoverItemByUnit,
+  mergeHandoverItemMeta,
+} from "@/app/api/ops/courier-handovers/_shared";
 
 const allowed = new Set(["worker", "manager", "head", "admin", "hub_worker"]);
 
@@ -50,10 +54,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const warehouseId = profile.warehouse_id;
+    const actorUserId = user.id;
+
     // Parse body
     const body = await req.json().catch(() => null);
     const cellCode = normalizeCellCode(body?.cellCode);
     const digits = normalizeUnitBarcode(body?.unitBarcode);
+    const skipHandoverReconciliation = body?.skipHandoverReconciliation === true;
 
     // Validation
     if (!digits) {
@@ -98,6 +106,31 @@ export async function POST(req: Request) {
         { error: `Ячейка "${cellCode}" заблокирована`, ok: false },
         { status: 400 }
       );
+    }
+
+    async function reconcileHandover(unitId: string) {
+      if (skipHandoverReconciliation) return;
+
+      const candidate = await findResolvableHandoverItemByUnit({
+        warehouseId,
+        unitId,
+      });
+      if (!candidate) return;
+
+      const nextMeta = mergeHandoverItemMeta(candidate.meta, {
+        source: "api.receiving.scan.reconcile",
+        receiving_status: "received",
+        received_at: new Date().toISOString(),
+        received_by: actorUserId,
+        received_via: "regular_receiving",
+        lost_at: null,
+        lost_by: null,
+      });
+
+      await supabaseAdmin
+        .from("warehouse_handover_items")
+        .update({ meta: nextMeta })
+        .eq("id", candidate.itemId);
     }
 
     // Auto-accept transfer if unit is in transit to this warehouse
@@ -189,6 +222,8 @@ export async function POST(req: Request) {
           console.error("Failed to close outbound shipment (non-blocking):", e);
         }
 
+        await reconcileHandover(anyUnit.id);
+
         return NextResponse.json({
           ok: true,
           unitId: anyUnit.id,
@@ -245,6 +280,8 @@ export async function POST(req: Request) {
       } catch (e) {
         console.error("Failed to close outbound shipment for same-cell scan:", e);
       }
+
+      await reconcileHandover(existingUnit.id);
 
       return NextResponse.json({
         ok: true,
@@ -585,6 +622,8 @@ export async function POST(req: Request) {
     }
 
     // Success response
+    await reconcileHandover(unitId);
+
     return NextResponse.json({
       ok: true,
       unitId,

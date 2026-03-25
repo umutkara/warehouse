@@ -122,6 +122,23 @@ describe("Cell source of truth contract", () => {
           error: null,
           count: 1,
         },
+        {
+          data: [
+            {
+              id: "unit-1",
+              barcode: "31025621317",
+              status: "rejected",
+              product_name: "Product",
+              partner_name: "Partner",
+              price: 10,
+              cell_id: "cell-client",
+              created_at: "2026-03-01T10:00:00.000Z",
+              meta: {},
+              warehouse_cells: { code: "CLIENT 1", cell_type: "storage" },
+            },
+          ],
+          error: null,
+        },
       ],
       warehouse_cells_map: [
         {

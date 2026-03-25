@@ -1,0 +1,678 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../../home/application/courier_app_controller.dart';
+import '../../../shared/widgets/barcode_scanner_sheet.dart';
+import '../../shared/widgets/giver_signature_dialog.dart';
+import '../../shared/widgets/section_card.dart';
+import '../../shared/widgets/status_chip.dart';
+import '../domain/courier_task.dart';
+import 'task_details_page.dart';
+
+class TasksPage extends StatefulWidget {
+  const TasksPage({super.key, required this.controller});
+
+  final CourierAppController controller;
+
+  @override
+  State<TasksPage> createState() => _TasksPageState();
+}
+
+class _TasksPageState extends State<TasksPage> {
+  final _confirmScanController = TextEditingController();
+  final Set<String> _selectedPendingIds = <String>{};
+  final Set<String> _selectedTaskIds = <String>{};
+
+  @override
+  void dispose() {
+    _confirmScanController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.controller.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (widget.controller.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'Не удалось загрузить задачи:\n${widget.controller.error}',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    if (widget.controller.tasks.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(10),
+        children: [
+          _PendingAssignmentsSection(
+            controller: widget.controller,
+            scanController: _confirmScanController,
+            selectedIds: _selectedPendingIds,
+            onToggleSelected: (shipmentId, selected) {
+              setState(() {
+                if (selected) {
+                  _selectedPendingIds.add(shipmentId);
+                } else {
+                  _selectedPendingIds.remove(shipmentId);
+                }
+              });
+            },
+            onConfirmSelected: () async => _confirmSelected(context),
+            onRejectSelected: () async => _rejectSelected(context),
+            onRejectWithNote: (note) async => _rejectWithNote(context, note),
+          ),
+          const SizedBox(height: 20),
+          const SectionCard(
+            title: 'Мои задачи',
+            child: Text('Пока нет активных задач'),
+          ),
+        ],
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(10),
+      children: [
+        _PendingAssignmentsSection(
+          controller: widget.controller,
+          scanController: _confirmScanController,
+          selectedIds: _selectedPendingIds,
+          onToggleSelected: (shipmentId, selected) {
+            setState(() {
+              if (selected) {
+                _selectedPendingIds.add(shipmentId);
+              } else {
+                _selectedPendingIds.remove(shipmentId);
+              }
+            });
+          },
+          onConfirmSelected: () async => _confirmSelected(context),
+          onRejectSelected: () async => _rejectSelected(context),
+          onRejectWithNote: (note) async => _rejectWithNote(context, note),
+        ),
+        const SizedBox(height: 12),
+        SectionCard(
+          title: 'Мои задачи',
+          dense: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _TasksGroupedByScenario(
+                tasks: widget.controller.tasks,
+                selectedIds: _selectedTaskIds,
+                onToggleSelected: (taskId, selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedTaskIds.add(taskId);
+                    } else {
+                      _selectedTaskIds.remove(taskId);
+                    }
+                  });
+                },
+                onOpenTask: (task) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => TaskDetailsPage(
+                        task: task,
+                        onMarkDropped: (data) => widget.controller.markTaskDropped(
+                          task,
+                          opsStatus: data.status,
+                          note: data.note,
+                          signaturePngBase64: data.signaturePngBase64,
+                          photoBytes: data.photoBytes,
+                          photoFileName: data.photoFileName,
+                        ),
+                        onUndoDrop: task.status == 'dropped'
+                            ? () => widget.controller.undoTaskDrop(task)
+                            : null,
+                        onConfirmPickup: task.assignedByLogistics && !task.pickupConfirmed
+                            ? () => _confirmPickupForTask(context, task)
+                            : null,
+                        onRejectPickup: task.assignedByLogistics && !task.pickupConfirmed
+                            ? () => _rejectPickupForTask(context, task)
+                            : null,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (_selectedTaskIds.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => _transferSelected(context),
+                  icon: const Icon(Icons.handshake),
+                  label: Text('Передать выбранные (${_selectedTaskIds.length})'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _confirmSelected(BuildContext context) async {
+    if (_selectedPendingIds.isEmpty) return;
+    final signature = await showGiverSignatureDialog(context);
+    if (!mounted || signature == null || signature.isEmpty) return;
+    await widget.controller.confirmPendingAssignments(
+      shipmentIds: _selectedPendingIds.toList(),
+      giverSignature: signature,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      setState(() => _selectedPendingIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Забор подтвержден')),
+      );
+    }
+  }
+
+  Future<void> _transferSelected(BuildContext context) async {
+    if (_selectedTaskIds.isEmpty) return;
+    final noteController = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Передать заказы'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Выбранные заказы будут сняты с ваших рук (передача другому лицу). '
+                'Unit не удаляются — их можно снова добавить по скану.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  hintText: 'Комментарий (необязательно)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
+              child: const Text('Передать'),
+            ),
+          ],
+        );
+      },
+    );
+    noteController.dispose();
+    if (!mounted) return;
+
+    final toTransfer = _selectedTaskIds.toList();
+    final count = await widget.controller.removeTasksFromHandsBulk(
+      taskIds: toTransfer,
+      reason: note?.isNotEmpty == true ? note : null,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      setState(() => _selectedTaskIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Передано: $count заказов')),
+      );
+    }
+  }
+
+  Future<void> _confirmPickupForTask(BuildContext context, CourierTask task) async {
+    final shipmentId = task.shipmentId;
+    if (shipmentId == null || shipmentId.isEmpty) return;
+    final signature = await showGiverSignatureDialog(context);
+    if (!mounted || signature == null || signature.isEmpty) return;
+
+    await widget.controller.confirmPendingAssignments(
+      shipmentIds: [shipmentId],
+      giverSignature: signature,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Забор подтвержден: ${task.barcode}')),
+      );
+    }
+  }
+
+  Future<void> _rejectWithNote(BuildContext context, String note) async {
+    if (_selectedPendingIds.isEmpty || note.isEmpty) return;
+    await widget.controller.rejectPendingAssignments(
+      shipmentIds: _selectedPendingIds.toList(),
+      note: note,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      setState(() => _selectedPendingIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Незабор сохранен')),
+      );
+    }
+  }
+
+  Future<void> _rejectPickupForTask(BuildContext context, CourierTask task) async {
+    final shipmentId = task.shipmentId;
+    if (shipmentId == null || shipmentId.isEmpty) return;
+    final noteController = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Незабор'),
+          content: TextField(
+            controller: noteController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Укажите причину незабора',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
+    );
+    noteController.dispose();
+    if (!mounted || note == null || note.isEmpty) return;
+
+    await widget.controller.rejectPendingAssignments(
+      shipmentIds: [shipmentId],
+      note: note,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Незабор сохранен: ${task.barcode}')),
+      );
+    }
+  }
+
+  Future<void> _rejectSelected(BuildContext context) async {
+    if (_selectedPendingIds.isEmpty) return;
+    final noteController = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Незабор'),
+          content: TextField(
+            controller: noteController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Укажите причину незабора',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
+    );
+    noteController.dispose();
+    if (!mounted || note == null || note.isEmpty) return;
+
+    await widget.controller.rejectPendingAssignments(
+      shipmentIds: _selectedPendingIds.toList(),
+      note: note,
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      setState(() => _selectedPendingIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Незабор сохранен')),
+      );
+    }
+  }
+}
+
+class _PendingAssignmentsSection extends StatelessWidget {
+  const _PendingAssignmentsSection({
+    required this.controller,
+    required this.scanController,
+    required this.selectedIds,
+    required this.onToggleSelected,
+    required this.onConfirmSelected,
+    required this.onRejectSelected,
+    required this.onRejectWithNote,
+  });
+
+  final CourierAppController controller;
+  final TextEditingController scanController;
+  final Set<String> selectedIds;
+  final void Function(String shipmentId, bool selected) onToggleSelected;
+  final Future<void> Function() onConfirmSelected;
+  final Future<void> Function() onRejectSelected;
+  final Future<void> Function(String note) onRejectWithNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final assignments = controller.pendingAssignments;
+    final formatter = DateFormat('dd.MM HH:mm');
+    final count = assignments.length;
+    final colorScheme = Theme.of(context).colorScheme;
+    final highlighted = count > 0;
+    return Card(
+      color: highlighted ? colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
+      elevation: highlighted ? 2 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: highlighted
+            ? BorderSide(color: colorScheme.primary.withValues(alpha: 0.6), width: 2)
+            : BorderSide.none,
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: false,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        title: Text(
+          'Задания от логистов — неподтвержденные ($count)',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: highlighted ? FontWeight.bold : null,
+              ),
+        ),
+        subtitle: const Text('Подтвердите забор или укажите незабор с причиной'),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Подтвердите забор сканом или выберите заказы и подтвердите массово.'),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: scanController,
+                  decoration: const InputDecoration(
+                    labelText: 'Скан штрихкода для авто-подтверждения',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) async => _scanConfirm(context),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: () async => _scanConfirm(context),
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('Сканировать и подтвердить'),
+                ),
+                const SizedBox(height: 12),
+                if (assignments.isEmpty)
+                  const Text('Нет неподтвержденных заказов')
+                else
+                  ...assignments.map((assignment) {
+                    final selected = selectedIds.contains(assignment.id);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: selected,
+                            onChanged: (value) => onToggleSelected(
+                              assignment.id,
+                              value ?? false,
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  assignment.barcode,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                Text('Отгружен: ${formatter.format(assignment.outAt.toLocal())}'),
+                                if (assignment.productName != null) Text('Товар: ${assignment.productName}'),
+                                if (assignment.partnerName != null) Text('Партнер: ${assignment.partnerName}'),
+                                if (assignment.scenario != null && assignment.scenario!.isNotEmpty)
+                                  Text('Сценарий: ${assignment.scenario}'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: selectedIds.isEmpty ? null : () async => onConfirmSelected(),
+                        child: Text('Подтвердить забор (${selectedIds.length})'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: selectedIds.isEmpty ? null : () async => onRejectSelected(),
+                        child: Text('Незабор (${selectedIds.length})'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!assignments.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: selectedIds.isEmpty ? null : () async => onRejectWithNote('Данного заказа нет'),
+                    icon: const Icon(Icons.cancel_outlined, size: 18),
+                    label: const Text('Данного заказа нет'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _scanConfirm(BuildContext context) async {
+    final scanned = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => BarcodeScannerSheet(title: 'Сканировать и подтвердить'),
+      ),
+    );
+    if (scanned == null || scanned.isEmpty) return;
+    scanController.text = scanned;
+    final signature = await showGiverSignatureDialog(context);
+    if (!context.mounted || signature == null || signature.isEmpty) return;
+    await controller.scanConfirmAssignment(scanned, giverSignature: signature);
+    if (!context.mounted) return;
+    if (controller.error == null) {
+      scanController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Забор подтвержден сканом: $scanned')),
+      );
+    }
+  }
+}
+
+class _TasksGroupedByScenario extends StatelessWidget {
+  const _TasksGroupedByScenario({
+    required this.tasks,
+    required this.selectedIds,
+    required this.onToggleSelected,
+    required this.onOpenTask,
+  });
+
+  final List<CourierTask> tasks;
+  final Set<String> selectedIds;
+  final void Function(String taskId, bool selected) onToggleSelected;
+  final void Function(CourierTask task) onOpenTask;
+
+  static String _scenarioKey(CourierTask t) =>
+      (t.scenario ?? '').trim().isEmpty ? 'Без сценария' : (t.scenario ?? '').trim();
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = <String, List<CourierTask>>{};
+    for (final task in tasks) {
+      groups.putIfAbsent(_scenarioKey(task), () => []).add(task);
+    }
+    final sortedKeys = groups.keys.toList()..sort((a, b) {
+        if (a == 'Без сценария') return 1;
+        if (b == 'Без сценария') return -1;
+        return a.compareTo(b);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final scenarioKey in sortedKeys) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(
+              scenarioKey,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+            ),
+          ),
+          ...groups[scenarioKey]!.map(
+            (task) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _TaskCard(
+                task: task,
+                selected: selectedIds.contains(task.id),
+                onToggleSelected: (selected) => onToggleSelected(task.id, selected),
+                onOpen: () => onOpenTask(task),
+                dense: true,
+              ),
+            ),
+          ),
+          if (scenarioKey != sortedKeys.last) const SizedBox(height: 6),
+        ],
+      ],
+    );
+  }
+}
+
+class _TaskCard extends StatelessWidget {
+  const _TaskCard({
+    required this.task,
+    required this.selected,
+    required this.onToggleSelected,
+    required this.onOpen,
+    this.dense = false,
+  });
+
+  final CourierTask task;
+  final bool selected;
+  final void Function(bool) onToggleSelected;
+  final VoidCallback onOpen;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final formatter = DateFormat('dd.MM HH:mm');
+    final theme = Theme.of(context);
+    final smallStyle = theme.textTheme.bodySmall?.copyWith(fontSize: 12);
+    final showNotPicked = task.assignedByLogistics && !task.pickupConfirmed;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Checkbox(
+            value: selected,
+            onChanged: (value) => onToggleSelected(value ?? false),
+          ),
+        ),
+        Expanded(
+          child: SectionCard(
+            title: task.barcode,
+            action: StatusChip(
+              status: task.status,
+              label: showNotPicked ? 'НЕ ЗАБРАН' : null,
+              color: showNotPicked ? Colors.red.shade700 : null,
+            ),
+            dense: dense,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (task.assignedByLogistics)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: dense ? 2 : 4),
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: dense ? 6 : 8, vertical: dense ? 2 : 3),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Назначено логистом${task.assignedCourierName != null ? ': ${task.assignedCourierName}' : ''}',
+                        style: smallStyle,
+                      ),
+                    ),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 0,
+                  children: [
+                    if (task.productName != null)
+                      Text('${task.productName}', style: smallStyle),
+                    if (task.partnerName != null)
+                      Text('• ${task.partnerName}', style: smallStyle),
+                    if (task.scenario != null && task.scenario!.isNotEmpty)
+                      Text('• ${task.scenario}', style: smallStyle),
+                  ],
+                ),
+                if ((task.productName != null || task.partnerName != null || (task.scenario != null && task.scenario!.isNotEmpty))) const SizedBox(height: 2),
+                Text('Взято: ${formatter.format(task.claimedAt.toLocal())}', style: smallStyle),
+                SizedBox(height: dense ? 4 : 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.tonal(
+                    onPressed: onOpen,
+                    style: dense
+                        ? FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          )
+                        : null,
+                    child: const Text('Открыть'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+

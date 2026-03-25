@@ -1,6 +1,6 @@
 import { ButtonHTMLAttributes, ReactNode, CSSProperties } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "accent" | "accentOutline";
 type ButtonSize = "sm" | "md" | "lg";
 
 interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> {
@@ -18,6 +18,7 @@ export function Button({
   children,
   disabled,
   className = "",
+  style,
   ...props
 }: ButtonProps) {
   const baseStyles = {
@@ -55,6 +56,16 @@ export function Button({
       background: disabled ? "var(--color-bg-tertiary)" : "var(--color-danger)",
       color: disabled ? "var(--color-text-tertiary)" : "#ffffff",
     },
+    accent: {
+      background: disabled ? "var(--color-bg-tertiary)" : "#7c3aed",
+      color: disabled ? "var(--color-text-tertiary)" : "#ffffff",
+      boxShadow: disabled ? "none" : "var(--shadow-sm)",
+    },
+    accentOutline: {
+      background: disabled ? "var(--color-bg-tertiary)" : "#f5f3ff",
+      color: disabled ? "var(--color-text-tertiary)" : "#5b21b6",
+      border: "2px solid #7c3aed",
+    },
   };
 
   const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
@@ -83,7 +94,16 @@ export function Button({
         ? { background: "var(--color-bg-tertiary)" }
         : variant === "danger"
           ? { background: "#b91c1c", transform: "translateY(-1px)", boxShadow: "var(--shadow-md)" }
-          : { background: "var(--color-bg-tertiary)", borderColor: "var(--color-text-tertiary)" };
+          : variant === "accent"
+            ? { background: "#6d28d9", transform: "translateY(-1px)", boxShadow: "var(--shadow-md)" }
+            : variant === "accentOutline"
+              ? {
+                  background: "#ede9fe",
+                  borderColor: "#6d28d9",
+                  transform: "translateY(-1px)",
+                  boxShadow: "var(--shadow-sm)",
+                }
+              : { background: "var(--color-bg-tertiary)", borderColor: "var(--color-text-tertiary)" };
 
   return (
     <button
@@ -94,6 +114,7 @@ export function Button({
         ...baseStyles,
         ...variantStyles[variant],
         ...sizeStyles[size],
+        ...style,
       }}
       onMouseEnter={(e) => {
         if (!disabled) {

@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
 import { Alert, Button } from "@/lib/ui/components";
+import { TsdCameraScanButton } from "./TsdCameraScanButton";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 // ⚡ Force dynamic for real-time TSD operations
@@ -33,8 +35,56 @@ type UnitInfo = {
   };
 };
 
+type CourierHandoverItem = {
+  handover_item_id: string;
+  task_id: string | null;
+  unit_id: string;
+  unit_barcode: string;
+  current_status: string | null;
+  current_cell_id: string | null;
+  condition_status: string | null;
+  source_kind: "expected" | "extra";
+  workflow_status: "pending" | "received" | "lost";
+  received_at: string | null;
+  received_by: string | null;
+  received_via: "courier_receiving" | "regular_receiving" | null;
+  lost_at: string | null;
+  lost_by: string | null;
+};
+
+type CourierHandoverSession = {
+  handover_session_id: string;
+  shift_id: string | null;
+  courier_user_id: string;
+  courier_name: string;
+  status: string | null;
+  started_at: string | null;
+  confirmed_at: string | null;
+  receiver_user_id: string | null;
+  note: string | null;
+  expected_total: number;
+  received_total: number;
+  remaining_total: number;
+  lost_total: number;
+  extra_total: number;
+  remaining_items: CourierHandoverItem[];
+  received_items: CourierHandoverItem[];
+  extra_items: CourierHandoverItem[];
+  lost_items: CourierHandoverItem[];
+};
+
+type CourierLostItem = CourierHandoverItem & {
+  courier_user_id: string;
+  courier_name: string;
+  handover_session_id: string;
+  shift_id: string | null;
+  handover_confirmed_at: string | null;
+};
+
 type Mode =
   | "receiving"
+  | "courier_receiving"
+  | "courier_lost"
   | "moving"
   | "inventory"
   | "shipping"
@@ -60,15 +110,17 @@ export default function TsdPage() {
   // Для режима Приемка
   const [binCell, setBinCell] = useState<CellInfo | null>(null);
   const [lastReceivedUnit, setLastReceivedUnit] = useState<{ barcode: string; binCode: string } | null>(null);
-  const [courierReturnGroups, setCourierReturnGroups] = useState<Array<{
-    courier_user_id: string;
-    courier_name: string;
-    handover_session_id: string;
-    handover_confirmed_at: string | null;
-    total_units: number;
-    items: Array<{ unit_barcode: string; unit_id: string }>;
-  }>>([]);
-  const [loadingCourierReturns, setLoadingCourierReturns] = useState(false);
+  const [courierReceivingBinCell, setCourierReceivingBinCell] = useState<CellInfo | null>(null);
+  const [lastCourierReceivedUnit, setLastCourierReceivedUnit] = useState<{
+    barcode: string;
+    binCode: string;
+    itemKind: "expected" | "extra";
+  } | null>(null);
+  const [courierHandovers, setCourierHandovers] = useState<CourierHandoverSession[]>([]);
+  const [selectedCourierHandoverId, setSelectedCourierHandoverId] = useState<string | null>(null);
+  const [loadingCourierHandovers, setLoadingCourierHandovers] = useState(false);
+  const [courierLostItems, setCourierLostItems] = useState<CourierLostItem[]>([]);
+  const [loadingCourierLostItems, setLoadingCourierLostItems] = useState(false);
   
   // Для режима Перемещение
   const [fromCell, setFromCell] = useState<CellInfo | null>(null);
@@ -95,7 +147,7 @@ export default function TsdPage() {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [selectedFromCellStep, setSelectedFromCellStep] = useState<any | null>(null); // Выбранная ячейка для сбора
   
-  // Для режима Отгрузка (НОВАЯ) - с группировкой по picking ячейкам
+  // Для режима Отгрузка (shipping_new) - с группировкой по picking ячейкам
   const [shippingNewTasks, setShippingNewTasks] = useState<any[]>([]);
   const [shippingNewCells, setShippingNewCells] = useState<Map<string, { code: string; description?: string; meta?: any }>>(new Map());
   const [shippingNewGrouped, setShippingNewGrouped] = useState<Map<string, any[]>>(new Map());
@@ -109,7 +161,7 @@ export default function TsdPage() {
   const [shippingNewToCell, setShippingNewToCell] = useState<CellInfo | null>(null); // TO ячейка (picking)
   const [shippingNewAllUnits, setShippingNewAllUnits] = useState<UnitInfo[]>([]); // Все заказы из всех задач
   
-  // Для режима Отгрузка (FCUTC) - последовательное сканирование
+  // Для режима Отгрузка поштучная (shipping_fcutc) - последовательное сканирование
   const [fcutcFromCell, setFcutcFromCell] = useState<CellInfo | null>(null);
   const [fcutcUnit, setFcutcUnit] = useState<UnitInfo | null>(null);
   const [fcutcTaskInfo, setFcutcTaskInfo] = useState<{
@@ -131,7 +183,9 @@ export default function TsdPage() {
   const [infoOps, setInfoOps] = useState<{ ops_status?: string; ops_status_label?: string; scenario?: string } | null>(null);
   const [infoHistory, setInfoHistory] = useState<any[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
-  
+  /** Краткая зелёная/красная подсветка поля скана после Enter (все режимы). */
+  const [scanFlash, setScanFlash] = useState<"success" | "error" | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [opsHint, setOpsHint] = useState<string | null>(null);
@@ -140,6 +194,7 @@ export default function TsdPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const successSoundRef = useRef<HTMLAudioElement | null>(null);
   const lastScanAtRef = useRef<number>(0);
+  const scanFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const playSuccessSound = useCallback(() => {
     if (typeof Audio === "undefined") return;
@@ -166,6 +221,47 @@ export default function TsdPage() {
       playSuccessSound();
     }
   }, [success, playSuccessSound]);
+
+  const triggerScanFlash = useCallback((kind: "success" | "error") => {
+    if (scanFlashTimerRef.current) {
+      clearTimeout(scanFlashTimerRef.current);
+      scanFlashTimerRef.current = null;
+    }
+    setScanFlash(kind);
+    scanFlashTimerRef.current = setTimeout(() => {
+      setScanFlash(null);
+      scanFlashTimerRef.current = null;
+    }, 700);
+  }, []);
+
+  useEffect(() => {
+    if (scanFlashTimerRef.current) {
+      clearTimeout(scanFlashTimerRef.current);
+      scanFlashTimerRef.current = null;
+    }
+    setScanFlash(null);
+  }, [mode]);
+
+  /** Краткое свечение активной кнопки режима при ответе скана (как у поля ввода). */
+  const modeButtonScanGlow = useCallback(
+    (forMode: Mode): CSSProperties | undefined => {
+      if (mode !== forMode || !scanFlash) return undefined;
+      const transition = "box-shadow 0.35s ease-out";
+      if (scanFlash === "success") {
+        return {
+          boxShadow:
+            "0 0 0 3px rgba(34, 197, 94, 0.5), 0 0 20px rgba(34, 197, 94, 0.3)",
+          transition,
+        };
+      }
+      return {
+        boxShadow:
+          "0 0 0 3px rgba(239, 68, 68, 0.48), 0 0 18px rgba(239, 68, 68, 0.26)",
+        transition,
+      };
+    },
+    [mode, scanFlash],
+  );
 
   useEffect(() => {
     async function loadRole() {
@@ -203,7 +299,13 @@ export default function TsdPage() {
   }, [isHubWorker, hubDestinationId]);
 
   useEffect(() => {
-    if (isHubWorker && mode !== "receiving" && mode !== "hub_shipping") {
+    if (
+      isHubWorker &&
+      mode !== "receiving" &&
+      mode !== "courier_receiving" &&
+      mode !== "courier_lost" &&
+      mode !== "hub_shipping"
+    ) {
       setMode("receiving");
     }
   }, [isHubWorker, mode]);
@@ -246,7 +348,7 @@ export default function TsdPage() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-  }, [binCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell, selectedFromCellStep, busy, fcutcFromCell, fcutcUnit, fcutcTaskInfo, fcutcToCell]);
+  }, [binCell, courierReceivingBinCell, fromCell, units, toCell, error, success, mode, inventoryCell, scannedBarcodes, shippingFromCell, shippingUnits, shippingToCell, selectedFromCellStep, busy, fcutcFromCell, fcutcUnit, fcutcTaskInfo, fcutcToCell]);
   
   // Load shipping tasks when mode is shipping
   useEffect(() => {
@@ -262,47 +364,72 @@ export default function TsdPage() {
     }
   }, [mode]);
 
-  // Load courier return groups when in receiving mode (курьеры на приёмке)
-  async function loadCourierReturns() {
-    setLoadingCourierReturns(true);
+  async function loadCourierHandovers(preferredHandoverId?: string | null) {
+    setLoadingCourierHandovers(true);
     try {
-      const res = await fetch("/api/ops/courier-returns", { cache: "no-store" });
+      const res = await fetch("/api/ops/courier-handovers", { cache: "no-store" });
       const payload = (await res.json().catch(() => null)) as
-        | { ok?: boolean; pending_groups?: Array<{
-            courier_user_id: string;
-            courier_name: string;
-            handover_session_id: string;
-            handover_confirmed_at?: string | null;
-            total_units?: number;
-            items?: Array<{ unit_barcode?: string; unit_id: string }>;
-          }> }
+        | { ok?: boolean; handovers?: CourierHandoverSession[] }
         | null;
-      if (res.ok && payload?.ok && Array.isArray(payload.pending_groups)) {
-        setCourierReturnGroups(
-          payload.pending_groups.map((g) => ({
-            courier_user_id: g.courier_user_id,
-            courier_name: g.courier_name,
-            handover_session_id: g.handover_session_id,
-            handover_confirmed_at: g.handover_confirmed_at ?? null,
-            total_units: g.total_units ?? g.items?.length ?? 0,
-            items: (g.items || []).map((i) => ({
-              unit_barcode: i.unit_barcode || i.unit_id,
-              unit_id: i.unit_id,
-            })),
-          }))
-        );
+
+      if (res.ok && payload?.ok && Array.isArray(payload.handovers)) {
+        setCourierHandovers(payload.handovers);
+        const nextSelectedId =
+          (preferredHandoverId &&
+            payload.handovers.some((handover) => handover.handover_session_id === preferredHandoverId)
+              ? preferredHandoverId
+              : null) ||
+          (selectedCourierHandoverId &&
+            payload.handovers.some((handover) => handover.handover_session_id === selectedCourierHandoverId)
+              ? selectedCourierHandoverId
+              : null) ||
+          payload.handovers[0]?.handover_session_id ||
+          null;
+        setSelectedCourierHandoverId(nextSelectedId);
       } else {
-        setCourierReturnGroups([]);
+        setCourierHandovers([]);
+        setSelectedCourierHandoverId(null);
       }
     } catch {
-      setCourierReturnGroups([]);
+      setCourierHandovers([]);
+      setSelectedCourierHandoverId(null);
     } finally {
-      setLoadingCourierReturns(false);
+      setLoadingCourierHandovers(false);
     }
   }
+
+  async function loadCourierLostItems() {
+    setLoadingCourierLostItems(true);
+    try {
+      const res = await fetch("/api/ops/courier-handovers/lost", { cache: "no-store" });
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; lost_items?: CourierLostItem[] }
+        | null;
+      if (res.ok && payload?.ok && Array.isArray(payload.lost_items)) {
+        setCourierLostItems(payload.lost_items);
+      } else {
+        setCourierLostItems([]);
+      }
+    } catch {
+      setCourierLostItems([]);
+    } finally {
+      setLoadingCourierLostItems(false);
+    }
+  }
+
+  const selectedCourierHandover = useMemo(
+    () =>
+      courierHandovers.find(
+        (handover) => handover.handover_session_id === selectedCourierHandoverId,
+      ) || null,
+    [courierHandovers, selectedCourierHandoverId],
+  );
+
   useEffect(() => {
-    if (mode === "receiving") {
-      loadCourierReturns();
+    if (mode === "courier_receiving") {
+      loadCourierHandovers();
+    } else if (mode === "courier_lost") {
+      loadCourierLostItems();
     }
   }, [mode]);
   
@@ -501,8 +628,12 @@ export default function TsdPage() {
   }
   
   // Обработка сканирования в новом режиме
-  async function handleShippingNewScan(scanValue: string) {
+  async function handleShippingNewScan(line: string) {
+    const trimmed = line.trim();
+    setScanValue(trimmed);
+
     if (!currentTaskNew) {
+      triggerScanFlash("error");
       setError("Сначала выберите задачу из списка");
       setScanValue("");
       return;
@@ -513,8 +644,9 @@ export default function TsdPage() {
     setBusy(true);
     
     try {
-      const parsed = parseScan(scanValue);
+      const parsed = parseScan(trimmed);
       if (!parsed) {
+        triggerScanFlash("error");
         setError("Некорректный скан");
         setScanValue("");
         return;
@@ -533,6 +665,7 @@ export default function TsdPage() {
         
         if (cellCode.toUpperCase() === currentTaskNew.targetCell.code.toUpperCase()) {
           if (!allFromCellsCompleted) {
+            triggerScanFlash("error");
             setError("Сначала завершите сбор из всех from-ячеек");
             setScanValue("");
             return;
@@ -543,6 +676,7 @@ export default function TsdPage() {
           setScanValue("");
           return;
         } else {
+          triggerScanFlash("error");
           setError(`Ожидается ячейка ${currentTaskNew.targetCell.code}, отсканирована ${cellCode}`);
           setScanValue("");
           return;
@@ -551,6 +685,7 @@ export default function TsdPage() {
       
       // Сканирование заказа - проверяем, что from-ячейка выбрана
       if (!shippingNewSelectedFromCell) {
+        triggerScanFlash("error");
         setError("Сначала выберите from-ячейку для сбора");
         setScanValue("");
         return;
@@ -561,6 +696,7 @@ export default function TsdPage() {
       // Проверяем, что заказ из выбранной from-ячейки
       const unit = shippingNewSelectedFromCell.units.find((u: any) => u.barcode === barcode);
       if (!unit) {
+        triggerScanFlash("error");
         setError(`Заказ ${barcode} не найден в ячейке ${shippingNewSelectedFromCell.code}`);
         setScanValue("");
         return;
@@ -568,6 +704,7 @@ export default function TsdPage() {
       
       // Проверяем, не отсканирован ли уже
       if (shippingNewScannedUnits.some((u) => u.barcode === barcode)) {
+        triggerScanFlash("error");
         setError(`Заказ ${barcode} уже отсканирован`);
         setScanValue("");
         return;
@@ -621,12 +758,14 @@ export default function TsdPage() {
       } else {
         setSuccess(`✓ ${barcode} перемещен в ${currentTaskNew.targetCell.code} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
       }
+      triggerScanFlash("success");
       showOpsHintForUnit(barcode);
 
       loadShippingNewTasks();
       
       setScanValue("");
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
       setScanValue("");
     } finally {
@@ -637,12 +776,14 @@ export default function TsdPage() {
   // Завершение задачи (после сканирования TO ячейки)
   async function handleCompleteShippingNewTask(toCellCode: string) {
     if (!currentTaskNew) {
+      triggerScanFlash("error");
       setError("Нет активной задачи");
       return;
     }
     
     // Проверяем, что все заказы отсканированы
     if (shippingNewScannedUnits.length < shippingNewAllUnits.length) {
+      triggerScanFlash("error");
       setError(`Отсканировано ${shippingNewScannedUnits.length} из ${shippingNewAllUnits.length} заказов`);
       return;
     }
@@ -655,6 +796,7 @@ export default function TsdPage() {
       // Получаем информацию о TO ячейке
       const toCellInfo = await loadCellInfo(toCellCode);
       if (!toCellInfo || toCellInfo.cell_type !== "picking") {
+        triggerScanFlash("error");
         setError(`Ячейка ${toCellCode} не является picking ячейкой`);
         return;
       }
@@ -687,6 +829,7 @@ export default function TsdPage() {
       }
       
       setSuccess(`✅ Задача завершена! ${shippingNewScannedUnits.length} заказов перемещено в ${toCellCode}`);
+      triggerScanFlash("success");
       
       // Сброс состояния
       setTimeout(() => {
@@ -699,6 +842,7 @@ export default function TsdPage() {
         loadShippingNewTasks(); // Обновить список задач
       }, 2000);
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка завершения задачи");
     } finally {
       setBusy(false);
@@ -950,6 +1094,8 @@ export default function TsdPage() {
       }
       if (mode === "receiving") {
         handleReceivingScan();
+      } else if (mode === "courier_receiving") {
+        handleCourierReceivingScan();
       } else if (mode === "moving") {
         handleMovingScan();
       } else if (mode === "inventory") {
@@ -999,6 +1145,15 @@ export default function TsdPage() {
     return null;
   }
 
+  /** Строка для парсинга: при скане с камеры подставляем в поле и в ту же логику, что и Enter. */
+  function scanSourceForSubmit(overrideRaw?: string): string {
+    const source = (overrideRaw !== undefined ? overrideRaw : scanValue).trim();
+    if (overrideRaw !== undefined) {
+      setScanValue(source);
+    }
+    return source;
+  }
+
   // Загрузка информации о ячейке
   async function loadCellInfo(code: string): Promise<CellInfo | null> {
     try {
@@ -1044,13 +1199,15 @@ export default function TsdPage() {
     }
   }
 
-  async function handleHubShippingScan() {
+  async function handleHubShippingScan(overrideRaw?: string) {
     if (busy) return;
     setError(null);
     setSuccess(null);
 
-    const parsed = parseScan(scanValue);
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed || parsed.type !== "unit") {
+      triggerScanFlash("error");
       setError("Сканируйте штрихкод заказа");
       setScanValue("");
       return;
@@ -1060,25 +1217,30 @@ export default function TsdPage() {
     try {
       const unitInfo = await loadUnitInfo(parsed.code);
       if (!unitInfo) {
+        triggerScanFlash("error");
         setError("Заказ не найден");
         return;
       }
 
       if (!unitInfo.cell || unitInfo.cell.cell_type !== "bin") {
+        triggerScanFlash("error");
         setError("Отправка разрешена только из BIN");
         return;
       }
 
       const alreadyAdded = hubScannedUnits.some((u) => u.id === unitInfo.id);
       if (alreadyAdded) {
+        triggerScanFlash("error");
         setError("Заказ уже добавлен в список");
         return;
       }
 
       setHubScannedUnits((prev) => [...prev, unitInfo]);
       setSuccess(`Добавлено: ${unitInfo.barcode}`);
+      triggerScanFlash("success");
       setScanValue("");
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e?.message || "Ошибка отправки");
     } finally {
       setBusy(false);
@@ -1168,9 +1330,11 @@ export default function TsdPage() {
   // ============================================
   // РЕЖИМ ПРИЕМКА
   // ============================================
-  async function handleReceivingScan() {
-    const parsed = parseScan(scanValue);
+  async function handleReceivingScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
@@ -1185,12 +1349,14 @@ export default function TsdPage() {
         // Это BIN-ячейка (приемка у курьера — только BIN)
         const cellInfo = await loadCellInfo(parsed.code);
         if (!cellInfo) {
+          triggerScanFlash("error");
           setError(`Ячейка "${parsed.code}" не найдена`);
           setScanValue("");
           return;
         }
 
         if (cellInfo.cell_type !== "bin") {
+          triggerScanFlash("error");
           setError(`Ячейка "${parsed.code}" не является BIN. Приемка только в BIN ячейки.`);
           setScanValue("");
           return;
@@ -1198,10 +1364,12 @@ export default function TsdPage() {
 
         setBinCell(cellInfo);
         setSuccess(`${cellInfo.cell_type.toUpperCase()}: ${cellInfo.code}`);
+        triggerScanFlash("success");
         setScanValue("");
       } else {
         // Это штрихкод unit
         if (!binCell) {
+          triggerScanFlash("error");
           setError("Сначала отсканируйте BIN ячейку");
           setScanValue("");
           return;
@@ -1231,13 +1399,152 @@ export default function TsdPage() {
         setSuccess(`${parsed.code} -> ${binCell.code} OK`);
         showOpsHintForUnit(parsed.code);
         setLastReceivedUnit({ barcode: parsed.code, binCode: binCell.code });
+        triggerScanFlash("success");
         setScanValue("");
-        loadCourierReturns(); // Обновить список курьеров (принятый заказ мог быть из handover)
         // BIN остаётся выбранным для приёма пачки
       }
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
       setScanValue("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCourierReceivingScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
+    if (!parsed) {
+      triggerScanFlash("error");
+      setError("Некорректный скан");
+      setScanValue("");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+
+    try {
+      if (parsed.type === "cell") {
+        const cellInfo = await loadCellInfo(parsed.code);
+        if (!cellInfo) {
+          triggerScanFlash("error");
+          setError(`Ячейка "${parsed.code}" не найдена`);
+          setScanValue("");
+          return;
+        }
+
+        if (cellInfo.cell_type !== "bin") {
+          triggerScanFlash("error");
+          setError(`Ячейка "${parsed.code}" не является BIN. Приемка курьера работает только с BIN.`);
+          setScanValue("");
+          return;
+        }
+
+        setCourierReceivingBinCell(cellInfo);
+        setSuccess(`${cellInfo.cell_type.toUpperCase()}: ${cellInfo.code}`);
+        triggerScanFlash("success");
+        setScanValue("");
+        return;
+      }
+
+      if (!selectedCourierHandover) {
+        triggerScanFlash("error");
+        setError("Сначала выберите курьера из списка");
+        setScanValue("");
+        return;
+      }
+
+      if (!courierReceivingBinCell) {
+        triggerScanFlash("error");
+        setError("Сначала отсканируйте BIN ячейку");
+        setScanValue("");
+        return;
+      }
+
+      const res = await fetch("/api/ops/courier-handovers/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          handoverId: selectedCourierHandover.handover_session_id,
+          cellCode: courierReceivingBinCell.code,
+          unitBarcode: parsed.code,
+        }),
+      });
+
+      const rawText = await res.text().catch(() => "");
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch {}
+
+      if (!res.ok) {
+        throw new Error(json?.error || rawText || "Ошибка приемки курьера");
+      }
+
+      const itemKind = json?.item_kind === "extra" ? "extra" : "expected";
+      setLastCourierReceivedUnit({
+        barcode: parsed.code,
+        binCode: courierReceivingBinCell.code,
+        itemKind,
+      });
+      setSuccess(
+        itemKind === "extra"
+          ? `${parsed.code} принято как вне рейса`
+          : `${parsed.code} принято от курьера`,
+      );
+      triggerScanFlash("success");
+      setScanValue("");
+      await loadCourierHandovers(selectedCourierHandover.handover_session_id);
+    } catch (e: any) {
+      triggerScanFlash("error");
+      setError(e.message || "Ошибка приемки курьера");
+      setScanValue("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCloseCourierHandover() {
+    if (!selectedCourierHandover) {
+      setError("Нет выбранной приемки курьера");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch("/api/ops/courier-handovers/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          handoverId: selectedCourierHandover.handover_session_id,
+        }),
+      });
+
+      const rawText = await res.text().catch(() => "");
+      let json: any = null;
+      try {
+        json = rawText ? JSON.parse(rawText) : null;
+      } catch {}
+
+      if (!res.ok) {
+        throw new Error(json?.error || rawText || "Не удалось закрыть приемку курьера");
+      }
+
+      const summary = json?.summary || {};
+      setSuccess(
+        `Приемка закрыта. Принято: ${summary.received_total || 0}, ` +
+          `потеряно: ${summary.lost_total || 0}, вне рейса: ${summary.extra_total || 0}`,
+      );
+      setLastCourierReceivedUnit(null);
+      await Promise.all([loadCourierHandovers(), loadCourierLostItems()]);
+    } catch (e: any) {
+      setError(e.message || "Не удалось закрыть приемку курьера");
     } finally {
       setBusy(false);
     }
@@ -1246,9 +1553,11 @@ export default function TsdPage() {
   // ============================================
   // РЕЖИМ ПЕРЕМЕЩЕНИЕ
   // ============================================
-  async function handleMovingScan() {
-    const parsed = parseScan(scanValue);
+  async function handleMovingScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
@@ -1263,6 +1572,7 @@ export default function TsdPage() {
         // Это ячейка
         const cellInfo = await loadCellInfo(parsed.code);
         if (!cellInfo) {
+          triggerScanFlash("error");
           setError(`Ячейка "${parsed.code}" не найдена`);
           setScanValue("");
           return;
@@ -1274,6 +1584,7 @@ export default function TsdPage() {
           // ⭐ НОВАЯ ПРОВЕРКА: FROM может быть только bin, storage, shipping, rejected, ff
           const allowedFromTypes = ['bin', 'storage', 'shipping', 'picking', 'rejected', 'ff'];
           if (!allowedFromTypes.includes(cellInfo.cell_type)) {
+            triggerScanFlash("error");
             setError(`Перемещение из ячейки типа "${cellInfo.cell_type.toUpperCase()}" не разрешено. Доступны: BIN, STORAGE, SHIPPING, PICKING, REJECTED, FF`);
             setScanValue("");
             return;
@@ -1281,10 +1592,12 @@ export default function TsdPage() {
 
           setFromCell(cellInfo);
           setSuccess(`FROM: ${cellInfo.code} (${cellInfo.cell_type})`);
+          triggerScanFlash("success");
         } else {
           // Второй скан ячейки - TO
           // Должен быть хотя бы один отсканированный заказ
           if (units.length === 0) {
+            triggerScanFlash("error");
             setError("Сначала отсканируйте хотя бы один заказ");
             setScanValue("");
             return;
@@ -1293,6 +1606,7 @@ export default function TsdPage() {
           // ⭐ НОВАЯ ПРОВЕРКА: проверяем матрицу разрешенных перемещений
           const isValidMove = validateMove(fromCell.cell_type, cellInfo.cell_type);
           if (!isValidMove.valid) {
+            triggerScanFlash("error");
             setError(isValidMove.error || "Перемещение запрещено");
             setScanValue("");
             return;
@@ -1300,6 +1614,7 @@ export default function TsdPage() {
 
           setToCell(cellInfo);
           setSuccess(`TO: ${cellInfo.code} (${cellInfo.cell_type})`);
+          triggerScanFlash("success");
 
           // Автоматически выполняем массовое перемещение (передаем toCell напрямую)
           executeMove(cellInfo);
@@ -1307,6 +1622,7 @@ export default function TsdPage() {
       } else {
         // Это unit barcode
         if (!fromCell) {
+          triggerScanFlash("error");
           setError("Сначала отсканируйте FROM ячейку");
           setScanValue("");
           return;
@@ -1314,6 +1630,7 @@ export default function TsdPage() {
 
         // Проверяем, не отсканирован ли уже этот заказ (дубликат)
         if (units.some(u => u.barcode === parsed.code)) {
+          triggerScanFlash("error");
           setError(`Заказ ${parsed.code} уже отсканирован (дубликат)`);
           setScanValue("");
           return;
@@ -1321,6 +1638,7 @@ export default function TsdPage() {
 
         const unitInfo = await loadUnitInfo(parsed.code);
         if (!unitInfo) {
+          triggerScanFlash("error");
           setError(`Заказ "${parsed.code}" не найден в системе`);
           setScanValue("");
           return;
@@ -1330,6 +1648,7 @@ export default function TsdPage() {
         if (fromCell.cell_type === 'bin') {
           // Проверка 1: заказ должен быть в конкретной FROM ячейке
           if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            triggerScanFlash("error");
             setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
             setScanValue("");
             return;
@@ -1338,6 +1657,7 @@ export default function TsdPage() {
           // Проверка 2: заказ НЕ должен быть в storage/shipping/picking
           const forbiddenTypes = ['storage', 'shipping', 'picking'];
           if (unitInfo.cell && forbiddenTypes.includes(unitInfo.cell.cell_type)) {
+            triggerScanFlash("error");
             setError(`Заказ ${parsed.code} находится в ячейке типа ${unitInfo.cell.cell_type.toUpperCase()}. Можно перемещать только из BIN`);
             setScanValue("");
             return;
@@ -1347,6 +1667,7 @@ export default function TsdPage() {
         // ⭐ ПРОВЕРКИ для FROM = REJECTED
         if (fromCell.cell_type === 'rejected') {
           if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            triggerScanFlash("error");
             setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
             setScanValue("");
             return;
@@ -1356,6 +1677,7 @@ export default function TsdPage() {
         // ⭐ ПРОВЕРКИ для FROM = FF
         if (fromCell.cell_type === 'ff') {
           if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            triggerScanFlash("error");
             setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
             setScanValue("");
             return;
@@ -1365,6 +1687,7 @@ export default function TsdPage() {
         // ⭐ ПРОВЕРКИ для FROM = PICKING (возврат в BIN)
         if (fromCell.cell_type === 'picking') {
           if (!unitInfo.cell || unitInfo.cell.id !== fromCell.id) {
+            triggerScanFlash("error");
             setError(`Заказ ${parsed.code} не находится в ячейке ${fromCell.code}`);
             setScanValue("");
             return;
@@ -1374,9 +1697,11 @@ export default function TsdPage() {
         // Добавляем в массив
         setUnits([...units, unitInfo]);
         setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${units.length + 1})`);
+        triggerScanFlash("success");
         showOpsHintForUnit(unitInfo.barcode);
       }
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
     } finally {
       setBusy(false);
@@ -1556,21 +1881,25 @@ export default function TsdPage() {
   }
 
   // Обработка скана в режиме инвентаризации
-  async function handleInventoryScan() {
+  async function handleInventoryScan(overrideRaw?: string) {
     if (!inventoryActive) {
+      triggerScanFlash("error");
       setError("Инвентаризация не активна");
       setScanValue("");
       return;
     }
 
     if (!inventoryCell || !currentInventoryTask) {
+      triggerScanFlash("error");
       setError("Сначала выберите ячейку из списка заданий");
       setScanValue("");
       return;
     }
 
-    const parsed = parseScan(scanValue);
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
@@ -1582,6 +1911,7 @@ export default function TsdPage() {
     // Только сканирование unit barcode (ячейка уже выбрана из списка)
     const barcode = parsed.code;
     if (scannedBarcodes.includes(barcode)) {
+      triggerScanFlash("error");
       setError(`Штрихкод "${barcode}" уже добавлен`);
       setScanValue("");
       return;
@@ -1589,6 +1919,7 @@ export default function TsdPage() {
 
     setScannedBarcodes([...scannedBarcodes, barcode]);
     setSuccess(`Добавлен: ${barcode} (всего: ${scannedBarcodes.length + 1})`);
+    triggerScanFlash("success");
     setScanValue("");
   }
 
@@ -1669,18 +2000,21 @@ export default function TsdPage() {
   }
 
   // Обработка сканирования для режима Shipping (логика с ручным выбором ячейки)
-  async function handleShippingScan() {
-    if (!scanValue.trim()) return;
+  async function handleShippingScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    if (!source) return;
 
     // Проверка наличия активной задачи
     if (!currentTask || shippingSteps.length === 0) {
+      triggerScanFlash("error");
       setError("Сначала выберите задание из списка");
       setScanValue("");
       return;
     }
 
-    const parsed = parseScan(scanValue.trim());
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Не удалось распознать сканирование");
       setScanValue("");
       return;
@@ -1701,6 +2035,7 @@ export default function TsdPage() {
         if (parsed.type === "cell") {
           const cellInfo = await loadCellInfo(parsed.code);
           if (!cellInfo) {
+            triggerScanFlash("error");
             setError(`Ячейка "${parsed.code}" не найдена`);
             setScanValue("");
             setBusy(false);
@@ -1709,6 +2044,7 @@ export default function TsdPage() {
           
           // Проверка что это целевая picking-ячейка
           if (!currentTask.targetCell || cellInfo.id !== currentTask.targetCell.id) {
+            triggerScanFlash("error");
             setError(`TO ячейка должна быть ${currentTask.targetCell?.code || 'picking из задания'}`);
             setScanValue("");
             setBusy(false);
@@ -1716,6 +2052,7 @@ export default function TsdPage() {
           }
           
           if (cellInfo.cell_type !== "picking") {
+            triggerScanFlash("error");
             setError(`TO ячейка должна быть picking, а не ${cellInfo.cell_type}`);
             setScanValue("");
             setBusy(false);
@@ -1724,10 +2061,12 @@ export default function TsdPage() {
           
           setShippingToCell(cellInfo);
           setSuccess(`✓ Picking: ${cellInfo.code}. Перемещение всех заказов...`);
+          triggerScanFlash("success");
           
           // Выполняем массовое перемещение всех собранных заказов
           handleCompleteShippingTaskStepBased(cellInfo);
         } else {
+          triggerScanFlash("error");
           setError("Отсканируйте TO ячейку (picking). Все заказы собраны, осталось переместить их в picking.");
           setScanValue("");
           setBusy(false);
@@ -1736,6 +2075,7 @@ export default function TsdPage() {
       } else {
         // Сбор заказов из выбранной from-ячейки
         if (!selectedFromCellStep) {
+          triggerScanFlash("error");
           setError("Сначала выберите ячейку из списка");
           setScanValue("");
           setBusy(false);
@@ -1748,6 +2088,7 @@ export default function TsdPage() {
           // Проверка что unit принадлежит выбранной ячейке
           const unitInStep = selectedFromCellStep.units.find((u: any) => u.barcode === barcode);
           if (!unitInStep) {
+            triggerScanFlash("error");
             setError(`Заказ ${barcode} не из ячейки ${selectedFromCellStep.fromCell?.code}. Отсканируйте заказ только из этой ячейки.`);
             setScanValue("");
             setBusy(false);
@@ -1756,6 +2097,7 @@ export default function TsdPage() {
           
           // Проверка что unit не был уже отсканирован
           if (selectedFromCellStep.scannedUnits.some((u: any) => u.barcode === barcode)) {
+            triggerScanFlash("error");
             setError(`Заказ ${barcode} уже отсканирован`);
             setScanValue("");
             setBusy(false);
@@ -1767,6 +2109,7 @@ export default function TsdPage() {
           const stepIdx = selectedFromCellStep.stepIndex;
           
           if (!updatedSteps[stepIdx]) {
+            triggerScanFlash("error");
             setError(`Ошибка: шаг ${stepIdx} не найден в списке. Попробуйте выбрать ячейку заново.`);
             setScanValue("");
             setBusy(false);
@@ -1796,14 +2139,17 @@ export default function TsdPage() {
             setShippingSteps(updatedSteps);
             setSelectedFromCellStep(null); // Сброс выбранной ячейки
             setSuccess(`✅ Ячейка ${completedCellCode} завершена! (${scannedCount}/${totalInCell})`);
+            triggerScanFlash("success");
           } else {
             const updatedStep = { ...updatedSteps[stepIdx], stepIndex: stepIdx };
             setShippingSteps(updatedSteps);
             // Сохраняем stepIndex при обновлении selectedFromCellStep
             setSelectedFromCellStep(updatedStep);
             setSuccess(`✓ ${barcode} (${scannedCount}/${totalInCell} из ${updatedStep.fromCell?.code})`);
+            triggerScanFlash("success");
           }
         } else {
+          triggerScanFlash("error");
           setError("Отсканируйте заказ (не ячейку). Выберите ячейку из списка, затем сканируйте заказы.");
           setScanValue("");
           setBusy(false);
@@ -1811,6 +2157,7 @@ export default function TsdPage() {
         }
       }
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
     } finally {
       setBusy(false);
@@ -2044,9 +2391,11 @@ export default function TsdPage() {
   // ============================================
   // РЕЖИМ ИЗЛИШКИ (SURPLUS)
   // ============================================
-  async function handleSurplusScan() {
-    const parsed = parseScan(scanValue);
+  async function handleSurplusScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
@@ -2061,6 +2410,7 @@ export default function TsdPage() {
         // Сканируем ячейку surplus
         const cellInfo = await loadCellInfo(parsed.code);
         if (!cellInfo) {
+          triggerScanFlash("error");
           setError(`Ячейка "${parsed.code}" не найдена`);
           setScanValue("");
           return;
@@ -2068,6 +2418,7 @@ export default function TsdPage() {
 
         // Проверка: ячейка ДОЛЖНА быть типа surplus
         if (cellInfo.cell_type !== "surplus") {
+          triggerScanFlash("error");
           setError(`Ячейка должна быть типа SURPLUS, а не ${cellInfo.cell_type.toUpperCase()}`);
           setScanValue("");
           return;
@@ -2075,9 +2426,11 @@ export default function TsdPage() {
 
         setSurplusCell(cellInfo);
         setSuccess(`✓ Ячейка излишков: ${cellInfo.code}`);
+        triggerScanFlash("success");
       } else {
         // Сканируем unit barcode
         if (!surplusCell) {
+          triggerScanFlash("error");
           setError("Сначала отсканируйте ячейку SURPLUS");
           setScanValue("");
           return;
@@ -2085,6 +2438,7 @@ export default function TsdPage() {
 
         // Проверяем, не отсканирован ли уже этот заказ
         if (surplusUnits.some(u => u.barcode === parsed.code)) {
+          triggerScanFlash("error");
           setError(`Заказ ${parsed.code} уже отсканирован (дубликат)`);
           setScanValue("");
           return;
@@ -2096,6 +2450,7 @@ export default function TsdPage() {
         if (unitInfo) {
           // Unit существует - проверяем что он НЕ размещен где-то на складе
           if (unitInfo.cell_id && unitInfo.cell) {
+            triggerScanFlash("error");
             setError(`❌ Заказ ${parsed.code} уже размещен в ячейке ${unitInfo.cell.code} (${unitInfo.cell.cell_type.toUpperCase()})`);
             setScanValue("");
             return;
@@ -2103,6 +2458,7 @@ export default function TsdPage() {
           // Unit существует но не размещен - добавляем
           setSurplusUnits([...surplusUnits, unitInfo]);
           setSuccess(`✓ Добавлен: ${unitInfo.barcode} (всего: ${surplusUnits.length + 1})`);
+          triggerScanFlash("success");
         } else {
           // Unit НЕ существует - это нормально для излишков (товары без ТТНК)
           // Создаем временный объект, unit будет создан при подтверждении
@@ -2112,9 +2468,11 @@ export default function TsdPage() {
           };
           setSurplusUnits([...surplusUnits, newUnitInfo]);
           setSuccess(`✓ Новый излишек: ${parsed.code} (всего: ${surplusUnits.length + 1})`);
+          triggerScanFlash("success");
         }
       }
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
     } finally {
       setBusy(false);
@@ -2125,15 +2483,18 @@ export default function TsdPage() {
   // ============================================
   // РЕЖИМ ИНФОРМАЦИЯ О ЗАКАЗЕ
   // ============================================
-  async function handleInfoScan() {
-    const parsed = parseScan(scanValue);
+  async function handleInfoScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
     }
 
     if (parsed.type !== "unit") {
+      triggerScanFlash("error");
       setError("Сканируйте штрихкод заказа");
       setScanValue("");
       return;
@@ -2148,6 +2509,7 @@ export default function TsdPage() {
       const unitRes = await fetch(`/api/units/by-barcode?barcode=${encodeURIComponent(parsed.code)}`, { cache: "no-store" });
       const unitJson = await unitRes.json().catch(() => ({}));
       if (!unitRes.ok) {
+        triggerScanFlash("error");
         setError(unitJson.error || "Заказ не найден");
         return;
       }
@@ -2179,12 +2541,51 @@ export default function TsdPage() {
       }
 
       setSuccess(`Информация по заказу ${unitJson.unit?.barcode || parsed.code}`);
+      triggerScanFlash("success");
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка загрузки информации");
     } finally {
       setInfoLoading(false);
       setBusy(false);
       setScanValue("");
+    }
+  }
+
+  function submitScanFromCamera(raw: string) {
+    switch (mode) {
+      case "receiving":
+        void handleReceivingScan(raw);
+        return;
+      case "courier_receiving":
+        void handleCourierReceivingScan(raw);
+        return;
+      case "moving":
+        void handleMovingScan(raw);
+        return;
+      case "inventory":
+        void handleInventoryScan(raw);
+        return;
+      case "shipping":
+        void handleShippingScan(raw);
+        return;
+      case "shipping_new":
+        void handleShippingNewScan(raw);
+        return;
+      case "shipping_fcutc":
+        void handleFcutcScan(raw);
+        return;
+      case "surplus":
+        void handleSurplusScan(raw);
+        return;
+      case "hub_shipping":
+        void handleHubShippingScan(raw);
+        return;
+      case "info":
+        void handleInfoScan(raw);
+        return;
+      default:
+        return;
     }
   }
 
@@ -2264,11 +2665,13 @@ export default function TsdPage() {
   }
 
   // ============================================
-  // РЕЖИМ ОТГРУЗКА (FCUTC) - последовательное сканирование
+  // РЕЖИМ ОТГРУЗКА (поштучная) - последовательное сканирование
   // ============================================
-  async function handleFcutcScan() {
-    const parsed = parseScan(scanValue);
+  async function handleFcutcScan(overrideRaw?: string) {
+    const source = scanSourceForSubmit(overrideRaw);
+    const parsed = parseScan(source);
     if (!parsed) {
+      triggerScanFlash("error");
       setError("Некорректный скан");
       setScanValue("");
       return;
@@ -2282,6 +2685,7 @@ export default function TsdPage() {
       // Шаг 1: Сканирование UNIT
       if (!fcutcUnit) {
         if (parsed.type !== "unit") {
+          triggerScanFlash("error");
           setError("Отсканируйте заказ (штрихкод)");
           setScanValue("");
           return;
@@ -2290,12 +2694,14 @@ export default function TsdPage() {
         const barcode = parsed.code;
         const unitInfo = await loadUnitInfo(barcode);
         if (!unitInfo) {
+          triggerScanFlash("error");
           setError(`Заказ "${barcode}" не найден в системе`);
           setScanValue("");
           return;
         }
 
         if (!unitInfo.cell) {
+          triggerScanFlash("error");
           setError(`Заказ ${barcode} не размещен в ячейке`);
           setScanValue("");
           return;
@@ -2309,6 +2715,7 @@ export default function TsdPage() {
         const checkJson = await checkRes.json();
 
         if (!checkRes.ok || !checkJson.found) {
+          triggerScanFlash("error");
           setError(checkJson.error || `Заказ ${barcode} не найден в активных задачах`);
           setScanValue("");
           return;
@@ -2322,6 +2729,7 @@ export default function TsdPage() {
           toCell: checkJson.toCell,
         });
         setSuccess(`✓ Заказ ${barcode} найден в задаче. TO ячейка: ${checkJson.toCell.code}${checkJson.toCell.description ? ` (${checkJson.toCell.description})` : ""}`);
+        triggerScanFlash("success");
         showOpsHintForUnit(barcode);
         setScanValue("");
         return;
@@ -2329,12 +2737,14 @@ export default function TsdPage() {
 
       // Шаг 2: Сканирование TO cell (если UNIT уже есть)
       if (!fcutcTaskInfo) {
+        triggerScanFlash("error");
         setError("Ошибка: информация о задаче не найдена. Начните заново.");
         setScanValue("");
         return;
       }
 
       if (parsed.type !== "cell") {
+        triggerScanFlash("error");
         setError("Отсканируйте TO ячейку");
         setScanValue("");
         return;
@@ -2342,6 +2752,7 @@ export default function TsdPage() {
 
       const toCellInfo = await loadCellInfo(parsed.code);
       if (!toCellInfo) {
+        triggerScanFlash("error");
         setError(`Ячейка "${parsed.code}" не найдена`);
         setScanValue("");
         return;
@@ -2349,12 +2760,14 @@ export default function TsdPage() {
 
       // Валидация: TO ячейка должна совпадать с ожидаемой из задачи
       if (toCellInfo.id !== fcutcTaskInfo.toCell.id) {
+        triggerScanFlash("error");
         setError(`Ожидается ячейка ${fcutcTaskInfo.toCell.code}, отсканирована ${parsed.code}`);
         setScanValue("");
         return;
       }
 
       if (toCellInfo.cell_type !== "picking") {
+        triggerScanFlash("error");
         setError(`TO ячейка должна быть picking, а не ${toCellInfo.cell_type}`);
         setScanValue("");
         return;
@@ -2365,6 +2778,7 @@ export default function TsdPage() {
       // Выполняем перемещение
       await handleFcutcMove();
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка обработки скана");
       setScanValue("");
     } finally {
@@ -2375,6 +2789,7 @@ export default function TsdPage() {
   // Перемещение заказа и обновление задачи
   async function handleFcutcMove() {
     if (!fcutcUnit || !fcutcToCell || !fcutcTaskInfo) {
+      triggerScanFlash("error");
       setError("Не все данные заполнены");
       return;
     }
@@ -2427,6 +2842,7 @@ export default function TsdPage() {
       } else {
         setSuccess(`✓ Заказ ${fcutcUnit.barcode} перемещен в ${fcutcToCell.code}`);
       }
+      triggerScanFlash("success");
 
       // Сброс состояния после успеха
       setTimeout(() => {
@@ -2439,6 +2855,7 @@ export default function TsdPage() {
         }
       }, 3000);
     } catch (e: any) {
+      triggerScanFlash("error");
       setError(e.message || "Ошибка перемещения");
       if (inventoryError) {
         setTimeout(() => setInventoryError(null), 5000);
@@ -2452,7 +2869,12 @@ export default function TsdPage() {
     if (mode === "receiving") {
       setBinCell(null);
       setLastReceivedUnit(null);
-      setCourierReturnGroups([]);
+    } else if (mode === "courier_receiving") {
+      setCourierReceivingBinCell(null);
+      setLastCourierReceivedUnit(null);
+      setSelectedCourierHandoverId(courierHandovers[0]?.handover_session_id || null);
+    } else if (mode === "courier_lost") {
+      setCourierLostItems([]);
     } else if (mode === "moving") {
       setFromCell(null);
       setUnits([]);
@@ -2617,27 +3039,56 @@ export default function TsdPage() {
         </h1>
 
         {/* Переключатель режимов */}
-        <div style={{ marginBottom: "var(--spacing-lg)", display: "flex", gap: "var(--spacing-sm)", flexWrap: "wrap" }}>
+        <div
+          style={{
+            marginBottom: "var(--spacing-lg)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: "var(--spacing-sm)",
+            width: "100%",
+          }}
+        >
           <Button
             variant={mode === "receiving" ? "primary" : "secondary"}
             size="lg"
             onClick={() => handleModeChange("receiving")}
             fullWidth
-            style={{ flex: 1, minWidth: 100 }}
+            style={modeButtonScanGlow("receiving")}
           >
             Приемка
           </Button>
+          <Button
+            variant={mode === "courier_receiving" ? "primary" : "secondary"}
+            size="lg"
+            onClick={() => handleModeChange("courier_receiving")}
+            fullWidth
+            style={modeButtonScanGlow("courier_receiving")}
+          >
+            Приемка курьера
+          </Button>
 
           {isHubWorker ? (
-            <Button
-              variant={mode === "hub_shipping" ? "primary" : "secondary"}
-              size="lg"
-              onClick={() => handleModeChange("hub_shipping")}
-              fullWidth
-              style={{ flex: 1, minWidth: 140 }}
-            >
-              Отправка (Хаб)
-            </Button>
+            <>
+              <Button
+                variant={mode === "hub_shipping" ? "primary" : "secondary"}
+                size="lg"
+                onClick={() => handleModeChange("hub_shipping")}
+                fullWidth
+                style={modeButtonScanGlow("hub_shipping")}
+              >
+                Отправка (Хаб)
+              </Button>
+              <Button
+                variant="danger"
+                size="lg"
+                onClick={() => handleModeChange("courier_lost")}
+                fullWidth
+                style={modeButtonScanGlow("courier_lost")}
+              >
+                Потерянные
+              </Button>
+            </>
           ) : (
             <>
               <Button
@@ -2645,43 +3096,34 @@ export default function TsdPage() {
                 size="lg"
                 onClick={() => handleModeChange("moving")}
                 fullWidth
-                style={{ flex: 1, minWidth: 100 }}
+                style={modeButtonScanGlow("moving")}
               >
                 Перемещение
-              </Button>
-              <Button
-                variant={mode === "inventory" ? "primary" : "secondary"}
-                size="lg"
-                onClick={() => handleModeChange("inventory")}
-                fullWidth
-                style={{ flex: 1, minWidth: 100 }}
-              >
-                Инвентаризация
               </Button>
               <Button
                 variant={mode === "shipping_new" ? "primary" : "secondary"}
                 size="lg"
                 onClick={() => handleModeChange("shipping_new")}
                 fullWidth
-                style={{ flex: 1, minWidth: 100 }}
+                style={modeButtonScanGlow("shipping_new")}
               >
-                Отгрузка (НОВАЯ)
+                Отгрузка
               </Button>
               <Button
                 variant={mode === "shipping_fcutc" ? "primary" : "secondary"}
                 size="lg"
                 onClick={() => handleModeChange("shipping_fcutc")}
                 fullWidth
-                style={{ flex: 1, minWidth: 100 }}
+                style={modeButtonScanGlow("shipping_fcutc")}
               >
-                Отгрузка (FCUTC)
+                Отгрузка (поштучная)
               </Button>
               <Button
                 variant={mode === "surplus" ? "primary" : "secondary"}
                 size="lg"
                 onClick={() => handleModeChange("surplus")}
                 fullWidth
-                style={{ flex: 1, minWidth: 100 }}
+                style={modeButtonScanGlow("surplus")}
               >
                 Излишки
               </Button>
@@ -2690,16 +3132,72 @@ export default function TsdPage() {
                 size="lg"
                 onClick={() => handleModeChange("info")}
                 fullWidth
-                style={{ flex: 1, minWidth: 100 }}
+                style={modeButtonScanGlow("info")}
               >
                 Информация
+              </Button>
+              <Button
+                variant={
+                  inventoryActive !== true
+                    ? "secondary"
+                    : mode === "inventory"
+                      ? "accent"
+                      : "accentOutline"
+                }
+                size="lg"
+                onClick={() => handleModeChange("inventory")}
+                fullWidth
+                disabled={inventoryActive !== true}
+                style={modeButtonScanGlow("inventory")}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                  }}
+                >
+                  {inventoryActive !== true && (
+                    <svg
+                      width={22}
+                      height={22}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      aria-hidden
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <line x1="6.5" y1="17.5" x2="17.5" y2="6.5" />
+                    </svg>
+                  )}
+                  Инвентаризация
+                </span>
+              </Button>
+              <Button
+                variant="danger"
+                size="lg"
+                onClick={() => handleModeChange("courier_lost")}
+                fullWidth
+                style={modeButtonScanGlow("courier_lost")}
+              >
+                Потерянные
               </Button>
             </>
           )}
         </div>
 
         {/* Главный input для сканирования */}
-        <div style={{ marginBottom: 16 }}>
+        <div
+          style={{
+            marginBottom: 16,
+            display: "flex",
+            gap: 8,
+            alignItems: "stretch",
+          }}
+        >
           <input
             ref={inputRef}
             type="text"
@@ -2709,11 +3207,18 @@ export default function TsdPage() {
             onKeyDown={handleKeyDown}
             disabled={busy}
             style={{
-              width: "100%",
+              flex: 1,
+              minWidth: 0,
+              width: "auto",
               padding: "var(--spacing-lg)",
               minHeight: 56,
               fontSize: "20px",
-              border: "2px solid var(--color-primary)",
+              border:
+                scanFlash === "success"
+                  ? "2px solid #22c55e"
+                  : scanFlash === "error"
+                    ? "2px solid #ef4444"
+                    : "2px solid var(--color-primary)",
               borderRadius: "var(--radius-md)",
               outline: "none",
               fontWeight: 600,
@@ -2721,10 +3226,24 @@ export default function TsdPage() {
               background: "var(--color-bg)",
               color: "var(--color-text)",
               fontFamily: "var(--font-sans)",
-              transition: "all var(--transition-base)",
+              transition: "box-shadow 0.35s ease-out, border-color 0.25s ease-out",
+              ...(scanFlash === "success"
+                ? {
+                    boxShadow:
+                      "0 0 0 3px rgba(34, 197, 94, 0.4), -10px 0 22px rgba(34, 197, 94, 0.38), 10px 0 22px rgba(34, 197, 94, 0.38)",
+                  }
+                : scanFlash === "error"
+                  ? {
+                      boxShadow:
+                        "0 0 0 3px rgba(239, 68, 68, 0.4), -10px 0 22px rgba(239, 68, 68, 0.34), 10px 0 22px rgba(239, 68, 68, 0.34)",
+                    }
+                  : { boxShadow: "none" }),
             }}
             autoFocus
           />
+          {mode !== "courier_lost" && (
+            <TsdCameraScanButton disabled={busy} onDetected={(raw) => submitScanFromCamera(raw)} />
+          )}
           {error && (
             <div style={{ marginTop: "var(--spacing-sm)" }}>
               <Alert variant="error">{error}</Alert>
@@ -2775,78 +3294,6 @@ export default function TsdPage() {
         {/* Режим ПРИЕМКА */}
         {mode === "receiving" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-            {/* Курьеры на приёмке (закрыли смену, заказы к приёму) */}
-            {(courierReturnGroups.length > 0 || loadingCourierReturns) && (
-              <div
-                style={{
-                  padding: 14,
-                  background: "#f8fafc",
-                  borderRadius: 10,
-                  border: "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>
-                    Курьеры на приёмке
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => loadCourierReturns()}
-                    disabled={loadingCourierReturns}
-                  >
-                    {loadingCourierReturns ? "Загрузка…" : "Обновить"}
-                  </Button>
-                </div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-                  После закрытия смены курьер появляется здесь. Отсканируйте заказы в BIN.
-                </div>
-                {loadingCourierReturns ? (
-                  <div style={{ fontSize: 13, color: "#64748b" }}>Загрузка…</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {courierReturnGroups.map((group) => (
-                      <div
-                        key={group.handover_session_id}
-                        style={{
-                          padding: 12,
-                          background: "#fff",
-                          borderRadius: 8,
-                          border: "1px solid #e2e8f0",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                          <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
-                            {group.courier_name}
-                          </span>
-                          <span style={{ fontSize: 13, color: "#64748b" }}>
-                            {group.total_units}{" "}
-                            {group.total_units === 1
-                              ? "заказ"
-                              : group.total_units >= 2 && group.total_units <= 4
-                                ? "заказа"
-                                : "заказов"}
-                          </span>
-                        </div>
-                        {group.handover_confirmed_at && (
-                          <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                            Handover: {new Date(group.handover_confirmed_at).toLocaleString("ru-RU")}
-                          </div>
-                        )}
-                        {group.items.length > 0 && (
-                          <div style={{ marginTop: 8, fontSize: 12, color: "#475569" }}>
-                            Штрихкоды: {group.items.slice(0, 5).map((i) => i.unit_barcode).join(", ")}
-                            {group.items.length > 5 ? ` … +${group.items.length - 5}` : ""}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* BIN — ячейка приёмки у курьера */}
             <div
               style={{
                 padding: 16,
@@ -2895,6 +3342,298 @@ export default function TsdPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {mode === "courier_receiving" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            <div
+              style={{
+                padding: 14,
+                background: "#f8fafc",
+                borderRadius: 10,
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>
+                  Приемка курьера
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => loadCourierHandovers()}
+                  disabled={loadingCourierHandovers}
+                >
+                  {loadingCourierHandovers ? "Загрузка…" : "Обновить"}
+                </Button>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Выберите сдачу курьера, отсканируйте BIN и принимайте заказы. Вне рейса учитываются отдельно.
+              </div>
+              {loadingCourierHandovers ? (
+                <div style={{ fontSize: 13, color: "#64748b" }}>Загрузка…</div>
+              ) : courierHandovers.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#64748b" }}>Нет активных сдач курьера.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {courierHandovers.map((handover) => {
+                    const isSelected = handover.handover_session_id === selectedCourierHandoverId;
+                    return (
+                      <div
+                        key={handover.handover_session_id}
+                        onClick={() => setSelectedCourierHandoverId(handover.handover_session_id)}
+                        style={{
+                          padding: 12,
+                          background: isSelected ? "#eff6ff" : "#fff",
+                          borderRadius: 8,
+                          border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                              {handover.courier_name}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>
+                              Сессия: {handover.handover_session_id.slice(0, 8)}
+                              {handover.started_at ? ` • ${new Date(handover.started_at).toLocaleString("ru-RU")}` : ""}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 12, color: "#475569", textAlign: "right" }}>
+                            <div>Ожидалось: {handover.expected_total}</div>
+                            <div>Принято: {handover.received_total}</div>
+                            <div>Осталось: {handover.remaining_total}</div>
+                            <div>Вне рейса: {handover.extra_total}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {selectedCourierHandover && (
+              <>
+                <div
+                  style={{
+                    padding: 16,
+                    background: "#fff",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
+                    {selectedCourierHandover.courier_name}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#64748b", marginBottom: 10 }}>
+                    Сессия {selectedCourierHandover.handover_session_id.slice(0, 8)}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, fontSize: 14 }}>
+                    <div>Ожидалось: <strong>{selectedCourierHandover.expected_total}</strong></div>
+                    <div>Принято: <strong>{selectedCourierHandover.received_total}</strong></div>
+                    <div>Осталось: <strong>{selectedCourierHandover.remaining_total}</strong></div>
+                    <div>Вне рейса: <strong>{selectedCourierHandover.extra_total}</strong></div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: 16,
+                    background: courierReceivingBinCell ? "#fff8e1" : "#f5f5f5",
+                    borderRadius: 8,
+                    border: "2px solid",
+                    borderColor: courierReceivingBinCell ? "#ffc107" : "#ddd",
+                  }}
+                >
+                  <div style={{ fontSize: "14px", color: "#666", marginBottom: 8 }}>BIN (приемка курьера)</div>
+                  {courierReceivingBinCell ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          backgroundColor: getCellColor(courierReceivingBinCell.cell_type, courierReceivingBinCell.meta),
+                          border: "1px solid #ccc",
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "20px", fontWeight: 700 }}>{courierReceivingBinCell.code}</div>
+                        <div style={{ fontSize: "14px", color: "#666" }}>{courierReceivingBinCell.cell_type}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "18px", color: "#999" }}>—</div>
+                  )}
+                </div>
+
+                {lastCourierReceivedUnit && (
+                  <div
+                    style={{
+                      padding: 16,
+                      background: "#e8f5e9",
+                      borderRadius: 8,
+                      border: "2px solid #4caf50",
+                    }}
+                  >
+                    <div style={{ fontSize: "14px", color: "#666", marginBottom: 4 }}>Последний принятый:</div>
+                    <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                      {lastCourierReceivedUnit.barcode} → {lastCourierReceivedUnit.binCode}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#166534", marginTop: 4 }}>
+                      {lastCourierReceivedUnit.itemKind === "extra" ? "Вне рейса" : "Из ожидаемой сдачи"}
+                    </div>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    padding: 14,
+                    background: "#fff",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Осталось принять ({selectedCourierHandover.remaining_items.length})</div>
+                  {selectedCourierHandover.remaining_items.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "#64748b" }}>Все ожидаемые заказы уже приняты.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                      {selectedCourierHandover.remaining_items.map((item) => (
+                        <div key={item.handover_item_id} style={{ fontSize: 14, color: "#0f172a" }}>
+                          {item.unit_barcode}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    padding: 14,
+                    background: "#fff",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Принято ({selectedCourierHandover.received_items.length})</div>
+                  {selectedCourierHandover.received_items.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "#64748b" }}>Пока ничего не принято.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                      {selectedCourierHandover.received_items.map((item) => (
+                        <div key={item.handover_item_id} style={{ fontSize: 14, color: "#0f172a" }}>
+                          {item.unit_barcode}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    padding: 14,
+                    background: "#fff",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Вне рейса ({selectedCourierHandover.extra_items.length})</div>
+                  {selectedCourierHandover.extra_items.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "#64748b" }}>Пока нет дополнительных заказов.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                      {selectedCourierHandover.extra_items.map((item) => (
+                        <div key={item.handover_item_id} style={{ fontSize: 14, color: "#0f172a" }}>
+                          {item.unit_barcode}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={handleCloseCourierHandover}
+                  disabled={busy}
+                  fullWidth
+                >
+                  Закрыть приемку
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
+        {mode === "courier_lost" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            <div
+              style={{
+                padding: 14,
+                background: "#f8fafc",
+                borderRadius: 10,
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>
+                  Потерянные
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => loadCourierLostItems()}
+                  disabled={loadingCourierLostItems}
+                >
+                  {loadingCourierLostItems ? "Загрузка…" : "Обновить"}
+                </Button>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Здесь остаются заказы, которые не были приняты при закрытии сдачи курьера.
+              </div>
+              {loadingCourierLostItems ? (
+                <div style={{ fontSize: 13, color: "#64748b" }}>Загрузка…</div>
+              ) : courierLostItems.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#64748b" }}>Потерянных заказов нет.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {courierLostItems.map((item) => (
+                    <div
+                      key={item.handover_item_id}
+                      style={{
+                        padding: 12,
+                        background: "#fff",
+                        borderRadius: 8,
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                            {item.unit_barcode}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            Курьер: {item.courier_name}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            Сессия: {item.handover_session_id.slice(0, 8)}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#475569", textAlign: "right" }}>
+                          <div>Потерян: {item.lost_at ? new Date(item.lost_at).toLocaleString("ru-RU") : "—"}</div>
+                          <div>Статус: {item.current_status || "—"}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -4012,7 +4751,7 @@ export default function TsdPage() {
           </div>
         )}
 
-        {/* Режим ОТГРУЗКА (FCUTC) - последовательное сканирование */}
+        {/* Режим ОТГРУЗКА (поштучная) - последовательное сканирование */}
         {mode === "shipping_fcutc" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
             {/* Текущая ячейка */}
@@ -4140,7 +4879,7 @@ export default function TsdPage() {
           </div>
         )}
 
-        {/* Режим ОТГРУЗКА (НОВАЯ) - с группировкой по picking ячейкам */}
+        {/* Режим ОТГРУЗКА - с группировкой по picking ячейкам */}
         {mode === "shipping_new" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
             {loadingTasksNew ? (
@@ -4566,6 +5305,20 @@ export default function TsdPage() {
               <li>Отсканируйте штрихкод заказа</li>
               <li>Заказ будет создан (если нового нет) и размещён в выбранную BIN ячейку</li>
               <li>BIN останется выбранным для приёма пачки заказов</li>
+            </ol>
+          ) : mode === "courier_receiving" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Выберите сдачу курьера из списка</li>
+              <li>Отсканируйте BIN ячейку для приемки</li>
+              <li>Сканируйте ожидаемые заказы или дополнительные заказы вне рейса</li>
+              <li>Следите за блоками «Осталось принять», «Принято» и «Вне рейса»</li>
+              <li>Нажмите «Закрыть приемку», если оставшиеся позиции нужно перевести в «Потерянные»</li>
+            </ol>
+          ) : mode === "courier_lost" ? (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Здесь показаны заказы, не принятые при закрытии сдачи курьера</li>
+              <li>Чтобы убрать заказ из списка, примите его через обычный режим «Приемка» в BIN</li>
+              <li>Нажмите «Обновить», если нужно перечитать актуальный список</li>
             </ol>
           ) : mode === "moving" ? (
             <ol style={{ margin: 0, paddingLeft: 18 }}>

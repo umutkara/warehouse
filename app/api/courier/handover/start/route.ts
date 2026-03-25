@@ -58,7 +58,6 @@ export async function POST(req: Request) {
     .select("id, unit_id")
     .eq("warehouse_id", auth.profile.warehouse_id)
     .eq("courier_user_id", shift.courier_user_id)
-    .eq("shift_id", shift.id)
     .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
 
   const allOnHandUnits = (taskUnits || []).filter((row) => row.unit_id);
@@ -72,6 +71,8 @@ export async function POST(req: Request) {
         meta: {
           source: "api.courier.handover.start",
           queue_source: "all_on_hand",
+          source_kind: "expected",
+          receiving_status: "pending",
         },
       })),
     );
