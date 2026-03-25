@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { buildBarcodeCandidates, normalizeBarcodeDigits } from "@/lib/barcode/normalization";
 
 export async function GET(req: Request) {
@@ -50,20 +51,45 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 
-  // Если не размещён
-  if (!unit.cell_id) {
+  let resolvedCellId: string | null = unit.cell_id ?? null;
+
+  // Fallback: when physical cell is not set, try latest active picking task target cell.
+  if (!resolvedCellId) {
+    const { data: taskLinks, error: taskLinksErr } = await supabaseAdmin
+      .from("picking_task_units")
+      .select("picking_task_id")
+      .eq("unit_id", unit.id);
+
+    if (!taskLinksErr && (taskLinks || []).length > 0) {
+      const taskIds = [...new Set((taskLinks || []).map((row: any) => row.picking_task_id).filter(Boolean))];
+      if (taskIds.length > 0) {
+        const { data: tasks, error: tasksErr } = await supabaseAdmin
+          .from("picking_tasks")
+          .select("id, created_at, target_picking_cell_id")
+          .eq("warehouse_id", profile.warehouse_id)
+          .in("id", taskIds)
+          .in("status", ["open", "in_progress"])
+          .not("target_picking_cell_id", "is", null)
+          .order("created_at", { ascending: false });
+        if (!tasksErr && (tasks || []).length > 0) {
+          resolvedCellId = tasks?.[0]?.target_picking_cell_id ?? null;
+        }
+      }
+    }
+  }
+
+  if (!resolvedCellId) {
     return NextResponse.json({
       unit,
       cell: null,
-      message: "Заказ найден, но не размещён (ячейка не назначена)",
+      message: "Заказ найден, но ячейка не определена (ни физически, ни по active picking task)",
     });
   }
 
-  // Источник истины для расположения: unit.cell_id.
   const { data: cellById, error: cErr } = await supabase
     .from("warehouse_cells_map")
     .select("id, code, cell_type, x, y, w, h, meta, is_active, warehouse_id")
-    .eq("id", unit.cell_id)
+    .eq("id", resolvedCellId)
     .eq("warehouse_id", profile.warehouse_id)
     .maybeSingle();
 
@@ -79,9 +105,15 @@ export async function GET(req: Request) {
     return NextResponse.json({
       unit,
       cell: null,
-      message: "Ячейка не найдена (возможно удалена)",
+      message: "Ячейка не найдена (возможно удалена или недоступна в warehouse map)",
     });
   }
 
-  return NextResponse.json({ unit, cell: cellById });
+  return NextResponse.json({
+    unit: {
+      ...unit,
+      cell_id: resolvedCellId,
+    },
+    cell: cellById,
+  });
 }

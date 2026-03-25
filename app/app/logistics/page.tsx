@@ -74,7 +74,7 @@ export default function LogisticsPage() {
       }
 
       const json = await res.json();
-      
+
       if (res.ok && json.ok) {
         const loadedUnits = json.units || [];
         setUnits(loadedUnits);

@@ -5,9 +5,11 @@ import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 /**
  * GET /api/logistics/picking-units
- * Returns all units currently in picking cells for logistics role
+ * Units «в picking» по операционной модели: последняя активная задача (open/in_progress)
+ * с target в активной picking-ячейке, без отгрузки status=out.
+ * Совпадает с оверлеем счётчиков на карте склада.
  */
-export async function GET(req: Request) {
+export async function GET() {
   const supabase = await supabaseServer();
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -25,12 +27,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  // Only logistics, admin, head can access
   if (!hasAnyRole(profile.role, ["logistics", "admin", "head", "hub_worker"])) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // First, get all picking cells for this warehouse (with meta for descriptions)
   const { data: pickingCells, error: cellsError } = await supabaseAdmin
     .from("warehouse_cells")
     .select("id, code, cell_type, meta")
@@ -42,72 +42,158 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: cellsError.message }, { status: 400 });
   }
 
-  const pickingCellIds = pickingCells?.map(c => c.id) || [];
-  
+  const pickingCellIds = pickingCells?.map((c) => c.id) || [];
   if (pickingCellIds.length === 0) {
+    return NextResponse.json({ ok: true, units: [] });
+  }
+
+  const pickingCellIdSet = new Set(pickingCellIds);
+
+  // Не используем .in("target_picking_cell_id", pickingCellIds): при десятках/сотнях UUID
+  // PostgREST раздувает URL и undici падает с TypeError: fetch failed.
+  const { data: activeTasksRaw, error: activeTasksError } = await supabaseAdmin
+    .from("picking_tasks")
+    .select("id, scenario, status, created_at, target_picking_cell_id")
+    .eq("warehouse_id", profile.warehouse_id)
+    .in("status", ["open", "in_progress"])
+    .not("target_picking_cell_id", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (activeTasksError) {
+    return NextResponse.json({ error: activeTasksError.message }, { status: 400 });
+  }
+
+  const activeTasks = (activeTasksRaw || []).filter((t: any) =>
+    t?.target_picking_cell_id && pickingCellIdSet.has(t.target_picking_cell_id),
+  );
+
+  const activeTaskIds = [...new Set((activeTasks || []).map((t: any) => t.id))];
+  const activeTaskMap = new Map<string, any>((activeTasks || []).map((t: any) => [t.id, t]));
+  let activeTaskUnits: any[] = [];
+  if (activeTaskIds.length > 0) {
+    const chunkSize = 200;
+    for (let i = 0; i < activeTaskIds.length; i += chunkSize) {
+      const chunk = activeTaskIds.slice(i, i + chunkSize);
+      const { data: chunkRows, error: chunkErr } = await supabaseAdmin
+        .from("picking_task_units")
+        .select("unit_id, picking_task_id")
+        .in("picking_task_id", chunk);
+      if (chunkErr) {
+        return NextResponse.json({ error: chunkErr.message }, { status: 400 });
+      }
+      if (chunkRows?.length) activeTaskUnits.push(...chunkRows);
+    }
+  }
+
+  const latestActiveTaskByUnitId = new Map<string, any>();
+  (activeTaskUnits || []).forEach((tu: any) => {
+    if (!tu.unit_id || !tu.picking_task_id) return;
+    const candidateTask = activeTaskMap.get(tu.picking_task_id);
+    if (!candidateTask) return;
+    const current = latestActiveTaskByUnitId.get(tu.unit_id);
+    if (!current) {
+      latestActiveTaskByUnitId.set(tu.unit_id, candidateTask);
+      return;
+    }
+    const currentTs = new Date(current.created_at || 0).getTime();
+    const candidateTs = new Date(candidateTask.created_at || 0).getTime();
+    if (candidateTs >= currentTs) latestActiveTaskByUnitId.set(tu.unit_id, candidateTask);
+  });
+
+  const activeUnitIds = [...latestActiveTaskByUnitId.keys()];
+  let activeUnits: any[] = [];
+  if (activeUnitIds.length > 0) {
+    const chunkSize = 500;
+    for (let i = 0; i < activeUnitIds.length; i += chunkSize) {
+      const chunk = activeUnitIds.slice(i, i + chunkSize);
+      const { data: chunkUnits, error: chunkErr } = await supabaseAdmin
+        .from("units")
+        .select("id, barcode, status, cell_id, created_at")
+        .eq("warehouse_id", profile.warehouse_id)
+        .in("id", chunk);
+      if (chunkErr) {
+        return NextResponse.json({ error: chunkErr.message }, { status: 400 });
+      }
+      if (chunkUnits?.length) activeUnits.push(...chunkUnits);
+    }
+  }
+
+  let shippedActiveSet = new Set<string>();
+  if (activeUnitIds.length > 0) {
+    const shipChunk = 300;
+    for (let i = 0; i < activeUnitIds.length; i += shipChunk) {
+      const chunk = activeUnitIds.slice(i, i + shipChunk);
+      const { data: shippedActive, error: shipErr } = await supabaseAdmin
+        .from("outbound_shipments")
+        .select("unit_id")
+        .in("unit_id", chunk)
+        .eq("status", "out");
+      if (shipErr) {
+        return NextResponse.json({ error: shipErr.message }, { status: 400 });
+      }
+      for (const row of shippedActive || []) {
+        if ((row as any).unit_id) shippedActiveSet.add((row as any).unit_id);
+      }
+    }
+  }
+  const workingUnits = (activeUnits || []).filter((u: any) => !shippedActiveSet.has(u.id));
+
+  if (workingUnits.length === 0) {
     return NextResponse.json({
       ok: true,
       units: [],
     });
   }
 
-  // Get all units in picking cells (use admin to bypass RLS)
-  const { data: units, error: unitsError } = await supabaseAdmin
-    .from("units")
-    .select(`
-      id,
-      barcode,
-      status,
-      cell_id,
-      created_at
-    `)
-    .eq("warehouse_id", profile.warehouse_id)
-    .in("cell_id", pickingCellIds)
-    .order("created_at", { ascending: false });
+  const cellsMap = new Map((pickingCells || []).map((c: any) => [c.id, c]));
 
-  if (unitsError) {
-    return NextResponse.json({ error: unitsError.message }, { status: 400 });
+  const workingUnitIds = workingUnits.map((u: any) => u.id);
+  let taskUnits: any[] = [];
+  const linkChunk = 200;
+  for (let i = 0; i < workingUnitIds.length; i += linkChunk) {
+    const chunk = workingUnitIds.slice(i, i + linkChunk);
+    const { data: chunkRows, error: taskUnitsError } = await supabaseAdmin
+      .from("picking_task_units")
+      .select("unit_id, picking_task_id")
+      .in("unit_id", chunk);
+    if (taskUnitsError) {
+      return NextResponse.json({ error: taskUnitsError.message }, { status: 400 });
+    }
+    if (chunkRows?.length) taskUnits.push(...chunkRows);
   }
 
-  const unitIds = units?.map(u => u.id) || [];
-  const { data: shipped, error: shippedError } = await supabaseAdmin
-    .from("outbound_shipments")
-    .select("unit_id, status")
-    .in("unit_id", unitIds)
-    .eq("status", "out");
+  let legacyTasks: any[] = [];
+  for (let i = 0; i < workingUnitIds.length; i += linkChunk) {
+    const chunk = workingUnitIds.slice(i, i + linkChunk);
+    const { data: chunkLegacy, error: legacyTasksError } = await supabaseAdmin
+      .from("picking_tasks")
+      .select("id, unit_id, scenario, status, created_at")
+      .in("unit_id", chunk)
+      .eq("warehouse_id", profile.warehouse_id);
+    if (legacyTasksError) {
+      return NextResponse.json({ error: legacyTasksError.message }, { status: 400 });
+    }
+    if (chunkLegacy?.length) legacyTasks.push(...chunkLegacy);
+  }
 
-  const shippedSet = new Set((shipped || []).map(s => s.unit_id));
-  const filteredUnits = (units || []).filter(u => !shippedSet.has(u.id));
+  const taskIds = [...new Set((taskUnits || []).map((tu: any) => tu.picking_task_id).filter(Boolean))];
+  let tasks: any[] = [];
+  if (taskIds.length > 0) {
+    const idChunk = 200;
+    for (let i = 0; i < taskIds.length; i += idChunk) {
+      const chunk = taskIds.slice(i, i + idChunk);
+      const { data: chunkTasks, error: tasksError } = await supabaseAdmin
+        .from("picking_tasks")
+        .select("id, scenario, status, created_at")
+        .in("id", chunk)
+        .eq("warehouse_id", profile.warehouse_id);
+      if (tasksError) {
+        return NextResponse.json({ error: tasksError.message }, { status: 400 });
+      }
+      if (chunkTasks?.length) tasks.push(...chunkTasks);
+    }
+  }
 
-  // Create cells map for quick lookup
-  const cellsMap = new Map(pickingCells?.map(c => [c.id, c]) || []);
-
-  // Get picking_tasks info to show scenario (read-only for logistics)
-  // After migration, units are linked via picking_task_units junction table
-  // First, get picking_task_units to find which tasks contain these units
-  const { data: taskUnits, error: taskUnitsError } = await supabaseAdmin
-    .from("picking_task_units")
-    .select("unit_id, picking_task_id")
-    .in("unit_id", filteredUnits.map(u => u.id));
-  
-  // Also check legacy unit_id field for old tasks (any status - unit is already in picking)
-  const { data: legacyTasks, error: legacyTasksError } = await supabaseAdmin
-    .from("picking_tasks")
-    .select("id, unit_id, scenario, status, created_at")
-    .in("unit_id", filteredUnits.map(u => u.id))
-    .eq("warehouse_id", profile.warehouse_id);
-  
-  // Get task IDs from picking_task_units
-  const taskIds = [...new Set(taskUnits?.map(tu => tu.picking_task_id) || [])];
-  
-  // Get tasks with scenario (any status - unit is already in picking, so task exists)
-  const { data: tasks, error: tasksError } = await supabaseAdmin
-    .from("picking_tasks")
-    .select("id, scenario, status, created_at")
-    .in("id", taskIds)
-    .eq("warehouse_id", profile.warehouse_id);
-
-  // Для задач с пустым scenario — взять сценарий из audit_events. При «осиротевших» задачах (task удалён из picking_tasks) — запрашиваем audit по всем taskIds.
   const taskIdsWithoutScenario =
     (tasks && tasks.length > 0)
       ? (tasks as any[]).filter((t: any) => !t.scenario?.trim()).map((t: any) => t.id)
@@ -154,8 +240,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // Create maps: task_id -> task and unit_id -> latest task
-  const tasksMap = new Map(tasks?.map(t => [t.id, t]) || []);
+  const tasksMap = new Map((tasks || []).map((t: any) => [t.id, t]));
   const latestTaskByUnitId = new Map<string, any>();
   (taskUnits || []).forEach((tu: any) => {
     if (!tu.unit_id || !tu.picking_task_id) return;
@@ -168,9 +253,7 @@ export async function GET(req: Request) {
     }
     const currentTs = new Date(current.created_at || 0).getTime();
     const candidateTs = new Date(candidateTask.created_at || 0).getTime();
-    if (candidateTs >= currentTs) {
-      latestTaskByUnitId.set(tu.unit_id, candidateTask);
-    }
+    if (candidateTs >= currentTs) latestTaskByUnitId.set(tu.unit_id, candidateTask);
   });
   const latestLegacyTaskByUnitId = new Map<string, any>();
   (legacyTasks || []).forEach((task: any) => {
@@ -182,14 +265,10 @@ export async function GET(req: Request) {
     }
     const currentTs = new Date(current.created_at || 0).getTime();
     const candidateTs = new Date(task.created_at || 0).getTime();
-    if (candidateTs >= currentTs) {
-      latestLegacyTaskByUnitId.set(task.unit_id, task);
-    }
+    if (candidateTs >= currentTs) latestLegacyTaskByUnitId.set(task.unit_id, task);
   });
 
-  // Enrich units with cell and scenario info
-  const enrichedUnits = (filteredUnits || []).map((u, idx) => {
-    // Choose scenario from latest linked task first; fallback to latest legacy task.
+  const enrichedUnits = (workingUnits || []).map((u: any) => {
     const latestTask = latestTaskByUnitId.get(u.id) || null;
     const latestLegacyTask = latestLegacyTaskByUnitId.get(u.id) || null;
     const effectiveTaskId = latestTask?.id || latestLegacyTask?.id || null;
@@ -198,9 +277,12 @@ export async function GET(req: Request) {
       latestLegacyTask?.scenario?.trim() ||
       null;
     const scenario = scenarioFromTask || (effectiveTaskId ? auditScenarioByTaskId.get(effectiveTaskId) || null : null);
+    const displayCellId =
+      latestActiveTaskByUnitId.get(u.id)?.target_picking_cell_id || u.cell_id || null;
     return {
       ...u,
-      cell: cellsMap.get(u.cell_id) || null,
+      cell_id: displayCellId,
+      cell: displayCellId ? cellsMap.get(displayCellId) || null : null,
       scenario,
     };
   });
