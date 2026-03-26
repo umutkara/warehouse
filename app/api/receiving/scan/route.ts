@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
+  buildScannerBarcodeCandidates,
+  normalizeBarcodeDigits,
+  pickBestBarcodeCandidate,
+} from "@/lib/barcode/normalization";
+import {
   findResolvableHandoverItemByUnit,
   mergeHandoverItemMeta,
 } from "@/app/api/ops/courier-handovers/_shared";
@@ -15,11 +20,6 @@ function normalizeCellCode(v: any): string {
     code = code.substring(5).trim();
   }
   return code.toUpperCase();
-}
-
-function normalizeUnitBarcode(v: any): string {
-  // Только цифры, trim
-  return String(v ?? "").replace(/\D/g, "").trim();
 }
 
 export async function POST(req: Request) {
@@ -60,7 +60,9 @@ export async function POST(req: Request) {
     // Parse body
     const body = await req.json().catch(() => null);
     const cellCode = normalizeCellCode(body?.cellCode);
-    const digits = normalizeUnitBarcode(body?.unitBarcode);
+    const rawUnitBarcode = String(body?.unitBarcode ?? "");
+    const digits = normalizeBarcodeDigits(rawUnitBarcode);
+    const barcodeCandidates = buildScannerBarcodeCandidates(rawUnitBarcode);
     const skipHandoverReconciliation = body?.skipHandoverReconciliation === true;
 
     // Validation
@@ -134,13 +136,14 @@ export async function POST(req: Request) {
     }
 
     // Auto-accept transfer if unit is in transit to this warehouse
-    const { data: anyUnit, error: anyUnitError } = await supabaseAdmin
+    const { data: anyUnits, error: anyUnitError } = await supabaseAdmin
       .from("units")
       .select("id, barcode, cell_id, warehouse_id, status")
-      .eq("barcode", digits)
-      .maybeSingle();
+      .in("barcode", barcodeCandidates)
+      .limit(20);
+    const anyUnit = pickBestBarcodeCandidate(anyUnits ?? [], barcodeCandidates);
 
-    if (anyUnitError && anyUnitError.code !== "PGRST116") {
+    if (anyUnitError) {
       console.error("Error loading unit for transfer check:", anyUnitError);
       return NextResponse.json({ error: "Ошибка проверки transfer", ok: false }, { status: 500 });
     }
@@ -227,7 +230,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
           ok: true,
           unitId: anyUnit.id,
-          barcode: digits,
+          barcode: anyUnit.barcode,
           cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
           status: newStatus,
           message: `Принято по transfer в ${targetCell.code}`,
@@ -236,15 +239,15 @@ export async function POST(req: Request) {
     }
 
     // Check if unit exists
-    const { data: existingUnit, error: unitCheckError } = await supabase
+    const { data: existingUnits, error: unitCheckError } = await supabase
       .from("units")
       .select("id, barcode, cell_id, status")
       .eq("warehouse_id", profile.warehouse_id)
-      .eq("barcode", digits)
-      .maybeSingle();
+      .in("barcode", barcodeCandidates)
+      .limit(20);
+    const existingUnit = pickBestBarcodeCandidate(existingUnits ?? [], barcodeCandidates);
 
-    if (unitCheckError && unitCheckError.code !== "PGRST116") {
-      // PGRST116 = not found, это нормально
+    if (unitCheckError) {
       console.error("Error checking unit:", unitCheckError);
       return NextResponse.json(
         { error: "Ошибка проверки unit", ok: false },
@@ -286,7 +289,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         unitId: existingUnit.id,
-        barcode: digits,
+        barcode: existingUnit.barcode,
         cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
         status: existingUnit.status,
         message: `Уже в этой ячейке (${targetCell.code})`,
@@ -306,6 +309,7 @@ export async function POST(req: Request) {
     }
 
     let unitId: string;
+    let resolvedBarcode = digits;
 
     // SCENARIO A: unit НЕ найден - создаём новый
     const targetStatus = "receiving";
@@ -347,9 +351,11 @@ export async function POST(req: Request) {
       }
 
       unitId = createdUnit.id;
+      resolvedBarcode = createdUnit.barcode;
     } else {
       // SCENARIO D: unit найден, но cell_id == null
       unitId = existingUnit.id;
+      resolvedBarcode = existingUnit.barcode;
     }
 
     // Check if unit has active OUT shipment BEFORE moving (to set correct note)
@@ -627,7 +633,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       unitId,
-      barcode: digits,
+      barcode: resolvedBarcode,
       cell: { id: targetCell.id, code: targetCell.code, cell_type: targetCell.cell_type },
       status: targetStatus,
       message: `Принято в ${targetCellLabel}`,

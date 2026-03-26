@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { getCellColor } from "@/lib/ui/cellColors";
 import { Alert, Button } from "@/lib/ui/components";
+import { buildScannerBarcodeCandidates } from "@/lib/barcode/normalization";
 import { TsdCameraScanButton } from "./TsdCameraScanButton";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
@@ -692,21 +693,12 @@ export default function TsdPage() {
       }
       
       const barcode = parsed.code;
-      const scannedDigits = String(barcode ?? "").replace(/\D/g, "");
-      const scannedNoLeadingZeros = scannedDigits.replace(/^0+/, "");
-      const reversedDigits = scannedDigits.split("").reverse().join("");
-      const reversedNoLeadingZeros = reversedDigits.replace(/^0+/, "");
+      const scannedCandidates = new Set(buildScannerBarcodeCandidates(barcode));
       
       // Проверяем, что заказ из выбранной from-ячейки
       const unit = shippingNewSelectedFromCell.units.find((u: any) => {
-        const unitDigits = String(u?.barcode ?? "").replace(/\D/g, "");
-        const unitNoLeadingZeros = unitDigits.replace(/^0+/, "");
-        return (
-          unitDigits === scannedDigits ||
-          unitNoLeadingZeros === scannedNoLeadingZeros ||
-          unitDigits === reversedDigits ||
-          unitNoLeadingZeros === reversedNoLeadingZeros
-        );
+        const unitCandidates = buildScannerBarcodeCandidates(u?.barcode ?? "");
+        return unitCandidates.some((candidate) => scannedCandidates.has(candidate));
       });
       if (!unit) {
         triggerScanFlash("error");
@@ -2720,8 +2712,10 @@ export default function TsdPage() {
           return;
         }
 
+        const canonicalBarcode = unitInfo.barcode || barcode;
+
         // Проверяем, есть ли заказ в активных задачах
-        const checkRes = await fetch(`/api/tsd/shipping-tasks/check-unit?unitBarcode=${encodeURIComponent(barcode)}`, {
+        const checkRes = await fetch(`/api/tsd/shipping-tasks/check-unit?unitBarcode=${encodeURIComponent(canonicalBarcode)}`, {
           cache: "no-store",
         });
 
@@ -2741,9 +2735,9 @@ export default function TsdPage() {
           taskId: checkJson.task.id,
           toCell: checkJson.toCell,
         });
-        setSuccess(`✓ Заказ ${barcode} найден в задаче. TO ячейка: ${checkJson.toCell.code}${checkJson.toCell.description ? ` (${checkJson.toCell.description})` : ""}`);
+        setSuccess(`✓ Заказ ${canonicalBarcode} найден в задаче. TO ячейка: ${checkJson.toCell.code}${checkJson.toCell.description ? ` (${checkJson.toCell.description})` : ""}`);
         triggerScanFlash("success");
-        showOpsHintForUnit(barcode);
+        showOpsHintForUnit(canonicalBarcode);
         setScanValue("");
         return;
       }

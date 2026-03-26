@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import {
+  buildScannerBarcodeCandidates,
+  normalizeBarcodeDigits,
+  pickBestBarcodeCandidate,
+} from "@/lib/barcode/normalization";
 
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
   const url = new URL(req.url);
-  const barcode = (url.searchParams.get("barcode") ?? "").trim();
+  const scanned = normalizeBarcodeDigits(url.searchParams.get("barcode") ?? "");
+  const barcodeCandidates = buildScannerBarcodeCandidates(scanned);
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   
@@ -12,7 +18,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!barcode) return NextResponse.json({ error: "Missing barcode" }, { status: 400 });
+  if (!scanned) return NextResponse.json({ error: "Missing barcode" }, { status: 400 });
 
   // Get warehouse_id for filtering
   const { data: profile, error: profError } = await supabase
@@ -25,14 +31,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Warehouse not assigned" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const { data: units, error } = await supabase
     .from("units")
     .select("id, barcode, status, created_at, cell_id, warehouse_id")
-    .eq("barcode", barcode)
+    .in("barcode", barcodeCandidates)
     .eq("warehouse_id", profile.warehouse_id)
-    .maybeSingle();
+    .limit(20);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const data = pickBestBarcodeCandidate(units ?? [], barcodeCandidates);
   if (!data) return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
 
   // Get current cell info if unit is in a cell
