@@ -1,3 +1,13 @@
+export async function callLogisticsPickingUnits() {
+  const { GET } = await import("../../app/api/logistics/picking-units/route");
+  return GET();
+}
+
+export async function callLogisticsCouriers() {
+  const { GET } = await import("../../app/api/logistics/couriers/route");
+  return GET();
+}
+
 export async function callShipOut(body: Record<string, unknown>) {
   const { POST } = await import("../../app/api/logistics/ship-out/route");
   return POST(
