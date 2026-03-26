@@ -692,9 +692,22 @@ export default function TsdPage() {
       }
       
       const barcode = parsed.code;
+      const scannedDigits = String(barcode ?? "").replace(/\D/g, "");
+      const scannedNoLeadingZeros = scannedDigits.replace(/^0+/, "");
+      const reversedDigits = scannedDigits.split("").reverse().join("");
+      const reversedNoLeadingZeros = reversedDigits.replace(/^0+/, "");
       
       // Проверяем, что заказ из выбранной from-ячейки
-      const unit = shippingNewSelectedFromCell.units.find((u: any) => u.barcode === barcode);
+      const unit = shippingNewSelectedFromCell.units.find((u: any) => {
+        const unitDigits = String(u?.barcode ?? "").replace(/\D/g, "");
+        const unitNoLeadingZeros = unitDigits.replace(/^0+/, "");
+        return (
+          unitDigits === scannedDigits ||
+          unitNoLeadingZeros === scannedNoLeadingZeros ||
+          unitDigits === reversedDigits ||
+          unitNoLeadingZeros === reversedNoLeadingZeros
+        );
+      });
       if (!unit) {
         triggerScanFlash("error");
         setError(`Заказ ${barcode} не найден в ячейке ${shippingNewSelectedFromCell.code}`);
@@ -703,9 +716,9 @@ export default function TsdPage() {
       }
       
       // Проверяем, не отсканирован ли уже
-      if (shippingNewScannedUnits.some((u) => u.barcode === barcode)) {
+      if (shippingNewScannedUnits.some((u) => u.id === unit.id || u.barcode === unit.barcode)) {
         triggerScanFlash("error");
-        setError(`Заказ ${barcode} уже отсканирован`);
+        setError(`Заказ ${unit.barcode} уже отсканирован`);
         setScanValue("");
         return;
       }
@@ -756,10 +769,10 @@ export default function TsdPage() {
           setShippingNewSelectedFromCell(null);
         }, 2000);
       } else {
-        setSuccess(`✓ ${barcode} перемещен в ${currentTaskNew.targetCell.code} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
+        setSuccess(`✓ ${unit.barcode} перемещен в ${currentTaskNew.targetCell.code} (${scannedInThisCell}/${shippingNewSelectedFromCell.units.length} из ${shippingNewSelectedFromCell.code})`);
       }
       triggerScanFlash("success");
-      showOpsHintForUnit(barcode);
+      showOpsHintForUnit(unit.barcode);
 
       loadShippingNewTasks();
       
@@ -3194,70 +3207,77 @@ export default function TsdPage() {
           style={{
             marginBottom: 16,
             display: "flex",
+            flexDirection: "column",
             gap: 8,
-            alignItems: "stretch",
           }}
         >
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Сканируй здесь"
-            value={scanValue}
-            onChange={(e) => setScanValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={busy}
+          <div
             style={{
-              flex: 1,
-              minWidth: 0,
-              width: "auto",
-              padding: "var(--spacing-lg)",
-              minHeight: 56,
-              fontSize: "20px",
-              border:
-                scanFlash === "success"
-                  ? "2px solid #22c55e"
-                  : scanFlash === "error"
-                    ? "2px solid #ef4444"
-                    : "2px solid var(--color-primary)",
-              borderRadius: "var(--radius-md)",
-              outline: "none",
-              fontWeight: 600,
-              boxSizing: "border-box",
-              background: "var(--color-bg)",
-              color: "var(--color-text)",
-              fontFamily: "var(--font-sans)",
-              transition: "box-shadow 0.35s ease-out, border-color 0.25s ease-out",
-              ...(scanFlash === "success"
-                ? {
-                    boxShadow:
-                      "0 0 0 3px rgba(34, 197, 94, 0.4), -10px 0 22px rgba(34, 197, 94, 0.38), 10px 0 22px rgba(34, 197, 94, 0.38)",
-                  }
-                : scanFlash === "error"
+              display: "flex",
+              gap: 8,
+              alignItems: "stretch",
+            }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Сканируй здесь"
+              value={scanValue}
+              onChange={(e) => setScanValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={busy}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                width: "auto",
+                padding: "var(--spacing-lg)",
+                minHeight: 56,
+                fontSize: "20px",
+                border:
+                  scanFlash === "success"
+                    ? "2px solid #22c55e"
+                    : scanFlash === "error"
+                      ? "2px solid #ef4444"
+                      : "2px solid var(--color-primary)",
+                borderRadius: "var(--radius-md)",
+                outline: "none",
+                fontWeight: 600,
+                boxSizing: "border-box",
+                background: "var(--color-bg)",
+                color: "var(--color-text)",
+                fontFamily: "var(--font-sans)",
+                transition: "box-shadow 0.35s ease-out, border-color 0.25s ease-out",
+                ...(scanFlash === "success"
                   ? {
                       boxShadow:
-                        "0 0 0 3px rgba(239, 68, 68, 0.4), -10px 0 22px rgba(239, 68, 68, 0.34), 10px 0 22px rgba(239, 68, 68, 0.34)",
+                        "0 0 0 3px rgba(34, 197, 94, 0.4), -10px 0 22px rgba(34, 197, 94, 0.38), 10px 0 22px rgba(34, 197, 94, 0.38)",
                     }
-                  : { boxShadow: "none" }),
-            }}
-            autoFocus
-          />
-          {mode !== "courier_lost" && (
-            <TsdCameraScanButton disabled={busy} onDetected={(raw) => submitScanFromCamera(raw)} />
-          )}
+                  : scanFlash === "error"
+                    ? {
+                        boxShadow:
+                          "0 0 0 3px rgba(239, 68, 68, 0.4), -10px 0 22px rgba(239, 68, 68, 0.34), 10px 0 22px rgba(239, 68, 68, 0.34)",
+                      }
+                    : { boxShadow: "none" }),
+              }}
+              autoFocus
+            />
+            {mode !== "courier_lost" && (
+              <TsdCameraScanButton disabled={busy} onDetected={(raw) => submitScanFromCamera(raw)} />
+            )}
+          </div>
           {error && (
-            <div style={{ marginTop: "var(--spacing-sm)" }}>
+            <div>
               <Alert variant="error">{error}</Alert>
             </div>
           )}
           {success && (
-            <div style={{ marginTop: "var(--spacing-sm)" }}>
+            <div>
               <Alert variant="success">{success}</Alert>
             </div>
           )}
           {opsHint && (
             <div
               style={{
-                marginTop: "var(--spacing-sm)",
                 padding: "12px 14px",
                 borderRadius: 12,
                 border: "1px solid #93c5fd",

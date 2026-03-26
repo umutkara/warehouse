@@ -3,15 +3,14 @@ import { supabaseServer } from "@/lib/supabase/server";
 
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
+  const url = new URL(req.url);
+  const barcode = (url.searchParams.get("barcode") ?? "").trim();
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   
   if (userErr || !userData?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const url = new URL(req.url);
-  const barcode = (url.searchParams.get("barcode") ?? "").trim();
 
   if (!barcode) return NextResponse.json({ error: "Missing barcode" }, { status: 400 });
 
