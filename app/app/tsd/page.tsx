@@ -120,6 +120,10 @@ export default function TsdPage() {
   const [courierHandovers, setCourierHandovers] = useState<CourierHandoverSession[]>([]);
   const [selectedCourierHandoverId, setSelectedCourierHandoverId] = useState<string | null>(null);
   const [loadingCourierHandovers, setLoadingCourierHandovers] = useState(false);
+  const [courierArchivedHandovers, setCourierArchivedHandovers] = useState<CourierHandoverSession[]>([]);
+  const [loadingCourierArchivedHandovers, setLoadingCourierArchivedHandovers] = useState(false);
+  const [expandedArchivedHandoverIds, setExpandedArchivedHandoverIds] = useState<string[]>([]);
+  const [isArchivePanelExpanded, setIsArchivePanelExpanded] = useState(false);
   const [courierLostItems, setCourierLostItems] = useState<CourierLostItem[]>([]);
   const [loadingCourierLostItems, setLoadingCourierLostItems] = useState(false);
   
@@ -418,6 +422,30 @@ export default function TsdPage() {
     }
   }
 
+  async function loadCourierArchivedHandovers() {
+    setLoadingCourierArchivedHandovers(true);
+    try {
+      const res = await fetch("/api/ops/courier-handovers/archive", { cache: "no-store" });
+      const payload = (await res.json().catch(() => null)) as
+        | { ok?: boolean; handovers?: CourierHandoverSession[] }
+        | null;
+      if (res.ok && payload?.ok && Array.isArray(payload.handovers)) {
+        setCourierArchivedHandovers(payload.handovers);
+        setExpandedArchivedHandoverIds((prev) =>
+          prev.filter((id) => payload.handovers?.some((handover) => handover.handover_session_id === id)),
+        );
+      } else {
+        setCourierArchivedHandovers([]);
+        setExpandedArchivedHandoverIds([]);
+      }
+    } catch {
+      setCourierArchivedHandovers([]);
+      setExpandedArchivedHandoverIds([]);
+    } finally {
+      setLoadingCourierArchivedHandovers(false);
+    }
+  }
+
   const selectedCourierHandover = useMemo(
     () =>
       courierHandovers.find(
@@ -429,10 +457,18 @@ export default function TsdPage() {
   useEffect(() => {
     if (mode === "courier_receiving") {
       loadCourierHandovers();
+      loadCourierArchivedHandovers();
     } else if (mode === "courier_lost") {
       loadCourierLostItems();
     }
   }, [mode]);
+
+  function toggleArchivedHandover(sessionId: string) {
+    setExpandedArchivedHandoverIds((prev) => {
+      const isExpanded = prev.includes(sessionId);
+      return isExpanded ? prev.filter((id) => id !== sessionId) : [...prev, sessionId];
+    });
+  }
   
   // Auto-load next task after completion
   useEffect(() => {
@@ -1547,7 +1583,7 @@ export default function TsdPage() {
           `потеряно: ${summary.lost_total || 0}, вне рейса: ${summary.extra_total || 0}`,
       );
       setLastCourierReceivedUnit(null);
-      await Promise.all([loadCourierHandovers(), loadCourierLostItems()]);
+      await Promise.all([loadCourierHandovers(), loadCourierArchivedHandovers(), loadCourierLostItems()]);
     } catch (e: any) {
       setError(e.message || "Не удалось закрыть приемку курьера");
     } finally {
@@ -3427,6 +3463,110 @@ export default function TsdPage() {
                   })}
                 </div>
               )}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                background: "#f8fafc",
+                borderRadius: 10,
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>
+                  Архив приемок
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setIsArchivePanelExpanded((prev) => !prev)}
+                  >
+                    {isArchivePanelExpanded ? "Свернуть" : "Развернуть"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadCourierArchivedHandovers()}
+                    disabled={loadingCourierArchivedHandovers}
+                  >
+                    {loadingCourierArchivedHandovers ? "Загрузка…" : "Обновить"}
+                  </Button>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: isArchivePanelExpanded ? 10 : 0 }}>
+                Закрытые сессии приемки курьера ({courierArchivedHandovers.length}).
+              </div>
+              {isArchivePanelExpanded &&
+                (loadingCourierArchivedHandovers ? (
+                  <div style={{ fontSize: 13, color: "#64748b" }}>Загрузка…</div>
+                ) : courierArchivedHandovers.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#64748b" }}>Архив пока пуст.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {courierArchivedHandovers.map((handover) => {
+                      const isExpanded = expandedArchivedHandoverIds.includes(handover.handover_session_id);
+                      return (
+                        <div
+                          key={handover.handover_session_id}
+                          style={{
+                            padding: 12,
+                            background: "#fff",
+                            borderRadius: 8,
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleArchivedHandover(handover.handover_session_id)}
+                            style={{
+                              width: "100%",
+                              background: "transparent",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: 0,
+                              textAlign: "left",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                              <div>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                                  {handover.courier_name}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#64748b" }}>
+                                  Сессия: {handover.handover_session_id.slice(0, 8)}
+                                  {handover.confirmed_at
+                                    ? ` • Закрыта ${new Date(handover.confirmed_at).toLocaleString("ru-RU")}`
+                                    : ""}
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#475569", textAlign: "right" }}>
+                                <div>Ожидалось: {handover.expected_total}</div>
+                                <div>Принято: {handover.received_total}</div>
+                                <div>Потери: {handover.lost_total}</div>
+                                <div>Вне рейса: {handover.extra_total}</div>
+                              </div>
+                            </div>
+                          </button>
+                          {isExpanded && (
+                            <div style={{ marginTop: 10, borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "grid", gap: 8 }}>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                Принято: {handover.received_items.map((item) => item.unit_barcode).join(", ") || "—"}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                Потери: {handover.lost_items.map((item) => item.unit_barcode).join(", ") || "—"}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                Вне рейса: {handover.extra_items.map((item) => item.unit_barcode).join(", ") || "—"}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
             </div>
 
             {selectedCourierHandover && (

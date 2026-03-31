@@ -92,6 +92,32 @@ export async function POST(req: Request) {
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+    if (existingItem.task_id) {
+      const { data: taskRow } = await supabaseAdmin
+        .from("courier_tasks")
+        .select("id, meta")
+        .eq("id", existingItem.task_id)
+        .maybeSingle();
+      if (taskRow?.id) {
+        const taskMeta =
+          taskRow.meta && typeof taskRow.meta === "object"
+            ? (taskRow.meta as Record<string, unknown>)
+            : {};
+        const hiddenAt = new Date().toISOString();
+        const hiddenMeta = {
+          ...taskMeta,
+          hidden_from_courier: true,
+          hidden_from_courier_at: hiddenAt,
+          hidden_from_courier_by: auth.user.id,
+          hidden_from_courier_reason: "warehouse_handover_received",
+          source: "api.ops.courier-handovers.scan",
+        };
+        await supabaseAdmin
+          .from("courier_tasks")
+          .update({ meta: hiddenMeta, updated_at: hiddenAt })
+          .eq("id", taskRow.id);
+      }
+    }
   } else {
     const { error: insertError } = await supabaseAdmin.from("warehouse_handover_items").insert({
       handover_session_id: handover.id,

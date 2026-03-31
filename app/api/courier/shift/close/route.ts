@@ -110,7 +110,6 @@ export async function POST(req: Request) {
     if (shiftTasksErr) {
       console.error("[shift/close] shiftTasks fetch error:", shiftTasksErr);
     }
-
     const allOnHandTasks = (shiftTasks || []).filter((task) => task.unit_id);
     if (allOnHandTasks.length > 0) {
       const { data: existingItems } = await supabaseAdmin

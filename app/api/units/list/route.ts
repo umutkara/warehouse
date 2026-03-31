@@ -358,6 +358,7 @@ export async function GET(req: Request) {
       : typeof totalCount === "number"
       ? totalCount
       : responseUnits.length;
+
     return NextResponse.json({
       ok: true,
       units: responseUnits,

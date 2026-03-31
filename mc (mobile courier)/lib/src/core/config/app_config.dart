@@ -1,11 +1,12 @@
 class AppConfig {
   const AppConfig._();
 
-  /// Backend API URL. Must match Next.js "Network" line (`next dev`). Override:
-  /// `--dart-define=API_BASE_URL=http://<your-lan-ip>:3000`
+  /// Backend API URL. Override via:
+  /// `--dart-define=API_BASE_URL=https://your-server.example.com`
+  /// Tip: use `./scripts/run-mobile-courier.sh` to reuse .env.local value.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.100.58:3000',
+    defaultValue: 'http://172.20.10.2:3000',
   );
 
   static const String supabaseUrl = String.fromEnvironment(
