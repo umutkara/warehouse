@@ -70,6 +70,36 @@ export async function GET(req: Request) {
   // Avoid mixing || with ?? (Turbopack parser strictness).
   let resolvedCellId: string | null = lastMoveToCellId || unit.cell_id || null;
 
+  // OUT/shipped are outside warehouse location tracking (hide cell).
+  try {
+    const { data: lastShipment } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select("status, out_at")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("unit_id", unit.id)
+      .order("out_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const shouldHideCell =
+      unit.status === "out" ||
+      unit.status === "shipped" ||
+      lastShipment?.status === "out";
+
+    if (shouldHideCell) {
+      return NextResponse.json({
+        unit: {
+          ...unit,
+          cell_id: null,
+        },
+        cell: null,
+        message: "Заказ в OUT: местонахождение на складе не отображается",
+      });
+    }
+  } catch {
+    // ignore
+  }
+
   // Fallback: when physical cell is not set, try latest active picking task target cell.
   if (!resolvedCellId) {
     const { data: taskLinks, error: taskLinksErr } = await supabaseAdmin

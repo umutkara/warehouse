@@ -255,6 +255,8 @@ export async function GET(req: Request) {
     const missingMoveCellIds = moveCellIds.filter((id) => !cellsMap.has(id));
 
     function getDisplayCell(unit: any): { code: string; cell_type: string } | null {
+      // OUT/shipped are outside warehouse location tracking (hide cell in lists).
+      if (unit?.status === "out" || unit?.status === "shipped") return null;
       const resolvedCellId =
         lastMoveToCellIdByUnitId.get(unit.id) ||
         unit.cell_id ||
