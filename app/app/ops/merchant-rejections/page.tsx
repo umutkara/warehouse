@@ -84,11 +84,11 @@ export default function MerchantRejectionsPage() {
 
   useEffect(() => {
     loadUnits();
-  }, [scope, ticketStatus, ageFilter, sortBy, page]);
+  }, [scope, ticketStatus, ageFilter, sortBy, page, searchBarcode]);
 
   useEffect(() => {
     setPage(1);
-  }, [scope, ticketStatus, ageFilter, sortBy]);
+  }, [scope, ticketStatus, ageFilter, sortBy, searchBarcode]);
 
   useEffect(() => {
     setPageJumpInput(String(page));
@@ -104,6 +104,7 @@ export default function MerchantRejectionsPage() {
       if (ticketStatus !== "all") params.set("ticket_status", ticketStatus);
       if (ageFilter !== "all") params.set("age", ageFilter);
       if (sortBy !== "created_desc") params.set("sort", sortBy);
+      if (searchBarcode.trim()) params.set("barcode", searchBarcode.trim());
       params.set("page", String(page));
       params.set("page_size", "30");
       const q = params.toString();

@@ -43,6 +43,8 @@ export async function GET(req: Request) {
     const ticketStatus = url.searchParams.get("ticket_status") || "all";
     const ageFilter = url.searchParams.get("age") || "all";
     const sortBy = url.searchParams.get("sort") || "created_desc";
+    const barcodeQueryRaw = url.searchParams.get("barcode") || "";
+    const barcodeQuery = barcodeQueryRaw.trim();
     const page = Math.max(1, Number(url.searchParams.get("page") || 1));
     const queryPageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size") || 30)));
     const ageThresholdHours = ageFilter === "24h" ? 24 : ageFilter === "48h" ? 48 : ageFilter === "7d" ? 168 : null;
@@ -110,6 +112,11 @@ export async function GET(req: Request) {
       return q;
     }
 
+    function applyBarcodeFilter(query: any) {
+      if (!barcodeQuery) return query;
+      return query.ilike("barcode", `%${barcodeQuery}%`);
+    }
+
     const selectColumns = "id, barcode, status, product_name, partner_name, price, created_at, meta, cell_id";
     const from = (page - 1) * queryPageSize;
     const to = from + queryPageSize - 1;
@@ -119,8 +126,10 @@ export async function GET(req: Request) {
 
     // Fast path: DB-level pagination is safe only for created_at sorting without age filtering.
     if (!requiresPostProcessingPagination) {
-      const unitsQuery = applyScopeAndTicketFilters(
-        supabaseAdmin.from("units").select(selectColumns, { count: "exact" }),
+      const unitsQuery = applyBarcodeFilter(
+        applyScopeAndTicketFilters(
+          supabaseAdmin.from("units").select(selectColumns, { count: "exact" }),
+        )
       )
         .order(sortBy.startsWith("created_") ? "created_at" : "created_at", {
           ascending: sortBy === "created_asc",
@@ -143,8 +152,10 @@ export async function GET(req: Request) {
       let offset = 0;
       let hasMore = true;
       while (hasMore) {
-        let unitsQuery = applyScopeAndTicketFilters(
-          supabaseAdmin.from("units").select(selectColumns),
+        let unitsQuery = applyBarcodeFilter(
+          applyScopeAndTicketFilters(
+            supabaseAdmin.from("units").select(selectColumns),
+          )
         );
         if (ageThresholdIso) {
           // age_hours is based on stay_start (>= created_at), so this is a strict prefilter.
