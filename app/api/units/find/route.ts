@@ -51,7 +51,24 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 
-  let resolvedCellId: string | null = unit.cell_id ?? null;
+  // "Фактическое местонахождение" = последняя точка перемещения unit_moves.to_cell_id (если есть).
+  // Если лог перемещения отсутствует, используем units.cell_id, а если он пуст — active picking task target.
+  let lastMoveToCellId: string | null = null;
+  try {
+    const { data: lastMove } = await supabaseAdmin
+      .from("unit_moves")
+      .select("to_cell_id, created_at")
+      .eq("unit_id", unit.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    lastMoveToCellId = (lastMove?.to_cell_id as string) ?? null;
+  } catch {
+    lastMoveToCellId = null;
+  }
+
+  // Avoid mixing || with ?? (Turbopack parser strictness).
+  let resolvedCellId: string | null = lastMoveToCellId || unit.cell_id || null;
 
   // Fallback: when physical cell is not set, try latest active picking task target cell.
   if (!resolvedCellId) {

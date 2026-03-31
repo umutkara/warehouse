@@ -39,6 +39,8 @@ export async function GET(req: Request) {
     const searchQuery = searchParams.get("search") || "";
     const statusFilter = searchParams.get("status") || "all";
     const opsFilter = searchParams.get("ops") || "all";
+    const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "200", 10) || 200, 1), 1000);
+    const offset = Math.max(parseInt(searchParams.get("offset") || "0", 10) || 0, 0);
     const normalizedSearchQuery = searchQuery.trim();
     const barcodeCandidates = buildBarcodeCandidates(normalizeBarcodeDigits(normalizedSearchQuery));
 
@@ -76,7 +78,8 @@ export async function GET(req: Request) {
         warehouse_cells!units_cell_id_fkey(code, cell_type)
       `)
       .eq("warehouse_id", profile.warehouse_id)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
     let countQuery = supabaseAdmin
       .from("units")
       .select("id, warehouse_cells!units_cell_id_fkey(cell_type)", { count: "exact", head: true })
@@ -122,13 +125,13 @@ export async function GET(req: Request) {
       }
     }
 
-    const { count: totalCount } = await countQuery;
+    const isBarcodeSearch = Boolean(normalizedSearchQuery) && barcodeCandidates.length > 0;
 
-    const { data: units, error: unitsError } = await query;
-    let effectiveUnits = units || [];
-    // If there is a numeric-like search query, load targeted barcode matches
-    // from the full warehouse scope to avoid default 1000-row ceiling.
-    if (normalizedSearchQuery && barcodeCandidates.length > 0) {
+    let totalCount: number | null = null;
+    let effectiveUnits: any[] = [];
+
+    if (isBarcodeSearch) {
+      // Fast path: search by barcode -> fetch only matching units.
       let barcodeQuery = supabaseAdmin
         .from("units")
         .select(`
@@ -144,7 +147,10 @@ export async function GET(req: Request) {
           warehouse_cells!units_cell_id_fkey(code, cell_type)
         `)
         .eq("warehouse_id", profile.warehouse_id)
-        .in("barcode", barcodeCandidates);
+        .in("barcode", barcodeCandidates)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
       if (statusFilter && statusFilter !== "all" && statusFilter !== "on_warehouse" && statusFilter !== "bin" && statusFilter !== "shipping") {
         barcodeQuery = barcodeQuery.eq("status", statusFilter);
       }
@@ -158,34 +164,70 @@ export async function GET(req: Request) {
           barcodeQuery = barcodeQuery.contains("meta", { ops_status: opsFilter });
         }
       }
-      const { data: barcodeHits } = await barcodeQuery.limit(100);
-      if (Array.isArray(barcodeHits) && barcodeHits.length > 0) {
-        const mapById = new Map<string, any>();
-        effectiveUnits.forEach((u: any) => mapById.set(u.id, u));
-        barcodeHits.forEach((u: any) => mapById.set(u.id, u));
-        effectiveUnits = Array.from(mapById.values());
+
+      const { data: barcodeHits, error: barcodeErr } = await barcodeQuery;
+      if (barcodeErr) {
+        console.error("Units list barcodeQuery error:", barcodeErr);
+        return NextResponse.json({ error: "Failed to load units" }, { status: 500 });
       }
-    }
-    if (unitsError) {
-      console.error("Units list error:", unitsError);
-      return NextResponse.json(
-        { error: "Failed to load units" },
-        { status: 500 }
-      );
+      effectiveUnits = Array.isArray(barcodeHits) ? barcodeHits : [];
+      totalCount = effectiveUnits.length;
+    } else {
+      const { count } = await countQuery;
+      totalCount = typeof count === "number" ? count : null;
+
+      const { data: units, error: unitsError } = await query;
+      if (unitsError) {
+        console.error("Units list error:", unitsError);
+        return NextResponse.json(
+          { error: "Failed to load units" },
+          { status: 500 }
+        );
+      }
+      effectiveUnits = units || [];
     }
 
     // По факту: ячейку для отображения берём из warehouse_cells_map; при рассинхроне — по status (rejected/ff).
     // Если cell_id пустой, но есть активная picking-задача с target — показываем эту ячейку (как на карте / в find).
-    const unitIdsNoPhysicalCell = effectiveUnits
-      .filter((u: any) => !u.cell_id)
+    // "Фактическое местонахождение" приоритетнее: последняя запись unit_moves.to_cell_id (если есть).
+
+    // 1) Сначала грузим lastMove (быстро определяет фактическую ячейку для большинства).
+    const lastMoveToCellIdByUnitId = new Map<string, string>();
+    try {
+      const allUnitIds = effectiveUnits.map((u: any) => u.id).filter(Boolean);
+      const chunkSize = 200;
+      for (let i = 0; i < allUnitIds.length; i += chunkSize) {
+        const chunk = allUnitIds.slice(i, i + chunkSize);
+        const { data: moves } = await supabaseAdmin
+          .from("unit_moves")
+          .select("unit_id, to_cell_id, created_at")
+          .in("unit_id", chunk)
+          .order("created_at", { ascending: false })
+          .limit(1000);
+        (moves ?? []).forEach((m: any) => {
+          if (!m?.unit_id || !m?.to_cell_id) return;
+          if (!lastMoveToCellIdByUnitId.has(m.unit_id)) {
+            lastMoveToCellIdByUnitId.set(m.unit_id, m.to_cell_id);
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2) Только если нет ни lastMove, ни physical cell — пробуем active picking target (обычно очень мало).
+    const unitIdsNeedPickingTarget = effectiveUnits
+      .filter((u: any) => !lastMoveToCellIdByUnitId.get(u.id) && !u.cell_id)
       .map((u: any) => u.id);
     const pickingTargetCellIdByUnitId = await getActivePickingTargetCellIdByUnitId(
       profile.warehouse_id,
-      unitIdsNoPhysicalCell,
+      unitIdsNeedPickingTarget,
     );
+
     const physicalCellIds = [...new Set(effectiveUnits.map((u: any) => u.cell_id).filter(Boolean))];
     const taskTargetCellIds = [...new Set(pickingTargetCellIdByUnitId.values())];
-    const cellIds = [...new Set([...physicalCellIds, ...taskTargetCellIds])];
+    const moveCellIdsInitial = [...new Set([...lastMoveToCellIdByUnitId.values()].filter(Boolean))];
+    const cellIds = [...new Set([...physicalCellIds, ...taskTargetCellIds, ...moveCellIdsInitial])];
     const cellsMap = new Map<string, { code: string; cell_type: string }>();
     if (cellIds.length > 0) {
       const { data: cells } = await supabaseAdmin
@@ -207,9 +249,17 @@ export async function GET(req: Request) {
       if (c.cell_type === "rejected") rejectedCell = rejectedCell ?? c;
       if (c.cell_type === "ff") ffCell = ffCell ?? c;
     });
+
+    // (cellsMap already includes move cells via cellIds; keep a small check for any misses)
+    const moveCellIds = [...new Set([...lastMoveToCellIdByUnitId.values()].filter(Boolean))];
+    const missingMoveCellIds = moveCellIds.filter((id) => !cellsMap.has(id));
+
     function getDisplayCell(unit: any): { code: string; cell_type: string } | null {
       const resolvedCellId =
-        unit.cell_id || pickingTargetCellIdByUnitId.get(unit.id) || null;
+        lastMoveToCellIdByUnitId.get(unit.id) ||
+        unit.cell_id ||
+        pickingTargetCellIdByUnitId.get(unit.id) ||
+        null;
       const raw = resolvedCellId ? cellsMap.get(resolvedCellId) : null;
       if (raw) return raw;
       if (unit.status === "rejected" && rejectedCell) return rejectedCell;
