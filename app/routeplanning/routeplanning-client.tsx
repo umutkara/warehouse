@@ -966,9 +966,18 @@ function ZoneEditorModal({
   const mapRef = useRef<any>(null);
   const mapsRef = useRef<any>(null);
   const clickListenerRef = useRef<any>(null);
+  const zonePolygonsRef = useRef<any[]>([]);
   const draftMarkersRef = useRef<any[]>([]);
   const draftLineRef = useRef<any>(null);
   const draftPolygonRef = useRef<any>(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  const clearZoneObjects = useCallback(() => {
+    for (const polygon of zonePolygonsRef.current) {
+      polygon.setMap(null);
+    }
+    zonePolygonsRef.current = [];
+  }, []);
 
   const clearDraftObjects = useCallback(() => {
     for (const marker of draftMarkersRef.current) {
@@ -1028,6 +1037,7 @@ function ZoneEditorModal({
   useEffect(() => {
     if (!open || !canEdit) return;
     let cancelled = false;
+    setMapReady(false);
     void loadGoogleMaps(apiKey)
       .then((maps) => {
         if (cancelled || !mapCanvasRef.current) return;
@@ -1050,23 +1060,67 @@ function ZoneEditorModal({
           if (typeof lat !== "number" || typeof lng !== "number") return;
           setDraftPoints((prev) => [...prev, { lat, lng }]);
         });
+        setMapReady(true);
       })
       .catch((error: unknown) => {
+        setMapReady(false);
         setModalError(error instanceof Error ? error.message : "Не удалось открыть карту геозон");
       });
 
     return () => {
       cancelled = true;
+      setMapReady(false);
       if (clickListenerRef.current && mapsRef.current) {
         mapsRef.current.event.removeListener(clickListenerRef.current);
         clickListenerRef.current = null;
       }
+      clearZoneObjects();
       clearDraftObjects();
     };
-  }, [apiKey, canEdit, clearDraftObjects, open]);
+  }, [apiKey, canEdit, clearDraftObjects, clearZoneObjects, open]);
 
   useEffect(() => {
-    if (!open || !canEdit || !mapRef.current || !mapsRef.current) return;
+    if (!open || !mapReady || !mapRef.current || !mapsRef.current) return;
+    const maps = mapsRef.current;
+    const map = mapRef.current;
+    clearZoneObjects();
+
+    const bounds = new maps.LatLngBounds();
+    let hasBounds = false;
+
+    for (const zone of zones) {
+      const path = parsePolygon(zone.polygon);
+      if (path.length < 3) continue;
+      const style = normalizeZoneStyle(zone.style);
+      const polygon = new maps.Polygon({
+        map,
+        paths: path,
+        strokeColor: style.strokeColor,
+        strokeOpacity: style.strokeOpacity,
+        strokeWeight: style.strokeWeight,
+        fillColor: style.fillColor,
+        fillOpacity: style.fillOpacity,
+        clickable: false,
+        zIndex: 1,
+      });
+      zonePolygonsRef.current.push(polygon);
+      for (const point of path) {
+        bounds.extend(point);
+        hasBounds = true;
+      }
+    }
+
+    if (hasBounds) {
+      map.fitBounds(bounds, 60);
+    }
+
+    return () => {
+      clearZoneObjects();
+    };
+  }, [clearZoneObjects, mapReady, open, zones]);
+
+  useEffect(() => {
+    if (!open || !canEdit || !mapReady || !mapRef.current || !mapsRef.current) return;
     clearDraftObjects();
     const maps = mapsRef.current;
     const map = mapRef.current;
