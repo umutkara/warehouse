@@ -15,6 +15,12 @@ describe("barcode normalization", () => {
     const candidates = buildBarcodeCandidates("31028624084");
     expect(candidates).toContain("31028624084");
     expect(candidates).toContain("003102862408401");
+    expect(candidates).toContain("003102862408402");
+  });
+
+  it("adds 00…01 and 00…02 padded variants for short numeric barcode", () => {
+    const candidates = buildBarcodeCandidates("31030960442");
+    expect(candidates).toContain("003103096044202");
   });
 
   it("builds candidates for 00-prefixed barcode", () => {

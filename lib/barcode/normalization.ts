@@ -14,6 +14,7 @@ export function buildBarcodeCandidates(rawBarcode: unknown): string[] {
   if (!digits.startsWith("00")) {
     out.add(`00${digits}`);
     out.add(`00${digits}01`);
+    out.add(`00${digits}02`);
   } else {
     out.add(`${digits}01`);
   }

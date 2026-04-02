@@ -245,7 +245,18 @@ export async function POST(req: Request) {
       .eq("warehouse_id", profile.warehouse_id)
       .in("barcode", barcodeCandidates)
       .limit(20);
-    const existingUnit = pickBestBarcodeCandidate(existingUnits ?? [], barcodeCandidates);
+
+    const existingRows = existingUnits ?? [];
+    const inTargetMatches = existingRows.filter(
+      (u) =>
+        u.cell_id === targetCell.id &&
+        u.barcode != null &&
+        barcodeCandidates.includes(u.barcode),
+    );
+    const existingUnit =
+      inTargetMatches.length === 0
+        ? pickBestBarcodeCandidate(existingRows, barcodeCandidates)
+        : pickBestBarcodeCandidate(inTargetMatches, barcodeCandidates);
 
     if (unitCheckError) {
       console.error("Error checking unit:", unitCheckError);
