@@ -155,9 +155,14 @@ export default function MobileCourierPrivacyPage() {
         </h2>
         <p>
           По вопросам обработки данных обращайтесь к оператору вашей складской системы. Настоящая
-          политика может обновляться; актуальная версия размещается по этому адресу. Для публикации в
-          Google Play укажите в консоли URL вида{" "}
-          <code style={{ fontSize: "0.9em" }}>https://&lt;ваш-домен&gt;/privacy</code>.
+          политика может обновляться; актуальная версия размещается по адресу:{" "}
+          <a
+            href="https://warehouse-nu-three.vercel.app/privacy"
+            style={{ color: "var(--color-primary)", wordBreak: "break-all" }}
+          >
+            https://warehouse-nu-three.vercel.app/privacy
+          </a>
+          .
         </p>
       </section>
     </main>
