@@ -192,9 +192,7 @@ export async function GET(req: Request) {
     shipmentByUnitId = new Map((shipments || []).map((shipment) => [shipment.unit_id, shipment]));
   }
 
-  return NextResponse.json({
-    ok: true,
-    tasks: (tasks || []).map((task) => {
+  const responseTasks = (tasks || []).map((task) => {
       const unit = unitsMap.get(task.unit_id) || null;
       const taskMeta = task.meta && typeof task.meta === "object" ? task.meta : null;
       const unitMeta = unit?.meta && typeof unit.meta === "object" ? unit.meta : null;
@@ -213,8 +211,7 @@ export async function GET(req: Request) {
           shipmentMeta.courier_pickup_confirmed_at.trim().length > 0);
       const selfPickup =
         taskMeta?.source === "api.courier.tasks.scan_claim" ||
-        Boolean(shipmentMeta?.external_pickup) ||
-        Boolean(unitMeta?.external_pickup);
+        Boolean(shipmentMeta?.external_pickup);
       return {
         ...task,
         shipment_id: shipment?.id || shipmentId,
@@ -230,6 +227,10 @@ export async function GET(req: Request) {
         ),
         unit,
       };
-    }),
+    });
+
+  return NextResponse.json({
+    ok: true,
+    tasks: responseTasks,
   });
 }

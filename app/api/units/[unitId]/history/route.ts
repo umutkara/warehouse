@@ -2,6 +2,22 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+type HistoryEvent = {
+  event_type: string;
+  created_at: string;
+  details: any;
+};
+
+function normalizeBase64PngDataUrl(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("http")) return trimmed;
+  if (trimmed.startsWith("data:image/")) return trimmed;
+  // Assume raw base64 png bytes
+  return `data:image/png;base64,${trimmed}`;
+}
+
 /**
  * GET /api/units/[unitId]/history
  * Returns comprehensive history of unit movements and events
@@ -255,7 +271,98 @@ export async function GET(
 
     // Merge task events with existing history and sort by date
     const existingHistory = historyData?.history || [];
-    const allHistory = [...existingHistory, ...taskEvents];
+
+    // Courier actions: merge courier_task_events + pickup confirmation from outbound_shipments.meta
+    const courierEvents: HistoryEvent[] = [];
+
+    const { data: courierTaskEvents, error: courierEventsError } = await supabaseAdmin
+      .from("courier_task_events")
+      .select(
+        "id, task_id, event_type, happened_at, note, lat, lng, proof_meta, meta, shift_id, courier_user_id, created_at, warehouse_id",
+      )
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("unit_id", unitId)
+      .order("happened_at", { ascending: false })
+      .limit(500);
+    if (courierEventsError) {
+      console.error("[History] Error loading courier_task_events:", courierEventsError);
+    }
+    for (const row of courierTaskEvents || []) {
+      const ts = row.happened_at || row.created_at || new Date().toISOString();
+      courierEvents.push({
+        event_type: "courier_task_event",
+        created_at: ts,
+        details: {
+          courier_event_type: row.event_type,
+          task_id: row.task_id,
+          event_id: row.id,
+          happened_at: row.happened_at,
+          note: row.note,
+          lat: row.lat,
+          lng: row.lng,
+          proof_meta: row.proof_meta,
+          meta: row.meta,
+          shift_id: row.shift_id,
+          courier_user_id: row.courier_user_id,
+          source: (row.meta as any)?.source || null,
+        },
+      });
+    }
+
+    const { data: shipmentRow, error: shipmentErr } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select("id, out_at, meta, courier_name, courier_user_id")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("unit_id", unitId)
+      .order("out_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (shipmentErr) {
+      console.error("[History] Error loading outbound shipment:", shipmentErr);
+    }
+    const shipmentMeta =
+      shipmentRow?.meta && typeof shipmentRow.meta === "object" ? (shipmentRow.meta as Record<string, unknown>) : null;
+    if (shipmentRow && shipmentMeta) {
+      const pickupStatus =
+        typeof shipmentMeta.courier_pickup_status === "string" ? shipmentMeta.courier_pickup_status : null;
+      const pickupConfirmedAt =
+        typeof shipmentMeta.courier_pickup_confirmed_at === "string" ? shipmentMeta.courier_pickup_confirmed_at : null;
+      const pickupRejectedAt =
+        typeof shipmentMeta.courier_pickup_rejected_at === "string" ? shipmentMeta.courier_pickup_rejected_at : null;
+      const pickupNote = typeof shipmentMeta.courier_pickup_note === "string" ? shipmentMeta.courier_pickup_note : null;
+      const rejectNote =
+        typeof shipmentMeta.courier_pickup_reject_note === "string" ? shipmentMeta.courier_pickup_reject_note : null;
+      const signatureUrl =
+        normalizeBase64PngDataUrl(shipmentMeta.courier_pickup_giver_signature_url) ||
+        normalizeBase64PngDataUrl(shipmentMeta.courier_pickup_giver_signature);
+
+      if (pickupStatus === "confirmed" && pickupConfirmedAt) {
+        courierEvents.push({
+          event_type: "courier_pickup_confirmed",
+          created_at: pickupConfirmedAt,
+          details: {
+            shipment_id: shipmentRow.id,
+            courier_name: shipmentRow.courier_name,
+            courier_user_id: shipmentRow.courier_user_id,
+            note: pickupNote,
+            giver_signature_url: signatureUrl,
+          },
+        });
+      } else if (pickupStatus === "rejected" && pickupRejectedAt) {
+        courierEvents.push({
+          event_type: "courier_pickup_rejected",
+          created_at: pickupRejectedAt,
+          details: {
+            shipment_id: shipmentRow.id,
+            courier_name: shipmentRow.courier_name,
+            courier_user_id: shipmentRow.courier_user_id,
+            note: rejectNote,
+          },
+        });
+      }
+    }
+
+    const allHistory = [...existingHistory, ...taskEvents, ...courierEvents];
     allHistory.sort((a, b) => {
       const dateA = new Date(a.created_at).getTime();
       const dateB = new Date(b.created_at).getTime();

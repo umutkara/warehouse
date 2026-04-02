@@ -491,21 +491,90 @@ type DropRenderPoint = {
   count: number;
   sample: DropPoint;
   clustered: boolean;
+  members: DropPoint[];
+  color_segments: Array<{
+    color_key: DropColor;
+    color_hex: string;
+    count: number;
+  }>;
 };
 
-function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRenderPoint[] {
-  if (zoom >= DROP_CLUSTER_ZOOM_THRESHOLD) {
-    return dropPoints
-      .filter((drop) => drop.lat !== null && drop.lng !== null)
-      .map((drop) => ({
-        lat: drop.lat as number,
-        lng: drop.lng as number,
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(a));
+}
+
+function buildColorSegments(drops: DropPoint[]) {
+  const counts = new Map<DropColor, { color_key: DropColor; color_hex: string; count: number }>();
+  for (const drop of drops) {
+    const existing = counts.get(drop.color_key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      counts.set(drop.color_key, {
         color_key: drop.color_key,
         color_hex: drop.color_hex || DROP_COLOR_HEX[drop.color_key],
         count: 1,
-        sample: drop,
-        clustered: false,
-      }));
+      });
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => b.count - a.count);
+}
+
+function buildRenderPointFromDrops(drops: DropPoint[]): DropRenderPoint {
+  const colorSegments = buildColorSegments(drops);
+  const primary = colorSegments[0];
+  const lat = drops.reduce((sum, drop) => sum + (drop.lat as number), 0) / drops.length;
+  const lng = drops.reduce((sum, drop) => sum + (drop.lng as number), 0) / drops.length;
+  return {
+    lat,
+    lng,
+    color_key: primary.color_key,
+    color_hex: primary.color_hex,
+    count: drops.length,
+    sample: drops[0],
+    clustered: drops.length > 1,
+    members: drops,
+    color_segments: colorSegments,
+  };
+}
+
+function clusterDropsByDistance(dropPoints: DropPoint[], maxDistanceMeters: number): DropRenderPoint[] {
+  const validDrops = dropPoints.filter((drop) => drop.lat !== null && drop.lng !== null);
+  const clusters: DropPoint[][] = [];
+
+  for (const drop of validDrops) {
+    const cluster = clusters.find((items) =>
+      items.some((existing) =>
+        distanceMeters(
+          existing.lat as number,
+          existing.lng as number,
+          drop.lat as number,
+          drop.lng as number,
+        ) <= maxDistanceMeters,
+      ),
+    );
+    if (cluster) {
+      cluster.push(drop);
+    } else {
+      clusters.push([drop]);
+    }
+  }
+
+  return clusters.map(buildRenderPointFromDrops);
+}
+
+function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRenderPoint[] {
+  if (zoom >= DROP_CLUSTER_ZOOM_THRESHOLD) {
+    return clusterDropsByDistance(dropPoints, 4);
   }
 
   const cellSize = clusterCellSizePx(zoom);
@@ -513,12 +582,7 @@ function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRende
   const buckets = new Map<
     string,
     {
-      latSum: number;
-      lngSum: number;
-      count: number;
-      sample: DropPoint;
-      color_key: DropColor;
-      color_hex: string;
+      drops: DropPoint[];
     }
   >();
 
@@ -529,33 +593,18 @@ function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRende
     const py = projected.y * worldPx;
     const cellX = Math.floor(px / cellSize);
     const cellY = Math.floor(py / cellSize);
-    const key = `${drop.color_key}:${cellX}:${cellY}`;
+    const key = `${cellX}:${cellY}`;
     const existing = buckets.get(key);
     if (existing) {
-      existing.latSum += drop.lat;
-      existing.lngSum += drop.lng;
-      existing.count += 1;
+      existing.drops.push(drop);
     } else {
       buckets.set(key, {
-        latSum: drop.lat,
-        lngSum: drop.lng,
-        count: 1,
-        sample: drop,
-        color_key: drop.color_key,
-        color_hex: drop.color_hex || DROP_COLOR_HEX[drop.color_key],
+        drops: [drop],
       });
     }
   }
 
-  return Array.from(buckets.values()).map((bucket) => ({
-    lat: bucket.latSum / bucket.count,
-    lng: bucket.lngSum / bucket.count,
-    color_key: bucket.color_key,
-    color_hex: bucket.color_hex,
-    count: bucket.count,
-    sample: bucket.sample,
-    clustered: bucket.count > 1,
-  }));
+  return Array.from(buckets.values()).map((bucket) => buildRenderPointFromDrops(bucket.drops));
 }
 
 function buildCourierAvatarSvg(seed: string): string {
@@ -601,6 +650,53 @@ function buildWarehouseZoneIcon(maps: any): { url: string; scaledSize: any; anch
     url: dataUri,
     scaledSize: new maps.Size(34, 34),
     anchor: new maps.Point(17, 17),
+  };
+}
+
+function buildDropClusterIcon(
+  maps: any,
+  drop: DropRenderPoint,
+): { url: string; scaledSize: any; anchor: any } {
+  const size = 38;
+  const center = size / 2;
+  const radius = 16;
+  const innerLeft = center - radius;
+  const innerSize = radius * 2;
+  let cursor = innerLeft;
+  const segmentRects = drop.color_segments
+    .map((segment, index) => {
+      const remainingWidth = innerLeft + innerSize - cursor;
+      const width =
+        index === drop.color_segments.length - 1
+          ? remainingWidth
+          : Math.max(4, (innerSize * segment.count) / drop.count);
+      const rect = `<rect x='${cursor.toFixed(2)}' y='${innerLeft}' width='${width.toFixed(
+        2,
+      )}' height='${innerSize}' fill='${segment.color_hex}'/>`;
+      cursor += width;
+      return rect;
+    })
+    .join("");
+  const label =
+    drop.count > 1
+      ? `<text x='${center}' y='${center + 4}' text-anchor='middle' font-family='Arial, sans-serif' font-size='12' font-weight='700' fill='white'>${drop.count}</text>`
+      : "";
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>
+  <defs>
+    <clipPath id='dropClusterClip'>
+      <circle cx='${center}' cy='${center}' r='${radius}' />
+    </clipPath>
+  </defs>
+  <g clip-path='url(#dropClusterClip)'>
+    ${segmentRects}
+  </g>
+  <circle cx='${center}' cy='${center}' r='${radius}' fill='none' stroke='white' stroke-width='2.5'/>
+  ${label}
+</svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new maps.Size(size, size),
+    anchor: new maps.Point(center, center),
   };
 }
 
@@ -807,38 +903,52 @@ function RoutePlanningMap({
     const effectiveZoom = typeof mapZoom === "number" ? mapZoom : map.getZoom() || 11;
     const renderedDropPoints = buildDropRenderPoints(dropPoints, effectiveZoom);
     for (const drop of renderedDropPoints) {
+      const isCombinedMarker = drop.count > 1 || drop.color_segments.length > 1;
+      const markerTitle = isCombinedMarker
+        ? `${drop.count} дропа: ${drop.members
+            .map((member) => member.unit_barcode || member.unit_id)
+            .join(", ")}`
+        : `Дроп ${drop.sample.unit_barcode || drop.sample.unit_id}`;
       const marker = new maps.Marker({
         map,
         position: { lat: drop.lat, lng: drop.lng },
-        title:
-          drop.count > 1
-            ? `${DROP_COLOR_LABEL[drop.color_key]}: ${drop.count} дропов`
-            : `Дроп ${drop.sample.unit_barcode || drop.sample.unit_id}`,
-        icon: {
-          path: maps.SymbolPath.CIRCLE,
-          scale: drop.count > 1 ? Math.min(17, 9 + Math.log2(drop.count) * 2.4) : 5,
-          fillColor: drop.color_hex || "#ef4444",
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: drop.count > 1 ? 2 : 1,
-        },
-        label:
-          drop.count > 1
-            ? {
-                text: String(drop.count),
-                color: "#ffffff",
-                fontWeight: "700",
-                fontSize: "12px",
-              }
-            : undefined,
+        title: markerTitle,
+        icon: isCombinedMarker
+          ? buildDropClusterIcon(maps, drop)
+          : {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 5,
+              fillColor: drop.color_hex || "#ef4444",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 1,
+            },
+        label: undefined,
         zIndex: drop.count > 1 ? 1800 + drop.count : undefined,
       });
       mapObjectsRef.current.markers.push(marker);
       if (drop.clustered) {
         marker.addListener("click", () => {
           const currentZoom = map.getZoom() || 11;
-          map.panTo(marker.getPosition());
-          map.setZoom(Math.min(currentZoom + 2, 18));
+          if (currentZoom < DROP_CLUSTER_ZOOM_THRESHOLD) {
+            map.panTo(marker.getPosition());
+            map.setZoom(Math.min(currentZoom + 2, DROP_CLUSTER_ZOOM_THRESHOLD));
+            return;
+          }
+          const lines = drop.members
+            .map((member) => {
+              const color = DROP_COLOR_LABEL[member.color_key];
+              const barcode = member.unit_barcode || member.unit_id;
+              return `<div>${escapeHtml(barcode)} <span style="color:#64748b">(${escapeHtml(color)})</span></div>`;
+            })
+            .join("");
+          infoWindow.setContent(`
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size:12px; line-height:1.4; min-width:180px;">
+              <div style="font-weight:700; margin-bottom:6px;">Сгруппированные дропы (${drop.count})</div>
+              ${lines}
+            </div>
+          `);
+          infoWindow.open({ map, anchor: marker });
         });
       }
       bounds.extend(marker.getPosition());

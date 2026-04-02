@@ -305,25 +305,6 @@ export async function GET() {
     }
   }
 
-  const pickedUpByCourierSet = new Set<string>();
-  if (dropUnitIds.length > 0) {
-    const shipmentsResult = await supabaseAdmin
-      .from("outbound_shipments")
-      .select("unit_id, meta")
-      .eq("warehouse_id", warehouseId)
-      .in("unit_id", dropUnitIds)
-      .eq("status", "out");
-    if (shipmentsResult.error) return dbErrorResponse(shipmentsResult.error.message);
-    for (const s of shipmentsResult.data || []) {
-      if (!s.unit_id) continue;
-      const meta = s.meta && typeof s.meta === "object" ? (s.meta as Record<string, unknown>) : {};
-      const confirmedAt = meta.courier_pickup_confirmed_at;
-      if (typeof confirmedAt === "string" && confirmedAt.trim()) {
-        pickedUpByCourierSet.add(s.unit_id);
-      }
-    }
-  }
-
   const dropPoints = dropEvents
     .map((event) => {
       const lat = toFiniteNumber(event.lat);
@@ -370,7 +351,6 @@ export async function GET() {
       point.lat !== null &&
       point.lng !== null &&
       !point.is_returned_to_bin &&
-      !pickedUpByCourierSet.has(point.unit_id) &&
       !(point.lat === 0 && point.lng === 0),
   );
 
@@ -380,6 +360,7 @@ export async function GET() {
       latestDropByUnitId.set(point.unit_id, point);
     }
   }
+  const dedupedDropPoints = Array.from(latestDropByUnitId.values());
 
   const zoneList = (zonesResult.data || []).map((z) => ({
     id: z.id,
@@ -481,7 +462,7 @@ export async function GET() {
     })),
     picking_units: pickingUnits,
     dropped_units: droppedUnits,
-    drop_points: dropPoints,
+    drop_points: dedupedDropPoints,
     live_couriers: liveCouriers,
     zones,
   });

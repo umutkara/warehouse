@@ -26,13 +26,13 @@ const OPS_STATUS_RULES = {
     createsDropPoint: true,
     requiresSignature: true,
     requiresPhoto: false,
-    requiresComment: false,
+    requiresComment: true,
   },
   client_rejected: {
     createsDropPoint: false,
     requiresSignature: false,
     requiresPhoto: false,
-    requiresComment: true,
+    requiresComment: false,
   },
   sent_to_client: {
     createsDropPoint: true,
@@ -492,7 +492,6 @@ export async function POST(
     if (unitUpdateError) {
       return NextResponse.json({ error: unitUpdateError.message }, { status: 500 });
     }
-
     const opsStatusTextMap: Record<string, string> = {
       partner_accepted_return: "Партнер принял на возврат",
       partner_rejected_return: "Партнер не принял на возврат",

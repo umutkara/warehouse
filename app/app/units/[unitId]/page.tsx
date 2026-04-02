@@ -59,6 +59,7 @@ export default function UnitDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [expandedHistoryItems, setExpandedHistoryItems] = useState<Record<string, boolean>>({});
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -695,6 +696,149 @@ export default function UnitDetailPage() {
           </div>
         );
 
+      case "courier_pickup_confirmed": {
+        const { courier_name, note, giver_signature_url } = event.details || {};
+        const isLargeInlineDataUrl =
+          typeof giver_signature_url === "string" && giver_signature_url.startsWith("data:image/") && giver_signature_url.length > 20_000;
+        const isExpanded = Boolean(expandedHistoryItems[uniqueKey]);
+        return (
+          <div
+            key={uniqueKey}
+            style={{
+              ...styles.historyItem,
+              background: "#f0fdf4",
+              borderColor: "#bbf7d0",
+            }}
+          >
+            <div style={styles.historyIcon}>✅</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Курьер забрал со склада</div>
+              {courier_name && <div style={styles.historyText}>Курьер: {courier_name}</div>}
+              {note && (
+                <div style={{ fontSize: 12, color: "#374151", marginTop: 4, padding: 6, background: "#fff", borderRadius: 4 }}>
+                  <strong>Комментарий:</strong> {note}
+                </div>
+              )}
+              {giver_signature_url && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Подпись передающего</div>
+                  {isLargeInlineDataUrl && !isExpanded ? (
+                    <button
+                      onClick={() =>
+                        setExpandedHistoryItems((prev) => ({
+                          ...prev,
+                          [uniqueKey]: true,
+                        }))
+                      }
+                      style={{
+                        padding: "6px 10px",
+                        background: "#fff",
+                        border: "1px solid #bbf7d0",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#166534",
+                      }}
+                    >
+                      Показать подпись
+                    </button>
+                  ) : (
+                    <a href={giver_signature_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block" }}>
+                      <img
+                        src={giver_signature_url}
+                        alt="Подпись передающего"
+                        loading="lazy"
+                        style={{ maxWidth: 160, maxHeight: 90, border: "1px solid #e5e7eb", borderRadius: 4, background: "#fff" }}
+                      />
+                    </a>
+                  )}
+                </div>
+              )}
+              <div style={styles.historyMeta}>{date}</div>
+            </div>
+          </div>
+        );
+      }
+
+      case "courier_pickup_rejected": {
+        const { courier_name, note } = event.details || {};
+        return (
+          <div
+            key={uniqueKey}
+            style={{
+              ...styles.historyItem,
+              background: "#fef2f2",
+              borderColor: "#fecaca",
+            }}
+          >
+            <div style={styles.historyIcon}>❌</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>Курьер отказался забирать</div>
+              {courier_name && <div style={styles.historyText}>Курьер: {courier_name}</div>}
+              {note && <div style={styles.historyText}>{note}</div>}
+              <div style={styles.historyMeta}>{date}</div>
+            </div>
+          </div>
+        );
+      }
+
+      case "courier_task_event": {
+        const d = event.details || {};
+        const eventType = String(d.courier_event_type || "");
+        const titleMap: Record<string, { title: string; icon: string; bg?: string; border?: string }> = {
+          claimed: { title: "Взял заказ", icon: "📌", bg: "#f0f9ff", border: "#bae6fd" },
+          in_route: { title: "В пути", icon: "🛣️", bg: "#f0f9ff", border: "#bae6fd" },
+          arrived: { title: "Прибыл", icon: "📍", bg: "#f0f9ff", border: "#bae6fd" },
+          dropped: { title: "Дроп", icon: "📦", bg: "#f0fdf4", border: "#bbf7d0" },
+          delivered: { title: "Доставлено", icon: "✅", bg: "#f0fdf4", border: "#bbf7d0" },
+          returned: { title: "Возврат", icon: "↩️", bg: "#fffbeb", border: "#fed7aa" },
+          failed: { title: "Не удалось", icon: "⚠️", bg: "#fef2f2", border: "#fecaca" },
+          ops_status_update: { title: "OPS статус (курьер)", icon: "📋", bg: "#f0f9ff", border: "#bae6fd" },
+        };
+        const mapped = titleMap[eventType] || { title: `Событие курьера: ${eventType || "unknown"}`, icon: "🧾" };
+        const proof = d.proof_meta || {};
+        const receiverSig = proof?.receiver_signature_url;
+        const actPhoto = proof?.act_photo_url;
+        return (
+          <div
+            key={uniqueKey}
+            style={{
+              ...styles.historyItem,
+              background: mapped.bg || "#f9fafb",
+              borderColor: mapped.border || "#e5e7eb",
+            }}
+          >
+            <div style={styles.historyIcon}>{mapped.icon}</div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.historyTitle}>{mapped.title}</div>
+              {d.note && <div style={styles.historyText}>{d.note}</div>}
+              {(receiverSig || actPhoto) && (
+                <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+                  {receiverSig && (
+                    <div>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Подпись принимающей стороны</div>
+                      <a href={receiverSig} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                        <img src={receiverSig} alt="Подпись" style={{ maxWidth: 120, maxHeight: 80, border: "1px solid #e5e7eb", borderRadius: 4 }} />
+                      </a>
+                    </div>
+                  )}
+                  {actPhoto && (
+                    <div>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Фото акта</div>
+                      <a href={actPhoto} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                        <img src={actPhoto} alt="Фото акта" style={{ maxWidth: 120, maxHeight: 80, objectFit: "cover", border: "1px solid #e5e7eb", borderRadius: 4 }} />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={styles.historyMeta}>{date}</div>
+            </div>
+          </div>
+        );
+      }
+
       default:
         return null;
     }
@@ -1161,15 +1305,32 @@ export default function UnitDetailPage() {
         {/* Right Column - History */}
         <div style={styles.column}>
           <div style={styles.card}>
+            <h2 style={styles.cardTitle}>Действия курьера</h2>
+
+            <div style={styles.historyContainer}>
+              {history.filter((e) => ["courier_task_event", "courier_pickup_confirmed", "courier_pickup_rejected"].includes(e.event_type)).length === 0 && (
+                <div style={{ fontSize: 14, color: "#9ca3af", textAlign: "center", padding: 20 }}>
+                  Действий курьера пока нет
+                </div>
+              )}
+              {history
+                .filter((e) => ["courier_task_event", "courier_pickup_confirmed", "courier_pickup_rejected"].includes(e.event_type))
+                .map((event, idx) => renderHistoryEvent(event, idx))}
+            </div>
+          </div>
+
+          <div style={styles.card}>
             <h2 style={styles.cardTitle}>История перемещений</h2>
 
             <div style={styles.historyContainer}>
-              {history.length === 0 && (
+              {history.filter((e) => !["courier_task_event", "courier_pickup_confirmed", "courier_pickup_rejected"].includes(e.event_type)).length === 0 && (
                 <div style={{ fontSize: 14, color: "#9ca3af", textAlign: "center", padding: 20 }}>
                   История пуста
                 </div>
               )}
-              {history.map((event, idx) => renderHistoryEvent(event, idx))}
+              {history
+                .filter((e) => !["courier_task_event", "courier_pickup_confirmed", "courier_pickup_rejected"].includes(e.event_type))
+                .map((event, idx) => renderHistoryEvent(event, idx))}
             </div>
           </div>
         </div>

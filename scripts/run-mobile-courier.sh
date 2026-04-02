@@ -32,12 +32,22 @@ fi
 DEVICE_ID="${1:-}"
 
 if [ -z "$DEVICE_ID" ]; then
-  DEVICE_ID="$(flutter devices --machine --device-timeout 10 | python3 - <<'PY'
+  RAW_DEVICES="$(flutter devices --machine --device-timeout 10 2>/dev/null || true)"
+  DEVICE_ID="$(python3 - <<'PY' "$RAW_DEVICES"
 import json
+import re
 import sys
 
+raw = sys.argv[1] if len(sys.argv) > 1 else ""
+
+# `flutter devices --machine` is supposed to print JSON, but some versions can
+# prepend human-readable error lines to stdout (e.g. adb warnings). Extract the
+# JSON array defensively.
+m = re.search(r"(\[[\s\S]*\])", raw)
+json_text = m.group(1) if m else "[]"
+
 try:
-    devices = json.load(sys.stdin)
+    devices = json.loads(json_text)
 except Exception:
     devices = []
 
