@@ -73,6 +73,8 @@ class OfflineEventQueue {
           item['path']?.toString() ?? '',
           body: (item['payload'] as Map?)?.cast<String, dynamic>() ?? {},
         );
+      } on ApiException {
+        // Server rejected the payload; keep offline queue for actual connectivity failures only.
       } catch (_) {
         remaining.add(item);
       }

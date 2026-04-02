@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:signature/signature.dart';
 
+import '../../../core/i18n/app_i18n.dart';
 import '../../shared/widgets/status_chip.dart';
 import '../domain/courier_task.dart';
 
@@ -35,7 +36,7 @@ class TaskDetailsPage extends StatelessWidget {
   static const List<_OpsStatusRule> _opsStatusRules = <_OpsStatusRule>[
     _OpsStatusRule(
       code: 'partner_accepted_return',
-      label: 'Партнер принял на возврат',
+      labelKey: 'ops.rule.partner_accepted_return',
       icon: Icons.check_circle_outline,
       createsDropPoint: true,
       requiresSignature: true,
@@ -44,7 +45,7 @@ class TaskDetailsPage extends StatelessWidget {
     ),
     _OpsStatusRule(
       code: 'partner_rejected_return',
-      label: 'Партнер не принял на возврат',
+      labelKey: 'ops.rule.partner_rejected_return',
       icon: Icons.cancel_outlined,
       createsDropPoint: false,
       requiresSignature: true,
@@ -53,7 +54,7 @@ class TaskDetailsPage extends StatelessWidget {
     ),
     _OpsStatusRule(
       code: 'sent_to_sc',
-      label: 'Передан в СЦ',
+      labelKey: 'ops.rule.sent_to_sc',
       icon: Icons.build_circle_outlined,
       createsDropPoint: true,
       requiresSignature: true,
@@ -62,25 +63,25 @@ class TaskDetailsPage extends StatelessWidget {
     ),
     _OpsStatusRule(
       code: 'client_accepted',
-      label: 'Клиент принял',
+      labelKey: 'ops.rule.client_accepted',
       icon: Icons.thumb_up_alt_outlined,
       createsDropPoint: true,
       requiresSignature: true,
       requiresPhoto: false,
-      requiresComment: false,
+      requiresComment: true,
     ),
     _OpsStatusRule(
       code: 'client_rejected',
-      label: 'Клиент не принял',
+      labelKey: 'ops.rule.client_rejected',
       icon: Icons.thumb_down_alt_outlined,
       createsDropPoint: false,
       requiresSignature: false,
       requiresPhoto: false,
-      requiresComment: true,
+      requiresComment: false,
     ),
     _OpsStatusRule(
       code: 'delivered_to_pudo',
-      label: 'Товар доставлен на ПУДО',
+      labelKey: 'ops.rule.delivered_to_pudo',
       icon: Icons.store_mall_directory_outlined,
       createsDropPoint: true,
       requiresSignature: true,
@@ -89,7 +90,7 @@ class TaskDetailsPage extends StatelessWidget {
     ),
     _OpsStatusRule(
       code: 'postponed_1',
-      label: 'Перенос',
+      labelKey: 'ops.rule.postponed_1',
       icon: Icons.schedule_outlined,
       createsDropPoint: false,
       requiresSignature: false,
@@ -98,7 +99,7 @@ class TaskDetailsPage extends StatelessWidget {
     ),
     _OpsStatusRule(
       code: 'in_progress',
-      label: 'В работе',
+      labelKey: 'ops.rule.in_progress',
       icon: Icons.pending_actions_outlined,
       createsDropPoint: false,
       requiresSignature: false,
@@ -112,7 +113,7 @@ class TaskDetailsPage extends StatelessWidget {
     final formatter = DateFormat('dd.MM.yyyy HH:mm');
     final showNotPicked = task.assignedByLogistics && !task.pickupConfirmed;
     return Scaffold(
-      appBar: AppBar(title: const Text('Детали задачи')),
+      appBar: AppBar(title: Text(context.t('task.details.title'))),
       body: SafeArea(
         child: Column(
           children: [
@@ -126,7 +127,8 @@ class TaskDetailsPage extends StatelessWidget {
                     const SizedBox(height: 8),
                     StatusChip(
                       status: task.status,
-                      label: showNotPicked ? 'НЕ ЗАБРАН' : null,
+                      opsStatus: task.opsStatus,
+                      label: showNotPicked ? context.t('task.not_picked') : null,
                       color: showNotPicked ? Colors.red.shade700 : null,
                     ),
                     const SizedBox(height: 16),
@@ -134,21 +136,28 @@ class TaskDetailsPage extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          'Источник: назначено логистом${task.assignedCourierName != null ? ' (${task.assignedCourierName})' : ''}',
+                          tr(
+                            context.t('task.source_logistics'),
+                            {
+                              'suffix': task.assignedCourierName != null
+                                  ? tr(context.t('task.source_suffix_name'), {'name': task.assignedCourierName})
+                                  : '',
+                            },
+                          ),
                         ),
                       ),
                     if (showNotPicked)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          'Заказ назначен логистом, но курьер еще не подтвердил фактический забор из точки.',
+                          context.t('task.assigned_not_confirmed'),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
-                    Text('Взято в работу: ${formatter.format(task.claimedAt.toLocal())}'),
-                    if (task.zoneId != null) Text('Зона: ${task.zoneId}'),
+                    Text(tr(context.t('task.claimed_at'), {'dt': formatter.format(task.claimedAt.toLocal())})),
+                    if (task.zoneId != null) Text(tr(context.t('task.zone'), {'zone': task.zoneId})),
                     if (task.scenario != null && task.scenario!.isNotEmpty)
-                      Text('Сценарий: ${task.scenario}'),
+                      Text(tr(context.t('task.scenario'), {'scenario': task.scenario})),
                   ],
                 ),
               ),
@@ -166,7 +175,7 @@ class TaskDetailsPage extends StatelessWidget {
                         Navigator.of(context).pop();
                       },
                       icon: const Icon(Icons.draw_outlined),
-                      label: const Text('Подтвердить забор'),
+                      label: Text(context.t('pickup.confirm')),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
@@ -176,7 +185,7 @@ class TaskDetailsPage extends StatelessWidget {
                         Navigator.of(context).pop();
                       },
                       icon: const Icon(Icons.cancel_outlined),
-                      label: const Text('Незабор'),
+                      label: Text(context.t('pickup.reject')),
                     ),
                   ] else if (task.selfPickup) ...[
                     Container(
@@ -186,7 +195,7 @@ class TaskDetailsPage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        'Самостоятельный забор. Сдаётся только при закрытии смены.',
+                        context.t('self_pickup.block'),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
@@ -198,7 +207,7 @@ class TaskDetailsPage extends StatelessWidget {
                         await onUndoDrop!();
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Дроп отменён')),
+                          SnackBar(content: Text(context.t('drop.undo.snack'))),
                         );
                         Navigator.of(context).pop();
                       },
@@ -207,7 +216,7 @@ class TaskDetailsPage extends StatelessWidget {
                         foregroundColor: Theme.of(context).colorScheme.onError,
                       ),
                       icon: const Icon(Icons.undo),
-                      label: const Text('Отменить дроп'),
+                      label: Text(context.t('drop.undo')),
                     ),
                   ] else if (!task.selfPickup) ...[
                     SizedBox(
@@ -215,15 +224,16 @@ class TaskDetailsPage extends StatelessWidget {
                       child: FilledButton.icon(
                         onPressed: () async {
                           final selected = await _showDropOpsStatusDialog(context);
-                          if (!context.mounted || selected == null) return;
+                          if (!context.mounted) return;
+                          if (selected == null) return;
                           await onMarkDropped(selected);
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
                                 selected.createsDropPoint
-                                    ? 'Дроп отправлен с OPS статусом'
-                                    : 'OPS статус отправлен (заказ остался у курьера)',
+                                    ? context.t('ops.snack.drop_sent')
+                                    : context.t('ops.snack.status_sent'),
                               ),
                             ),
                           );
@@ -234,7 +244,7 @@ class TaskDetailsPage extends StatelessWidget {
                           foregroundColor: Colors.white,
                         ),
                         icon: const Icon(Icons.playlist_add_check_circle_outlined),
-                        label: const Text('OPS статус'),
+                        label: Text(context.t('task.finish_route')),
                       ),
                     ),
                   ],
@@ -380,17 +390,19 @@ class _DropDialogState extends State<_DropDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('OPS статус', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(context.t('ops.dialog.title'),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               Flexible(
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Статус (обязательно):'),
+                      Text(context.t('ops.dialog.status_required')),
                       const SizedBox(height: 4),
                       DropdownButtonFormField<String>(
                         initialValue: _selectedStatus,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           border: OutlineInputBorder(),
                           isDense: true,
@@ -399,17 +411,27 @@ class _DropDialogState extends State<_DropDialog> {
                             .map(
                               (o) => DropdownMenuItem(
                                 value: o.code,
-                                child: Row(
-                                  children: [
-                                    Icon(o.icon, size: 22, color: Theme.of(context).colorScheme.primary),
-                                    const SizedBox(width: 10),
-                                    Flexible(child: Text(o.label)),
-                                  ],
+                                child: SizedBox(
+                                  width: 240,
+                                  child: Row(
+                                    children: [
+                                      Icon(o.icon, size: 22, color: Theme.of(context).colorScheme.primary),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          context.t(o.labelKey),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             )
                             .toList(),
-                        onChanged: (v) => setState(() => _selectedStatus = v),
+                        onChanged: (v) {
+                          setState(() => _selectedStatus = v);
+                        },
                       ),
                       if (_selectedRule != null) ...[
                         const SizedBox(height: 10),
@@ -421,8 +443,8 @@ class _DropDialogState extends State<_DropDialog> {
                           ),
                           child: Text(
                             _selectedRule!.createsDropPoint
-                                ? 'Будет создана точка дропа, заказ уйдет из рук курьера.'
-                                : 'Точка дропа не создается, заказ остается у курьера.',
+                                ? context.t('ops.dialog.will_create_drop')
+                                : context.t('ops.dialog.wont_create_drop'),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
@@ -433,15 +455,22 @@ class _DropDialogState extends State<_DropDialog> {
                         maxLines: 2,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(),
-                          labelText:
-                              _requiresComment ? 'Комментарий (обязательно)' : 'Комментарий (опционально)',
+                          labelText: _requiresComment
+                              ? context.t('ops.dialog.comment_required')
+                              : context.t('ops.dialog.comment_optional'),
                           isDense: true,
                         ),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: (_) {
+                          setState(() {});
+                        },
                       ),
                       if (_requiresSignature) ...[
                         const SizedBox(height: 16),
-                        const Text('Подпись принимающей стороны (обязательно):'),
+                        Text(
+                          _selectedStatus == 'partner_rejected_return'
+                              ? context.t('ops.dialog.sig_reject_required')
+                              : context.t('ops.dialog.sig_accept_required'),
+                        ),
                         const SizedBox(height: 4),
                         Container(
                           height: 120,
@@ -463,12 +492,12 @@ class _DropDialogState extends State<_DropDialog> {
                             _signatureController.clear();
                             setState(() {});
                           },
-                          child: const Text('Очистить подпись'),
+                          child: Text(context.t('ops.dialog.sig_clear')),
                         ),
                       ],
                       if (_requiresPhoto) ...[
                         const SizedBox(height: 12),
-                        const Text('Фото акта (обязательно):'),
+                        Text(context.t('ops.dialog.photo_required')),
                         const SizedBox(height: 4),
                         if (_photoBytes != null)
                           Row(
@@ -485,7 +514,7 @@ class _DropDialogState extends State<_DropDialog> {
                               const SizedBox(width: 8),
                               TextButton(
                                 onPressed: _capturePhoto,
-                                child: const Text('Изменить'),
+                                child: Text(context.t('ops.dialog.photo_change')),
                               ),
                             ],
                           )
@@ -493,7 +522,7 @@ class _DropDialogState extends State<_DropDialog> {
                           FilledButton.icon(
                             onPressed: _capturePhoto,
                             icon: const Icon(Icons.camera_alt, size: 20),
-                            label: const Text('Сделать фото акта'),
+                            label: Text(context.t('ops.dialog.photo_take')),
                           ),
                       ],
                     ],
@@ -506,13 +535,15 @@ class _DropDialogState extends State<_DropDialog> {
                 children: [
                   TextButton(
                     onPressed: widget.onCancel,
-                    child: const Text('Отмена'),
+                    child: Text(context.t('common.cancel')),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
                     onPressed: _canConfirm ? () => _onConfirm() : null,
                     child: Text(
-                      _selectedRule?.createsDropPoint == true ? 'Подтвердить дроп' : 'Сохранить статус',
+                      _selectedRule?.createsDropPoint == true
+                          ? context.t('ops.dialog.confirm_drop')
+                          : context.t('ops.dialog.save_status'),
                     ),
                   ),
                 ],
@@ -528,7 +559,7 @@ class _DropDialogState extends State<_DropDialog> {
 class _OpsStatusRule {
   const _OpsStatusRule({
     required this.code,
-    required this.label,
+    required this.labelKey,
     required this.icon,
     required this.createsDropPoint,
     required this.requiresSignature,
@@ -537,7 +568,7 @@ class _OpsStatusRule {
   });
 
   final String code;
-  final String label;
+  final String labelKey;
   final IconData icon;
   final bool createsDropPoint;
   final bool requiresSignature;

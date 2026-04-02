@@ -1,9 +1,21 @@
+import java.util.Properties
+import org.gradle.api.GradleException
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+val hasReleaseKeystore: Boolean =
+    keystorePropertiesFile.exists().also { exists ->
+        if (exists) {
+            keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+        }
+    }
 
 android {
     namespace = "com.warehouse.mobile_courier"
@@ -29,11 +41,40 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storePassword = keystoreProperties.getProperty("storePassword")
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile")!!)
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (hasReleaseKeystore) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
+        }
+    }
+}
+
+// Google Play rejects AABs signed with the debug key. Require a real upload keystore for bundleRelease.
+afterEvaluate {
+    tasks.named("bundleRelease").configure {
+        doFirst {
+            if (!hasReleaseKeystore) {
+                throw GradleException(
+                    "Release App Bundle needs a upload keystore. Copy android/key.properties.example to " +
+                        "android/key.properties, fill it in, and create the .jks file (see comments in the example). " +
+                        "https://developer.android.com/studio/publish/app-signing",
+                )
+            }
         }
     }
 }

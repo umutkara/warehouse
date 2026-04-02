@@ -9,6 +9,16 @@ class TaskRepository {
 
   final ApiClient _apiClient;
 
+  String _imageContentTypeForFileName(String fileName) {
+    final normalized = fileName.toLowerCase();
+    if (normalized.endsWith('.png')) return 'image/png';
+    if (normalized.endsWith('.webp')) return 'image/webp';
+    if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    return 'image/jpeg';
+  }
+
   Future<CurrentShift?> loadCurrentShift() async {
     final response = await _apiClient.getJson('/api/courier/shift/current');
     final shift = response['shift'];
@@ -142,6 +152,7 @@ class TaskRepository {
       fileField: 'photo',
       fileBytes: photoBytes,
       fileName: fileName,
+      contentType: _imageContentTypeForFileName(fileName),
     );
   }
 

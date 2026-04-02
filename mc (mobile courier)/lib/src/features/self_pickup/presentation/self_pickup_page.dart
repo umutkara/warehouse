@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../map/domain/geo_models.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
@@ -65,7 +66,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
   Future<void> _scanToPendingList() async {
     final scanned = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => BarcodeScannerSheet(title: 'Добавить заказ'),
+        builder: (_) => BarcodeScannerSheet(title: context.t('self_pickup.add_order')),
       ),
     );
     if (scanned == null || scanned.isEmpty) return;
@@ -93,7 +94,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Добавлено: $successCount из ${toAdd.length}')),
+      SnackBar(content: Text(tr(context.t('self_pickup.added_snack'), {'ok': successCount, 'total': toAdd.length}))),
     );
   }
 
@@ -101,19 +102,18 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Убрать с рук?'),
+        title: Text(context.t('self_pickup.remove_from_hands_title')),
         content: Text(
-          'Заказ ${task.barcode} исчезнет из «Мои задачи». '
-          'Unit не удаляется — его можно будет снова добавить по скану.',
+          tr(context.t('self_pickup.remove_from_hands_body'), {'barcode': task.barcode}),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Отмена'),
+            child: Text(context.t('common.cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Убрать с рук'),
+            child: Text(context.t('self_pickup.remove_from_hands')),
           ),
         ],
       ),
@@ -123,7 +123,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
     if (!mounted) return;
     if (widget.controller.error == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Убрано с рук')),
+        SnackBar(content: Text(context.t('self_pickup.removed_snack'))),
       );
     }
   }
@@ -149,7 +149,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
                 FilledButton.tonalIcon(
                   onPressed: _openWarehouseNavigation,
                   icon: const Icon(Icons.navigation),
-                  label: const Text('Маршрут до склада'),
+                  label: Text(context.t('self_pickup.warehouse_route')),
                 ),
               ],
             ),
@@ -157,13 +157,11 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
           const SizedBox(height: 16),
         ],
         SectionCard(
-          title: 'Добавить заказ',
+          title: context.t('self_pickup.add_order'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Сканируйте штрихкоды, затем нажмите «Добавить» для подтверждения с подписью.',
-              ),
+              Text(context.t('self_pickup.scan_hint')),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -171,21 +169,25 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
                     child: FilledButton.tonalIcon(
                       onPressed: _scanToPendingList,
                       icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Сканировать'),
+                      label: Text(context.t('self_pickup.scan')),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton(
                       onPressed: _pendingBarcodes.isEmpty ? null : _addAllPending,
-                      child: Text(_pendingBarcodes.isEmpty ? 'Добавить' : 'Добавить (${_pendingBarcodes.length})'),
+                      child: Text(
+                        _pendingBarcodes.isEmpty
+                            ? context.t('self_pickup.add')
+                            : '${context.t('self_pickup.add')} (${_pendingBarcodes.length})',
+                      ),
                     ),
                   ),
                 ],
               ),
               if (_pendingBarcodes.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text('Ожидают добавления:', style: TextStyle(fontSize: 12)),
+                Text(context.t('self_pickup.pending'), style: const TextStyle(fontSize: 12)),
                 const SizedBox(height: 6),
                 ..._pendingBarcodes.map((b) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -195,7 +197,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
                           IconButton(
                             icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
                             onPressed: () => _removeFromPending(b),
-                            tooltip: 'Удалить из списка',
+                            tooltip: context.t('self_pickup.remove_from_list'),
                           ),
                         ],
                       ),
@@ -206,9 +208,9 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
         ),
         const SizedBox(height: 16),
         SectionCard(
-          title: 'Мои заказы (самостоятельный забор)',
+          title: context.t('self_pickup.my_orders'),
           child: _selfPickupTasks.isEmpty
-              ? const Text('Пока нет заказов самостоятельного забора')
+              ? Text(context.t('self_pickup.none'))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: _selfPickupTasks.map((task) {
@@ -234,7 +236,7 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
                                 TextButton.icon(
                                   onPressed: () => _removeFromHands(task),
                                   icon: const Icon(Icons.remove_circle_outline, size: 18),
-                                  label: const Text('Убрать с рук'),
+                                  label: Text(context.t('self_pickup.remove_from_hands')),
                                   style: TextButton.styleFrom(
                                     foregroundColor: Theme.of(context).colorScheme.error,
                                   ),
@@ -242,10 +244,13 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
                               ],
                             ),
                             if (task.productName != null)
-                              Text('Товар: ${task.productName}', style: Theme.of(context).textTheme.bodySmall),
+                              Text(tr(context.t('self_pickup.product'), {'name': task.productName}),
+                                  style: Theme.of(context).textTheme.bodySmall),
                             if (task.partnerName != null)
-                              Text('Партнер: ${task.partnerName}', style: Theme.of(context).textTheme.bodySmall),
-                            Text('Взято: ${formatter.format(task.claimedAt.toLocal())}', style: Theme.of(context).textTheme.bodySmall),
+                              Text(tr(context.t('self_pickup.partner'), {'name': task.partnerName}),
+                                  style: Theme.of(context).textTheme.bodySmall),
+                            Text(tr(context.t('self_pickup.claimed_short'), {'dt': formatter.format(task.claimedAt.toLocal())}),
+                                style: Theme.of(context).textTheme.bodySmall),
                           ],
                         ),
                       ),

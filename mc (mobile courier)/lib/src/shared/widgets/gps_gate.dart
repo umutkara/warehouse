@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/i18n/app_i18n.dart';
+
 /// Полноэкранный блокирующий виджет: приложение не работает без GPS.
 /// Показывает overlay с просьбой включить геолокацию.
 class GpsGate extends StatefulWidget {
@@ -78,14 +80,13 @@ class _GpsGateState extends State<GpsGate> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Включите GPS для работы приложения',
+                  context.t('gps.title'),
                   style: Theme.of(context).textTheme.headlineSmall,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Приложение курьера работает только с включённой геолокацией. '
-                  'Включите GPS в настройках устройства.',
+                  context.t('gps.body'),
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
@@ -93,7 +94,7 @@ class _GpsGateState extends State<GpsGate> {
                 FilledButton.icon(
                   onPressed: _checkGps,
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Проверить снова'),
+                  label: Text(context.t('gps.retry')),
                 ),
               ],
             ),

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/auth/auth_service.dart';
+import '../../../core/config/app_config.dart';
+import '../../../core/i18n/app_i18n.dart';
 import '../../../core/network/api_client.dart';
 import '../../self_pickup/presentation/self_pickup_page.dart';
 import '../../shift/presentation/shift_page.dart';
@@ -70,24 +73,58 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text('Курьер: ${_controller.courierName}'),
+            title: Text(tr(context.t('home.title'), {'name': _controller.courierName})),
             actions: [
+              PopupMenuButton<AppLang>(
+                initialValue: context.lang,
+                tooltip: '${context.t('lang.ru')} / ${context.t('lang.az')}',
+                onSelected: (lang) => AppI18n.of(context).controller.set(lang),
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: AppLang.ru,
+                    child: Text(context.t('lang.ru')),
+                  ),
+                  PopupMenuItem(
+                    value: AppLang.az,
+                    child: Text(context.t('lang.az')),
+                  ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Center(
+                    child: Text(
+                      context.lang == AppLang.az ? context.t('lang.az') : context.t('lang.ru'),
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ),
+              ),
               if (_controller.pendingQueueCount > 0)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Center(
-                    child: Text('Очередь: ${_controller.pendingQueueCount}'),
+                    child: Text(tr(context.t('home.queue'), {'count': _controller.pendingQueueCount})),
                   ),
                 ),
               IconButton(
                 onPressed: _controller.refreshAll,
                 icon: const Icon(Icons.refresh),
-                tooltip: 'Обновить',
+                tooltip: context.t('home.refresh'),
+              ),
+              IconButton(
+                onPressed: () async {
+                  final uri = Uri.parse(AppConfig.privacyPolicyUrl);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.privacy_tip_outlined),
+                tooltip: context.t('home.privacy_policy'),
               ),
               IconButton(
                 onPressed: () async => widget.onLogout(),
                 icon: const Icon(Icons.logout),
-                tooltip: 'Выйти',
+                tooltip: context.t('home.logout'),
               ),
             ],
           ),
@@ -115,10 +152,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Widget _buildBottomNav(BuildContext context) {
-    const navItems = [
-      (icon: Icons.assignment_outlined, selectedIcon: Icons.assignment, label: 'Задачи'),
-      (icon: Icons.add_box_outlined, selectedIcon: Icons.add_box, label: 'Забор'),
-      (icon: Icons.query_stats_outlined, selectedIcon: Icons.query_stats, label: 'Смена'),
+    final navItems = [
+      (icon: Icons.assignment_outlined, selectedIcon: Icons.assignment, label: context.t('nav.tasks')),
+      (icon: Icons.add_box_outlined, selectedIcon: Icons.add_box, label: context.t('nav.pickup')),
+      (icon: Icons.query_stats_outlined, selectedIcon: Icons.query_stats, label: context.t('nav.shift')),
     ];
     final colorScheme = Theme.of(context).colorScheme;
 

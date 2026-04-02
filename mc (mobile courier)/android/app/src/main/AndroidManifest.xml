@@ -14,6 +14,9 @@
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyC6uE4Oa4ckhm3jUmHFZWRwx5W8k4OwbwU" />
+        <meta-data
+            android:name="privacy_policy_url"
+            android:value="https://warehouse-nu-three.vercel.app/privacy" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

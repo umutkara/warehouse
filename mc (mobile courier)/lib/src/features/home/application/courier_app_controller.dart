@@ -424,28 +424,35 @@ class CourierAppController extends ChangeNotifier {
   }) async {
     double? lat;
     double? lng;
+    var locationSource = 'none';
     try {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
       );
       lat = pos.latitude;
       lng = pos.longitude;
+      locationSource = 'gps';
     } catch (_) {
       final last = _lastLocationSnapshot;
       if (last != null) {
         lat = last.point.lat;
         lng = last.point.lng;
+        locationSource = 'last_snapshot';
       }
     }
 
     String? photoUrl = actPhotoUrl;
     if (photoUrl == null && photoBytes != null && photoBytes.isNotEmpty && task.unitId.isNotEmpty) {
-      final resp = await _taskRepository.uploadDropPhoto(
-        unitId: task.unitId,
-        photoBytes: photoBytes,
-        fileName: photoFileName ?? 'drop_act.jpg',
-      );
-      photoUrl = resp['url']?.toString();
+      try {
+        final resp = await _taskRepository.uploadDropPhoto(
+          unitId: task.unitId,
+          photoBytes: photoBytes,
+          fileName: photoFileName ?? 'drop_act.jpg',
+        );
+        photoUrl = resp['url']?.toString();
+      } catch (e) {
+        rethrow;
+      }
     }
 
     final proof = <String, dynamic>{'source': 'mobile'};
@@ -525,6 +532,11 @@ class CourierAppController extends ChangeNotifier {
         proof: proof,
       );
       await refreshAll();
+    } on ApiException catch (e) {
+      error = e.toString();
+      loading = false;
+      notifyListeners();
+      rethrow;
     } catch (e) {
       await _eventQueue.enqueue(
         path: '/api/courier/tasks/${task.id}/event',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../shared/widgets/section_card.dart';
 
@@ -18,41 +19,39 @@ class ShiftPage extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       children: [
         SectionCard(
-          title: 'Текущая смена',
+          title: context.t('shift.current.title'),
           child: controller.currentShift == null
-              ? const Text('Открытая смена не найдена')
+              ? Text(context.t('shift.current.none'))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('ID смены: ${controller.currentShift!.id}'),
-                    Text('Статус: ${_shiftStatusLabel(controller.currentShift!.status)}'),
-                    Text('Начата: ${formatter.format(controller.currentShift!.startedAt.toLocal())}'),
-                    Text('Активных задач: ${controller.currentShift!.activeTasks}'),
+                    Text(tr(context.t('shift.current.id'), {'id': controller.currentShift!.id})),
+                    Text(tr(context.t('shift.current.status'), {'status': _shiftStatusLabel(context, controller.currentShift!.status)})),
+                    Text(tr(context.t('shift.current.started'), {'dt': formatter.format(controller.currentShift!.startedAt.toLocal())})),
+                    Text(tr(context.t('shift.current.active_tasks'), {'count': controller.currentShift!.activeTasks})),
                   ],
                 ),
         ),
         SectionCard(
-          title: 'Сводка смены',
+          title: context.t('shift.summary.title'),
           child: Column(
             children: [
-              _MetricTile(label: 'Назначено', value: summary.totalAssigned),
-              _MetricTile(label: 'В маршруте', value: summary.inRoute),
-              _MetricTile(label: 'Доставлено/возврат', value: summary.delivered),
-              _MetricTile(label: 'Проблемные', value: summary.problematic),
+              _MetricTile(label: context.t('shift.metric.assigned'), value: summary.totalAssigned),
+              _MetricTile(label: context.t('shift.metric.in_route'), value: summary.inRoute),
+              _MetricTile(label: context.t('shift.metric.delivered'), value: summary.delivered),
+              _MetricTile(label: context.t('shift.metric.problematic'), value: summary.problematic),
             ],
           ),
         ),
         SectionCard(
-          title: 'Закрытие смены',
+          title: context.t('shift.close.title'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Передайте на склад оставшиеся заказы до конца смены.',
-              ),
+              Text(context.t('shift.close.body1')),
               const SizedBox(height: 8),
               Text(
-                'Перед закрытием смены все недоставленные заказы будут переданы на склад для приёмки.',
+                context.t('shift.close.body2'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
@@ -64,19 +63,16 @@ class ShiftPage extends StatelessWidget {
                       final confirm = await showDialog<bool>(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Закрыть смену?'),
-                          content: const Text(
-                            'А точно ли хотите закрыть смену? '
-                            'Оставшиеся заказы будут переданы на склад.',
-                          ),
+                          title: Text(context.t('shift.close.confirm_title')),
+                          content: Text(context.t('shift.close.confirm_body')),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.of(ctx).pop(false),
-                              child: const Text('Отмена'),
+                              child: Text(context.t('common.cancel')),
                             ),
                             FilledButton(
                               onPressed: () => Navigator.of(ctx).pop(true),
-                              child: const Text('Да, закрыть'),
+                              child: Text(context.t('shift.close.confirm_yes')),
                             ),
                           ],
                         ),
@@ -88,7 +84,7 @@ class ShiftPage extends StatelessWidget {
                         debugPrint('[ShiftPage] closeShift: success');
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Смена закрыта')),
+                          SnackBar(content: Text(context.t('shift.closed_snack'))),
                         );
                       } on ApiException catch (e) {
                         debugPrint('[ShiftPage] closeShift error: ${e.statusCode} ${e.message}');
@@ -112,7 +108,7 @@ class ShiftPage extends StatelessWidget {
                       }
                     },
                     icon: Icon(isClosed ? Icons.check_circle : Icons.lock_clock),
-                    label: Text(isClosed ? 'Смена уже закрыта' : 'Закрыть смену'),
+                    label: Text(isClosed ? context.t('shift.already_closed') : context.t('shift.close.action')),
                   );
                 },
               ),
@@ -123,16 +119,16 @@ class ShiftPage extends StatelessWidget {
     );
   }
 
-  String _shiftStatusLabel(String status) {
+  String _shiftStatusLabel(BuildContext context, String status) {
     switch (status) {
       case 'open':
-        return 'Открыта';
+        return context.t('shift.status.open');
       case 'closing':
-        return 'Закрывается';
+        return context.t('shift.status.closing');
       case 'closed':
-        return 'Закрыта';
+        return context.t('shift.status.closed');
       case 'canceled':
-        return 'Отменена';
+        return context.t('shift.status.canceled');
       default:
         return status;
     }

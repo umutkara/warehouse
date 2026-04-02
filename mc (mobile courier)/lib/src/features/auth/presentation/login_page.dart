@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../../core/auth/auth_preferences.dart';
 import '../../../core/auth/auth_service.dart';
+import '../../../core/config/app_config.dart';
+import '../../../core/i18n/app_i18n.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -53,7 +57,7 @@ class _LoginPageState extends State<LoginPage> {
     if (!AuthService.isConfigured) {
       setState(() {
         _error =
-            'Supabase не настроен. Передайте SUPABASE_URL и SUPABASE_ANON_KEY через --dart-define.';
+            context.t('login.supabase_not_configured');
       });
       return;
     }
@@ -73,11 +77,11 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
       if (!isSessionValid) {
-        setState(() => _error = 'Сессия истекла. Войдите снова.');
+        setState(() => _error = context.t('login.session_expired'));
         return;
       }
       if (user == null) {
-        setState(() => _error = 'Не удалось выполнить вход');
+        setState(() => _error = context.t('login.failed'));
         return;
       }
 
@@ -162,7 +166,7 @@ class _LoginPageState extends State<LoginPage> {
         ),
         const SizedBox(height: 24),
         Text(
-          'Курьер',
+          context.t('login.title'),
           style: theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w700,
             letterSpacing: -0.5,
@@ -219,7 +223,7 @@ class _LoginPageState extends State<LoginPage> {
             textInputAction: TextInputAction.next,
             style: theme.textTheme.bodyLarge,
             decoration: InputDecoration(
-              labelText: 'Электронная почта',
+              labelText: context.t('login.email'),
               hintText: 'name@company.com',
               prefixIcon: Icon(
                 Icons.email_outlined,
@@ -246,7 +250,7 @@ class _LoginPageState extends State<LoginPage> {
             ),
             validator: (value) {
               if (value == null || value.trim().isEmpty || !value.contains('@')) {
-                return 'Введите корректный email';
+                return context.t('login.email_invalid');
               }
               return null;
             },
@@ -259,7 +263,7 @@ class _LoginPageState extends State<LoginPage> {
             onFieldSubmitted: (_) => _submit(),
             style: theme.textTheme.bodyLarge,
             decoration: InputDecoration(
-              labelText: 'Пароль',
+              labelText: context.t('login.password'),
               prefixIcon: Icon(
                 Icons.lock_outline_rounded,
                 color: colorScheme.onSurfaceVariant,
@@ -285,7 +289,7 @@ class _LoginPageState extends State<LoginPage> {
             ),
             validator: (value) {
               if (value == null || value.length < 6) {
-                return 'Слишком короткий пароль';
+                return context.t('login.password_short');
               }
               return null;
             },
@@ -314,7 +318,7 @@ class _LoginPageState extends State<LoginPage> {
               GestureDetector(
                 onTap: () => setState(() => _rememberMe = !_rememberMe),
                 child: Text(
-                  'Запомнить вход',
+                  context.t('login.remember'),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -365,7 +369,19 @@ class _LoginPageState extends State<LoginPage> {
                       color: colorScheme.onPrimary,
                     ),
                   )
-                : const Text('Начать смену'),
+                : Text(context.t('login.start_shift')),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: TextButton(
+              onPressed: () async {
+                final uri = Uri.parse(AppConfig.privacyPolicyUrl);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: Text(context.t('login.privacy_policy')),
+            ),
           ),
         ],
       ),

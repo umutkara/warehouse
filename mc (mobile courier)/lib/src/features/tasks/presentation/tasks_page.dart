@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
 import '../../shared/widgets/giver_signature_dialog.dart';
@@ -39,7 +40,7 @@ class _TasksPageState extends State<TasksPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Не удалось загрузить задачи:\n${widget.controller.error}',
+            tr(context.t('tasks.load_error'), {'error': widget.controller.error}),
             textAlign: TextAlign.center,
           ),
         ),
@@ -67,9 +68,9 @@ class _TasksPageState extends State<TasksPage> {
             onRejectWithNote: (note) async => _rejectWithNote(context, note),
           ),
           const SizedBox(height: 20),
-          const SectionCard(
-            title: 'Мои задачи',
-            child: Text('Пока нет активных задач'),
+          SectionCard(
+            title: context.t('tasks.my_tasks'),
+            child: Text(context.t('tasks.no_active_tasks')),
           ),
         ],
       );
@@ -96,7 +97,7 @@ class _TasksPageState extends State<TasksPage> {
         ),
         const SizedBox(height: 12),
         SectionCard(
-          title: 'Мои задачи',
+          title: context.t('tasks.my_tasks'),
           dense: true,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -145,7 +146,7 @@ class _TasksPageState extends State<TasksPage> {
                 FilledButton.icon(
                   onPressed: () => _transferSelected(context),
                   icon: const Icon(Icons.handshake),
-                  label: Text('Передать выбранные (${_selectedTaskIds.length})'),
+                  label: Text(tr(context.t('tasks.transfer_selected'), {'count': _selectedTaskIds.length})),
                 ),
               ],
             ],
@@ -167,7 +168,7 @@ class _TasksPageState extends State<TasksPage> {
     if (widget.controller.error == null) {
       setState(() => _selectedPendingIds.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Забор подтвержден')),
+        SnackBar(content: Text(context.t('tasks.pickup_confirmed'))),
       );
     }
   }
@@ -179,23 +180,22 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Передать заказы'),
+          title: Text(context.t('tasks.transfer.title')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Выбранные заказы будут сняты с ваших рук (передача другому лицу). '
-                'Unit не удаляются — их можно снова добавить по скану.',
+                context.t('tasks.transfer.body'),
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: noteController,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  hintText: 'Комментарий (необязательно)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  hintText: context.t('tasks.transfer.comment_optional_hint'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ],
@@ -203,11 +203,11 @@ class _TasksPageState extends State<TasksPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Отмена'),
+              child: Text(context.t('common.cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
-              child: const Text('Передать'),
+              child: Text(context.t('tasks.transfer.action')),
             ),
           ],
         );
@@ -225,7 +225,7 @@ class _TasksPageState extends State<TasksPage> {
     if (widget.controller.error == null) {
       setState(() => _selectedTaskIds.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Передано: $count заказов')),
+        SnackBar(content: Text(tr(context.t('tasks.transferred_snack'), {'count': count}))),
       );
     }
   }
@@ -243,7 +243,7 @@ class _TasksPageState extends State<TasksPage> {
     if (!mounted) return;
     if (widget.controller.error == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Забор подтвержден: ${task.barcode}')),
+        SnackBar(content: Text(tr(context.t('tasks.pickup_confirmed_for'), {'barcode': task.barcode}))),
       );
     }
   }
@@ -258,7 +258,7 @@ class _TasksPageState extends State<TasksPage> {
     if (widget.controller.error == null) {
       setState(() => _selectedPendingIds.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Незабор сохранен')),
+        SnackBar(content: Text(context.t('tasks.pickup_reject_saved'))),
       );
     }
   }
@@ -271,23 +271,23 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Незабор'),
+          title: Text(context.t('tasks.pickup_reject.title')),
           content: TextField(
             controller: noteController,
             maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'Укажите причину незабора',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              hintText: context.t('tasks.pickup_reject.reason_hint'),
+              border: const OutlineInputBorder(),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Отмена'),
+              child: Text(context.t('common.cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
-              child: const Text('Сохранить'),
+              child: Text(context.t('common.save')),
             ),
           ],
         );
@@ -303,7 +303,7 @@ class _TasksPageState extends State<TasksPage> {
     if (!mounted) return;
     if (widget.controller.error == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Незабор сохранен: ${task.barcode}')),
+        SnackBar(content: Text(tr(context.t('tasks.pickup_reject_saved_for'), {'barcode': task.barcode}))),
       );
     }
   }
@@ -315,23 +315,23 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Незабор'),
+          title: Text(context.t('tasks.pickup_reject.title')),
           content: TextField(
             controller: noteController,
             maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'Укажите причину незабора',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              hintText: context.t('tasks.pickup_reject.reason_hint'),
+              border: const OutlineInputBorder(),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Отмена'),
+              child: Text(context.t('common.cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
-              child: const Text('Сохранить'),
+              child: Text(context.t('common.save')),
             ),
           ],
         );
@@ -348,7 +348,7 @@ class _TasksPageState extends State<TasksPage> {
     if (widget.controller.error == null) {
       setState(() => _selectedPendingIds.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Незабор сохранен')),
+        SnackBar(content: Text(context.t('tasks.pickup_reject_saved'))),
       );
     }
   }
@@ -615,6 +615,7 @@ class _TaskCard extends StatelessWidget {
             title: task.barcode,
             action: StatusChip(
               status: task.status,
+              opsStatus: task.opsStatus,
               label: showNotPicked ? 'НЕ ЗАБРАН' : null,
               color: showNotPicked ? Colors.red.shade700 : null,
             ),

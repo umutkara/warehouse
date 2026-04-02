@@ -15,6 +15,7 @@ class CourierTask {
     this.pickupConfirmed = false,
     this.pickupStatus,
     this.selfPickup = false,
+    this.opsStatus,
     this.lastEventAt,
   });
 
@@ -33,6 +34,7 @@ class CourierTask {
   final bool pickupConfirmed;
   final String? pickupStatus;
   final bool selfPickup;
+  final String? opsStatus;
   final DateTime? lastEventAt;
 
   factory CourierTask.fromApi(Map<String, dynamic> map) {
@@ -63,6 +65,7 @@ class CourierTask {
       pickupConfirmed: map['pickup_confirmed'] == true,
       pickupStatus: map['pickup_status']?.toString(),
       selfPickup: selfPickup,
+      opsStatus: meta?['ops_status']?.toString(),
       lastEventAt: lastEventAt,
     );
   }

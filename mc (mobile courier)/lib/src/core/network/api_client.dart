@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../config/app_config.dart';
 
@@ -53,6 +54,7 @@ class ApiClient {
         fileField,
         fileBytes,
         filename: fileName,
+        contentType: contentType != null ? MediaType.parse(contentType) : null,
       ));
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
