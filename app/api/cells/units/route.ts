@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getDisplayCellIdsByUnitIds } from "@/lib/units/display-cell-id";
 
 export async function GET(req: Request) {
   const supabase = await supabaseServer();
@@ -50,7 +51,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ units: data ?? [] });
   }
 
-  // Picking cells: mirror map counters (active tasks targeted to picking, latest task per unit, excluding out).
+  // Picking cells: как на карте после выравнивания — только юниты, у которых отображаемая ячейка
+  // (последний move / cell_id / цель задачи) совпадает с этой picking-ячейкой.
   const { data: activeTasks, error: activeTasksError } = await supabaseAdmin
     .from("picking_tasks")
     .select("id, created_at, target_picking_cell_id")
@@ -130,5 +132,11 @@ export async function GET(req: Request) {
       (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
     );
 
-  return NextResponse.json({ units: resultUnits });
+  const displayByUnit = await getDisplayCellIdsByUnitIds(
+    profile.warehouse_id,
+    resultUnits.map((u) => ({ id: u.id, cell_id: u.cell_id, status: u.status })),
+  );
+  const alignedUnits = resultUnits.filter((u) => displayByUnit.get(u.id) === cellId);
+
+  return NextResponse.json({ units: alignedUnits });
 }

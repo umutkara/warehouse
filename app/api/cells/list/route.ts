@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getDisplayCellIdsByUnitIds } from "@/lib/units/display-cell-id";
 
 export async function GET() {
   const supabase = await supabaseServer();
@@ -105,11 +106,24 @@ export async function GET() {
         }
 
         if (!taskSourceError) {
+          const pickUnitIds = [...latestTaskByUnitId.keys()];
+          const { data: pickUnitsRows } = await supabaseAdmin
+            .from("units")
+            .select("id, cell_id, status")
+            .in("id", pickUnitIds)
+            .eq("warehouse_id", profile.warehouse_id);
+          const displayByUnit = await getDisplayCellIdsByUnitIds(
+            profile.warehouse_id,
+            (pickUnitsRows ?? []) as Array<{ id: string; cell_id: string | null; status?: string | null }>,
+          );
+
           for (const unitId of unitIds) {
             if (shippedSet.has(unitId)) continue;
             const task = latestTaskByUnitId.get(unitId);
             const cellId = task?.target_picking_cell_id;
             if (!cellId) continue;
+            const eff = displayByUnit.get(unitId) ?? null;
+            if (eff !== cellId) continue;
             taskTargetCountByCellId.set(cellId, (taskTargetCountByCellId.get(cellId) || 0) + 1);
           }
         }
