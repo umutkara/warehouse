@@ -21,6 +21,12 @@ export const TERMINAL_TASK_STATUSES = [
   "canceled",
 ] as const;
 
+/** Matches filtering in GET /api/courier/tasks/my (exclude removed-from-hands / rejected tasks). */
+export function courierTaskVisibleInCourierApp(meta: unknown): boolean {
+  const m = meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {};
+  return m.hidden_from_courier !== true;
+}
+
 export function mapEventToTaskStatus(eventType: string): string {
   switch (eventType) {
     case "claimed":

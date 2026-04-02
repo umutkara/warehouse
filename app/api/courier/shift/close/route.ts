@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
-import { ACTIVE_TASK_STATUSES, COURIER_ALLOWED_ROLES, WAREHOUSE_CONTROL_ROLES } from "@/app/api/courier/_shared/state";
+import {
+  ACTIVE_TASK_STATUSES,
+  COURIER_ALLOWED_ROLES,
+  courierTaskVisibleInCourierApp,
+  WAREHOUSE_CONTROL_ROLES,
+} from "@/app/api/courier/_shared/state";
 import { hasAnyRole } from "@/app/api/_shared/role-access";
 
 export async function POST(req: Request) {
@@ -102,15 +107,17 @@ export async function POST(req: Request) {
   if (ensuredHandoverId) {
     const { data: shiftTasks, error: shiftTasksErr } = await supabaseAdmin
       .from("courier_tasks")
-      .select("id, unit_id")
+      .select("id, unit_id, meta")
       .eq("warehouse_id", auth.profile.warehouse_id)
       .eq("courier_user_id", shift.courier_user_id)
-      .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
+      .in("status", [...ACTIVE_TASK_STATUSES]);
 
     if (shiftTasksErr) {
       console.error("[shift/close] shiftTasks fetch error:", shiftTasksErr);
     }
-    const allOnHandTasks = (shiftTasks || []).filter((task) => task.unit_id);
+    const allOnHandTasks = (shiftTasks || []).filter(
+      (task) => task.unit_id && courierTaskVisibleInCourierApp(task.meta),
+    );
     if (allOnHandTasks.length > 0) {
       const { data: existingItems } = await supabaseAdmin
         .from("warehouse_handover_items")

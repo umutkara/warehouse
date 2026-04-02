@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
-import { COURIER_ALLOWED_ROLES } from "@/app/api/courier/_shared/state";
+import {
+  ACTIVE_TASK_STATUSES,
+  COURIER_ALLOWED_ROLES,
+  courierTaskVisibleInCourierApp,
+} from "@/app/api/courier/_shared/state";
 
 export async function POST(req: Request) {
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
@@ -55,12 +59,20 @@ export async function POST(req: Request) {
 
   const { data: taskUnits } = await supabaseAdmin
     .from("courier_tasks")
-    .select("id, unit_id")
+    .select("id, unit_id, meta")
     .eq("warehouse_id", auth.profile.warehouse_id)
     .eq("courier_user_id", shift.courier_user_id)
-    .in("status", ["claimed", "in_route", "arrived", "dropped", "failed", "returned"]);
+    .in("status", [...ACTIVE_TASK_STATUSES]);
 
-  const allOnHandUnits = (taskUnits || []).filter((row) => row.unit_id);
+  const rowsWithUnit = (taskUnits || []).filter(
+    (row) => row.unit_id && courierTaskVisibleInCourierApp(row.meta),
+  );
+  const seenUnitIds = new Set<string>();
+  const allOnHandUnits = rowsWithUnit.filter((row) => {
+    if (seenUnitIds.has(row.unit_id!)) return false;
+    seenUnitIds.add(row.unit_id!);
+    return true;
+  });
   if (allOnHandUnits.length > 0) {
     await supabaseAdmin.from("warehouse_handover_items").insert(
       allOnHandUnits.map((row) => ({

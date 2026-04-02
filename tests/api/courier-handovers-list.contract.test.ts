@@ -122,6 +122,14 @@ describe("Courier handovers list contracts", () => {
           error: null,
         },
       ],
+      courier_tasks: [
+        {
+          data: [
+            { courier_user_id: "courier-1", unit_id: "u1", status: "claimed", meta: {} },
+          ],
+          error: null,
+        },
+      ],
     });
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
     vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);

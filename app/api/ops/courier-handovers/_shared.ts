@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { hasAnyRole } from "@/app/api/_shared/role-access";
+import {
+  ACTIVE_TASK_STATUSES,
+  courierTaskVisibleInCourierApp,
+} from "@/app/api/courier/_shared/state";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
 
@@ -348,6 +352,42 @@ export async function loadComputedHandovers({
       computedSession.remaining_total += 1;
       computedSession.remaining_items.push(computedItem);
     }
+  }
+
+  const courierUserIds = [
+    ...new Set(
+      Array.from(computedBySessionId.values())
+        .map((s) => s.courier_user_id)
+        .filter(Boolean),
+    ),
+  ];
+  let activeUnitsByCourier = new Map<string, Set<string>>();
+  if (courierUserIds.length > 0) {
+    const { data: activeTasks, error: activeTasksError } = await supabaseAdmin
+      .from("courier_tasks")
+      .select("courier_user_id, unit_id, meta")
+      .eq("warehouse_id", warehouseId)
+      .in("courier_user_id", courierUserIds)
+      .in("status", [...ACTIVE_TASK_STATUSES]);
+    if (activeTasksError) {
+      throw new Error(activeTasksError.message);
+    }
+    activeUnitsByCourier = new Map();
+    for (const row of activeTasks || []) {
+      if (!row.unit_id || !row.courier_user_id) continue;
+      if (!courierTaskVisibleInCourierApp(row.meta)) continue;
+      if (!activeUnitsByCourier.has(row.courier_user_id)) {
+        activeUnitsByCourier.set(row.courier_user_id, new Set());
+      }
+      activeUnitsByCourier.get(row.courier_user_id)!.add(row.unit_id);
+    }
+  }
+
+  for (const session of computedBySessionId.values()) {
+    const allowed = activeUnitsByCourier.get(session.courier_user_id) ?? new Set<string>();
+    session.remaining_items = session.remaining_items.filter((item) => allowed.has(item.unit_id));
+    session.remaining_total = session.remaining_items.length;
+    session.expected_total = session.received_total + session.remaining_total + session.lost_total;
   }
 
   return Array.from(computedBySessionId.values())
