@@ -352,6 +352,11 @@ export default function LeftNav({ role }: { role: string }) {
                 Мерчант не принял
               </NavButton>
             )}
+            {(canOps || canLogistics) && (
+              <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
+                Route Planning
+              </NavButton>
+            )}
           </>
         )}
 
@@ -364,9 +369,6 @@ export default function LeftNav({ role }: { role: string }) {
             </NavButton>
             <NavButton href="/app/outbound" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
               OUT (В доставке)
-            </NavButton>
-            <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
-              Route Planning
             </NavButton>
           </>
         )}
