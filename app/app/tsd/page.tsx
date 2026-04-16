@@ -318,31 +318,37 @@ export default function TsdPage() {
   // Проверка статуса инвентаризации и загрузка заданий
   useEffect(() => {
     async function checkInventoryStatus() {
-      if (mode === "inventory") {
+      try {
+        const res = await fetch("/api/inventory/status", { cache: "no-store" });
+        let json: any = null;
         try {
-          const res = await fetch("/api/inventory/status", { cache: "no-store" });
-          let json: any = null;
-          try {
-            json = await res.json();
-          } catch {}
+          json = await res.json();
+        } catch {}
 
-          if (res.ok) {
-            setInventoryActive(json.active || false);
-            if (!json.active) {
+        if (res.ok) {
+          const active = Boolean(json?.active);
+          setInventoryActive(active);
+          if (mode === "inventory") {
+            if (!active) {
               setInventoryError("Инвентаризация не активна. Обратитесь к менеджеру.");
             } else {
               setInventoryError(null);
               loadInventoryTasks(); // Загрузить задания
             }
+          } else {
+            setInventoryError(null);
+            setInventoryTasks([]);
+            setCurrentInventoryTask(null);
           }
-        } catch (e: any) {
-          console.error("Failed to check inventory status:", e);
+          return;
         }
-      } else {
-        setInventoryActive(null);
-        setInventoryError(null);
-        setInventoryTasks([]);
-        setCurrentInventoryTask(null);
+
+        setInventoryActive(false);
+        if (mode === "inventory") {
+          setInventoryError(json?.error || "Не удалось проверить статус инвентаризации");
+        }
+      } catch (e: any) {
+        console.error("Failed to check inventory status:", e);
       }
     }
     checkInventoryStatus();

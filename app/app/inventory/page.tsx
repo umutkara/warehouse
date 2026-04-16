@@ -16,6 +16,15 @@ type Profile = {
   role: string;
 };
 
+type ReportSessionOption = {
+  id: string;
+  status: string;
+  startedAt: string | null;
+  closedAt: string | null;
+  startedByName: string | null;
+  label: string;
+};
+
 const INVENTORY_CELL_TYPES = [
   { value: "bin", label: "BIN" },
   { value: "storage", label: "Storage" },
@@ -36,10 +45,14 @@ export default function InventoryPage() {
   const [generatingReport, setGeneratingReport] = useState(false);
   const [cellCodesInput, setCellCodesInput] = useState("");
   const [selectedCellTypes, setSelectedCellTypes] = useState<string[]>([]);
+  const [reportSessions, setReportSessions] = useState<ReportSessionOption[]>([]);
+  const [selectedReportSessionId, setSelectedReportSessionId] = useState<string>("");
+  const [loadingReportSessions, setLoadingReportSessions] = useState(false);
 
   useEffect(() => {
     loadProfile();
     loadStatus();
+    loadReportSessions();
   }, []);
 
   async function loadProfile() {
@@ -71,10 +84,33 @@ export default function InventoryPage() {
         startedBy: json.startedBy || null,
         startedAt: json.startedAt || null,
       });
+      if (json.sessionId && !selectedReportSessionId) {
+        setSelectedReportSessionId(json.sessionId);
+      }
     } catch (e: any) {
       setError(e?.message || "Ошибка загрузки статуса");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadReportSessions() {
+    setLoadingReportSessions(true);
+    try {
+      const res = await fetch("/api/inventory/sessions", { cache: "no-store" });
+      if (!res.ok) {
+        return;
+      }
+      const json = await res.json();
+      const sessions = Array.isArray(json?.sessions) ? json.sessions : [];
+      setReportSessions(sessions);
+      if (!selectedReportSessionId) {
+        setSelectedReportSessionId(json?.activeSessionId || sessions[0]?.id || "");
+      }
+    } catch {
+      // keep UI usable even if sessions endpoint temporarily unavailable
+    } finally {
+      setLoadingReportSessions(false);
     }
   }
 
@@ -107,6 +143,7 @@ export default function InventoryPage() {
       }
       setSuccess("Инвентаризация успешно запущена");
       await loadStatus();
+      await loadReportSessions();
     } catch (e: any) {
       setError(e?.message || "Ошибка запуска инвентаризации");
     } finally {
@@ -137,6 +174,7 @@ export default function InventoryPage() {
       }
       setSuccess("Инвентаризация отменена, все изменения откачены");
       await loadStatus();
+      await loadReportSessions();
     } catch (e: any) {
       setError(e?.message || "Ошибка отмены инвентаризации");
     } finally {
@@ -160,6 +198,7 @@ export default function InventoryPage() {
       }
       setSuccess("Инвентаризация успешно завершена");
       await loadStatus();
+      await loadReportSessions();
     } catch (e: any) {
       setError(e?.message || "Ошибка завершения инвентаризации");
     } finally {
@@ -168,6 +207,10 @@ export default function InventoryPage() {
   }
 
   async function handleGenerateReport() {
+    if (!selectedReportSessionId) {
+      setError("Выберите сессию инвентаризации для скачивания акта");
+      return;
+    }
     setGeneratingReport(true);
     setError(null);
     setSuccess(null);
@@ -175,7 +218,7 @@ export default function InventoryPage() {
       const res = await fetch("/api/inventory/generate-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: status?.sessionId }),
+        body: JSON.stringify({ sessionId: selectedReportSessionId }),
       });
       
       if (!res.ok) {
@@ -186,17 +229,19 @@ export default function InventoryPage() {
 
       const json = await res.json();
       
-      if (json.ok && json.publicUrl) {
-        // Download the file programmatically to avoid popup blockers
+      const downloadUrl = json?.downloadUrl || json?.signedUrl || json?.publicUrl || null;
+
+      if (json.ok && downloadUrl) {
+        // Download the generated act file programmatically
         const link = document.createElement("a");
-        link.href = json.publicUrl;
-        link.download = json.fileName || "inventory-report.csv";
-        link.target = "_blank";
+        link.href = downloadUrl;
+        link.download = json.fileName || "inventory-act.pdf";
+        link.rel = "noopener noreferrer";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         
-        setSuccess(`Отчёт сгенерирован: ${json.fileName}`);
+        setSuccess(`Акт инвентаризации сформирован: ${json.fileName}`);
       } else {
         setError("Ошибка генерации отчёта");
       }
@@ -443,12 +488,48 @@ export default function InventoryPage() {
                   >
                     📊 {status?.active ? "Посмотреть прогресс" : "Просмотреть результаты"}
                   </a>
+                </>
+              )}
 
+              {canManage && (
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    padding: 12,
+                    background: "#f9fafb",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#374151" }}>
+                    Выберите сессию для скачивания акта:
+                  </div>
+                  <select
+                    value={selectedReportSessionId}
+                    onChange={(e) => setSelectedReportSessionId(e.target.value)}
+                    disabled={loadingReportSessions || reportSessions.length === 0}
+                    style={{
+                      border: "1px solid #d1d5db",
+                      borderRadius: 6,
+                      padding: "8px 10px",
+                      fontSize: 13,
+                      background: "#fff",
+                    }}
+                  >
+                    {reportSessions.length === 0 && <option value="">Нет доступных сессий</option>}
+                    {reportSessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.label}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={handleGenerateReport}
-                    disabled={generatingReport}
+                    disabled={generatingReport || !selectedReportSessionId}
                     style={{
-                      background: generatingReport 
+                      background: generatingReport
                         ? "#d1d5db"
                         : "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)",
                       color: "#fff",
@@ -462,22 +543,10 @@ export default function InventoryPage() {
                       boxShadow: generatingReport ? "none" : "0 2px 8px rgba(139, 92, 246, 0.3)",
                       transition: "all 0.2s",
                     }}
-                    onMouseEnter={(e) => {
-                      if (!generatingReport) {
-                        e.currentTarget.style.transform = "translateY(-1px)";
-                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(139, 92, 246, 0.4)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!generatingReport) {
-                        e.currentTarget.style.transform = "translateY(0)";
-                        e.currentTarget.style.boxShadow = "0 2px 8px rgba(139, 92, 246, 0.3)";
-                      }
-                    }}
                   >
-                    {generatingReport ? "Генерация..." : "📥 Скачать отчёт"}
+                    {generatingReport ? "Генерация акта..." : "📥 Скачать акт (A4)"}
                   </button>
-                </>
+                </div>
               )}
             </div>
           )}

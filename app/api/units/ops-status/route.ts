@@ -59,6 +59,7 @@ export async function POST(req: Request) {
     "warehouse_did_not_issue",
     "in_progress",
     "no_report",
+    "found",
   ];
 
   if (!validStatuses.includes(status)) {
@@ -230,6 +231,7 @@ function getStatusText(status: string | null): string {
     warehouse_did_not_issue: "Склад не выдал",
     in_progress: "В работе",
     no_report: "Отчета нет",
+    found: "Найден",
   };
 
   return statusMap[status] || status;

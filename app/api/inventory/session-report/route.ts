@@ -21,12 +21,11 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Профиль не найден" }, { status: 404 });
     }
 
-    // Получить sessionId из query или из активной сессии
+    // Получить sessionId из query или из текущей/последней сессии
     const url = new URL(req.url);
     let sessionId = url.searchParams.get("sessionId");
 
     if (!sessionId) {
-      // Попробовать получить из текущей или последней сессии
       const { data: warehouse } = await supabase
         .from("warehouses")
         .select("inventory_session_id, inventory_active")
@@ -56,51 +55,111 @@ export async function GET(req: Request) {
       }
     }
 
-    // Проверить что session принадлежит warehouse
-    const { data: session, error: sessionError } = await supabase
+    // Проверить, что session принадлежит warehouse
+    let session: any = null;
+    const { data: sessionWithUsers, error: sessionWithUsersError } = await supabase
       .from("inventory_sessions")
-      .select("id, status, started_at, closed_at, warehouse_id")
+      .select("id, status, started_at, closed_at, warehouse_id, started_by, closed_by")
       .eq("id", sessionId)
       .single();
-
-    if (sessionError || !session) {
-      return NextResponse.json({ error: "Сессия не найдена" }, { status: 404 });
+    if (sessionWithUsersError) {
+      const { data: sessionFallback, error: sessionFallbackError } = await supabase
+        .from("inventory_sessions")
+        .select("id, status, started_at, closed_at, warehouse_id")
+        .eq("id", sessionId)
+        .single();
+      if (sessionFallbackError || !sessionFallback) {
+        return NextResponse.json({ error: "Сессия не найдена" }, { status: 404 });
+      }
+      session = sessionFallback;
+    } else {
+      session = sessionWithUsers;
     }
 
     if (session.warehouse_id !== profile.warehouse_id) {
       return NextResponse.json({ error: "Доступ запрещён" }, { status: 403 });
     }
 
-    // Получить общее количество ячеек (активных)
-    const { count: cellsTotal } = await supabase
-      .from("warehouse_cells")
-      .select("*", { count: "exact", head: true })
-      .eq("warehouse_id", profile.warehouse_id)
-      .eq("is_active", true);
+    const participantIds = [session.started_by, session.closed_by].filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    );
+    const participantsById = new Map<string, string>();
+    if (participantIds.length > 0) {
+      const { data: participants } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", Array.from(new Set(participantIds)));
+      (participants || []).forEach((p: { id: string; full_name: string | null }) => {
+        participantsById.set(p.id, p.full_name || p.id);
+      });
+    }
 
-    // Получить отсканированные ячейки
-    const { data: scannedCells } = await supabase
-      .from("inventory_cell_counts")
-      .select("cell_id")
-      .eq("session_id", sessionId);
+    // Используем RPC, чтобы не упираться в прямой SELECT inventory_cell_counts и RLS edge cases.
+    const { data: tasksRpc, error: tasksRpcError } = await supabase.rpc("inventory_get_tasks", {
+      p_session_id: sessionId,
+    });
+    if (tasksRpcError) {
+      return NextResponse.json(
+        { error: tasksRpcError.message || "Ошибка получения задач сессии" },
+        { status: 500 },
+      );
+    }
+    const tasksResult = typeof tasksRpc === "string" ? JSON.parse(tasksRpc) : tasksRpc;
+    if (!tasksResult?.ok) {
+      return NextResponse.json(
+        { error: tasksResult?.error || "Ошибка получения задач сессии" },
+        { status: 500 },
+      );
+    }
+    const tasks = Array.isArray(tasksResult?.tasks) ? tasksResult.tasks : [];
 
-    const scannedCellIds = (scannedCells || []).map((c) => c.cell_id);
-    const cellsScanned = scannedCellIds.length;
+    const normalizedTasks = tasks
+      .map((task: any) => ({
+        id: task.id,
+        cellId: task.cellId ?? task.cell_id ?? null,
+        cellCode: task.cellCode ?? task.cell_code ?? null,
+        cellType: task.cellType ?? task.cell_type ?? null,
+        status: task.status ?? null,
+        scannedBy: task.scannedBy ?? task.scanned_by ?? null,
+        scannedByName: task.scannedByName ?? task.scanned_by_name ?? null,
+        scannedAt: task.scannedAt ?? task.scanned_at ?? null,
+      }))
+      .filter((task: any) => task.cellId && task.cellCode);
 
-    // Получить данные по отсканированным ячейкам с деталями
-    const { data: cellCounts } = await supabase
-      .from("inventory_cell_counts")
-      .select("cell_id")
-      .eq("session_id", sessionId);
+    const cellIdsForQuery = Array.from(new Set(normalizedTasks.map((task: any) => task.cellId)));
+    const scannerIds = Array.from(
+      new Set(
+        normalizedTasks
+          .map((task: any) => task.scannedBy)
+          .filter((v: any): v is string => typeof v === "string" && v.length > 0),
+      ),
+    );
+    if (scannerIds.length > 0) {
+      const { data: scanners } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", scannerIds);
+      (scanners || []).forEach((p: { id: string; full_name: string | null }) => {
+        participantsById.set(p.id, p.full_name || p.id);
+      });
+    }
 
     const rows: Array<{
+      taskId: string;
       cell: { id: string; code: string; cell_type: string };
+      status: string;
+      scannedBy: string | null;
+      scannedByName: string | null;
+      scannedAt: string | null;
       expectedCount: number;
       scannedCount: number;
       missingCount: number;
+      lostCount: number;
       extraCount: number;
       unknownCount: number;
+      scanned: string[];
       missing: string[];
+      lost: string[];
       extra: string[];
       unknown: string[];
     }> = [];
@@ -109,16 +168,7 @@ export async function GET(req: Request) {
     let unitsScannedTotal = 0;
     let cellsWithDiff = 0;
 
-    if (cellCounts && cellCounts.length > 0) {
-      const cellIdsForQuery = cellCounts.map((c) => c.cell_id);
-
-      // Получить информацию о ячейках
-      const { data: cells } = await supabase
-        .from("warehouse_cells")
-        .select("id, code, cell_type")
-        .in("id", cellIdsForQuery);
-
-      // Получить expected units (что должно быть в ячейках по БД)
+    if (cellIdsForQuery.length > 0) {
       const { data: expectedUnits } = await supabase
         .from("units")
         .select("barcode, cell_id")
@@ -126,17 +176,13 @@ export async function GET(req: Request) {
         .in("cell_id", cellIdsForQuery);
 
       const expectedByCell = new Map<string, string[]>();
-      if (expectedUnits) {
-        expectedUnits.forEach((u) => {
-          if (u.cell_id && u.barcode) {
-            const existing = expectedByCell.get(u.cell_id) || [];
-            existing.push(u.barcode);
-            expectedByCell.set(u.cell_id, existing);
-          }
-        });
-      }
+      (expectedUnits || []).forEach((u: { barcode: string | null; cell_id: string | null }) => {
+        if (!u.cell_id || !u.barcode) return;
+        const list = expectedByCell.get(u.cell_id) || [];
+        list.push(u.barcode);
+        expectedByCell.set(u.cell_id, list);
+      });
 
-      // Получить scanned units
       const { data: scannedUnits } = await supabase
         .from("inventory_cell_units")
         .select("unit_barcode, cell_id, unit_id")
@@ -144,57 +190,65 @@ export async function GET(req: Request) {
         .in("cell_id", cellIdsForQuery);
 
       const scannedByCell = new Map<string, Array<{ barcode: string; unit_id: string | null }>>();
-      if (scannedUnits) {
-        scannedUnits.forEach((u) => {
-          if (u.cell_id && u.unit_barcode) {
-            const existing = scannedByCell.get(u.cell_id) || [];
-            existing.push({ barcode: u.unit_barcode, unit_id: u.unit_id });
-            scannedByCell.set(u.cell_id, existing);
-          }
+      (scannedUnits || []).forEach(
+        (u: { unit_barcode: string | null; cell_id: string | null; unit_id: string | null }) => {
+          if (!u.cell_id || !u.unit_barcode) return;
+          const list = scannedByCell.get(u.cell_id) || [];
+          list.push({ barcode: u.unit_barcode, unit_id: u.unit_id });
+          scannedByCell.set(u.cell_id, list);
+        },
+      );
+
+      normalizedTasks.forEach((task: any) => {
+        const expected = expectedByCell.get(task.cellId) || [];
+        const scanned = scannedByCell.get(task.cellId) || [];
+
+        const expectedSet = new Set(expected);
+        const scannedBarcodes = scanned.map((s) => s.barcode);
+        const scannedSet = new Set(scannedBarcodes);
+
+        const missing = expected.filter((b) => !scannedSet.has(b));
+        const extra = scannedBarcodes.filter((b) => !expectedSet.has(b));
+        const unknown = scanned.filter((s) => !s.unit_id).map((s) => s.barcode);
+        const lost = missing;
+        const hasDiff = missing.length > 0 || extra.length > 0 || unknown.length > 0;
+
+        const scannedByName =
+          task.scannedByName ||
+          (task.scannedBy ? participantsById.get(task.scannedBy) || task.scannedBy : null);
+
+        rows.push({
+          taskId: task.id,
+          cell: {
+            id: task.cellId,
+            code: task.cellCode,
+            cell_type: task.cellType || "unknown",
+          },
+          status: task.status || "pending",
+          scannedBy: task.scannedBy,
+          scannedByName,
+          scannedAt: task.scannedAt,
+          expectedCount: expected.length,
+          scannedCount: scannedBarcodes.length,
+          missingCount: missing.length,
+          lostCount: lost.length,
+          extraCount: extra.length,
+          unknownCount: unknown.length,
+          scanned: scannedBarcodes,
+          missing,
+          lost,
+          extra,
+          unknown,
         });
-      }
 
-      // Построить rows
-      if (cells) {
-        cells.forEach((cell) => {
-          const expected = expectedByCell.get(cell.id) || [];
-          const scanned = scannedByCell.get(cell.id) || [];
-
-          const expectedSet = new Set(expected);
-          const scannedBarcodes = scanned.map((s) => s.barcode);
-          const scannedSet = new Set(scannedBarcodes);
-
-          const missing = expected.filter((b) => !scannedSet.has(b));
-          const extra = scannedBarcodes.filter((b) => !expectedSet.has(b));
-          const unknown = scanned.filter((s) => !s.unit_id).map((s) => s.barcode);
-
-          const hasDiff = missing.length > 0 || extra.length > 0 || unknown.length > 0;
-
-          rows.push({
-            cell: {
-              id: cell.id,
-              code: cell.code,
-              cell_type: cell.cell_type,
-            },
-            expectedCount: expected.length,
-            scannedCount: scanned.length,
-            missingCount: missing.length,
-            extraCount: extra.length,
-            unknownCount: unknown.length,
-            // Добавляем подробные списки для отчетности
-            missing: missing,
-            extra: extra,
-            unknown: unknown,
-          });
-
-          unitsExpectedTotal += expected.length;
-          unitsScannedTotal += scanned.length;
-          if (hasDiff) {
-            cellsWithDiff++;
-          }
-        });
-      }
+        unitsExpectedTotal += expected.length;
+        unitsScannedTotal += scannedBarcodes.length;
+        if (hasDiff) cellsWithDiff++;
+      });
     }
+
+    const cellsTotal = normalizedTasks.length;
+    const cellsScanned = normalizedTasks.filter((task: any) => task.status === "scanned").length;
 
     return NextResponse.json({
       ok: true,
@@ -203,9 +257,19 @@ export async function GET(req: Request) {
         status: session.status,
         started_at: session.started_at,
         closed_at: session.closed_at,
+        started_by: session.started_by ?? null,
+        started_by_name:
+          typeof session.started_by === "string"
+            ? participantsById.get(session.started_by) || session.started_by
+            : null,
+        closed_by: session.closed_by ?? null,
+        closed_by_name:
+          typeof session.closed_by === "string"
+            ? participantsById.get(session.closed_by) || session.closed_by
+            : null,
       },
       totals: {
-        cellsTotal: cellsTotal || 0,
+        cellsTotal,
         cellsScanned,
         unitsExpectedTotal,
         unitsScannedTotal,

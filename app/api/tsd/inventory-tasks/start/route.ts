@@ -69,6 +69,7 @@ export async function POST(req: Request) {
     // Если scanned_by != текущий пользователь и это worker (не менеджер)
     // то задание занято
     const scannedBy = task.scannedBy ?? task.scanned_by ?? null;
+
     if (scannedBy && scannedBy !== authData.user.id) {
       const { data: lockedByProfile } = await supabase
         .from("profiles")

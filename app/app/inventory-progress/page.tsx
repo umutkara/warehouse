@@ -25,12 +25,85 @@ type InventorySessionInfo = {
   sessionClosedAt: string | null;
 };
 
+type LostUnit = {
+  barcode: string;
+  cellCode: string;
+  cellType: string;
+  scannedBy: string | null;
+  scannedByName: string | null;
+  scannedAt: string | null;
+  unitId: string | null;
+  unitStatus: string | null;
+  opsStatus: string | null;
+  isFound: boolean;
+};
+
 export default function InventoryProgressPage() {
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [lostUnits, setLostUnits] = useState<LostUnit[]>([]);
+  const [loadingLostUnits, setLoadingLostUnits] = useState(false);
+  const [markingBarcode, setMarkingBarcode] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("guest");
   const [sessionInfo, setSessionInfo] = useState<InventorySessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const canMarkFound = ["admin", "head", "manager", "ops", "logistics"].includes(userRole);
+
+  const loadLostUnits = useCallback(
+    async (sessionId: string | null | undefined) => {
+      if (!sessionId) {
+        setLostUnits([]);
+        return;
+      }
+      setLoadingLostUnits(true);
+      try {
+        const res = await fetch(`/api/inventory/lost-units?sessionId=${encodeURIComponent(sessionId)}`, {
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) {
+          return;
+        }
+        const items = Array.isArray(json?.lostUnits) ? json.lostUnits : [];
+        setLostUnits(items);
+      } finally {
+        setLoadingLostUnits(false);
+      }
+    },
+    [],
+  );
+
+  async function handleMarkFound(barcode: string) {
+    if (!sessionInfo?.sessionId || !barcode) return;
+    setMarkingBarcode(barcode);
+    setActionMessage(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/inventory/lost-units", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionInfo.sessionId,
+          barcode,
+          comment: "Отмечен найденным из кабинета инвентаризации",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        setError(json?.error || "Не удалось отметить заказ как найденный");
+        return;
+      }
+      setActionMessage(`Заказ ${barcode} отмечен как найденный`);
+      await loadLostUnits(sessionInfo.sessionId);
+    } catch (e: any) {
+      setError(e?.message || "Не удалось отметить заказ как найденный");
+    } finally {
+      setMarkingBarcode(null);
+    }
+  }
 
   // ⚡ OPTIMIZATION: Memoized load function
   const loadTasks = useCallback(async () => {
@@ -54,6 +127,7 @@ export default function InventoryProgressPage() {
       const json = await res.json();
       
       if (json.ok) {
+        const tasks = Array.isArray(json.tasks) ? json.tasks : [];
         setTasks(json.tasks || []);
         setSessionInfo({
           sessionId: json.sessionId,
@@ -61,6 +135,7 @@ export default function InventoryProgressPage() {
           sessionStartedAt: json.sessionStartedAt,
           sessionClosedAt: json.sessionClosedAt,
         });
+        await loadLostUnits(json.sessionId || null);
         setError(null);
       } else {
         setError(json.error || "Ошибка загрузки заданий");
@@ -70,7 +145,7 @@ export default function InventoryProgressPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [router, loadLostUnits]);
 
   useEffect(() => {
     loadTasks();
@@ -83,6 +158,19 @@ export default function InventoryProgressPage() {
     return () => clearInterval(interval);
   }, [loadTasks, sessionInfo?.sessionStatus]);
 
+  useEffect(() => {
+    async function loadRole() {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json?.role) setUserRole(json.role);
+      } catch {
+        setUserRole("guest");
+      }
+    }
+    loadRole();
+  }, []);
+
   // ⚡ OPTIMIZATION: Memoized computed values
   const pendingTasks = useMemo(() => tasks.filter((t) => t.status === "pending"), [tasks]);
   const scannedTasks = useMemo(() => tasks.filter((t) => t.status === "scanned"), [tasks]);
@@ -90,6 +178,14 @@ export default function InventoryProgressPage() {
   const progress = useMemo(
     () => (totalTasks > 0 ? Math.round((scannedTasks.length / totalTasks) * 100) : 0),
     [totalTasks, scannedTasks.length]
+  );
+  const unresolvedLostUnits = useMemo(
+    () => lostUnits.filter((item) => !item.isFound),
+    [lostUnits],
+  );
+  const foundLostUnits = useMemo(
+    () => lostUnits.filter((item) => item.isFound),
+    [lostUnits],
   );
 
   // ⚡ OPTIMIZATION: Memoized helper function
@@ -236,6 +332,14 @@ export default function InventoryProgressPage() {
                 <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Осталось</div>
                 <div style={{ fontSize: 20, fontWeight: 600, color: "#ef4444" }}>{pendingTasks.length}</div>
               </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Потерянные</div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "#dc2626" }}>{unresolvedLostUnits.length}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Отмечены найденными</div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: "#16a34a" }}>{foundLostUnits.length}</div>
+              </div>
             </div>
 
             {progress === 100 && (
@@ -285,6 +389,121 @@ export default function InventoryProgressPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {(loadingLostUnits || lostUnits.length > 0) && (
+            <div style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12, color: "#dc2626" }}>
+                ⚠️ Потерянные заказы ({unresolvedLostUnits.length})
+              </h2>
+              {actionMessage && (
+                <div
+                  style={{
+                    background: "#ecfdf5",
+                    border: "1px solid #86efac",
+                    color: "#166534",
+                    padding: 10,
+                    borderRadius: 8,
+                    marginBottom: 10,
+                    fontSize: 13,
+                  }}
+                >
+                  {actionMessage}
+                </div>
+              )}
+              {loadingLostUnits ? (
+                <div style={{ fontSize: 13, color: "#6b7280" }}>Загрузка потерянных...</div>
+              ) : unresolvedLostUnits.length === 0 ? (
+                <div
+                  style={{
+                    background: "#f0fdf4",
+                    border: "1px solid #bbf7d0",
+                    color: "#166534",
+                    padding: 10,
+                    borderRadius: 8,
+                    fontSize: 13,
+                  }}
+                >
+                  Потерянные заказы не обнаружены.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {unresolvedLostUnits.map((item) => (
+                    <div
+                      key={`${item.barcode}-${item.cellCode}`}
+                      style={{
+                        padding: 10,
+                        background: "#fff",
+                        border: "1px solid #fecaca",
+                        borderRadius: 8,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b" }}>{item.barcode}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                          Ячейка: {item.cellCode} ({item.cellType}) • Сканировал: {item.scannedByName || item.scannedBy || "—"}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleMarkFound(item.barcode)}
+                        disabled={!canMarkFound || !item.unitId || markingBarcode === item.barcode}
+                        style={{
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "8px 12px",
+                          background:
+                            !canMarkFound || !item.unitId || markingBarcode === item.barcode
+                              ? "#d1d5db"
+                              : "#16a34a",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor:
+                            !canMarkFound || !item.unitId || markingBarcode === item.barcode
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        {markingBarcode === item.barcode ? "Сохранение..." : "Отметить найден"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!canMarkFound && unresolvedLostUnits.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#9ca3af" }}>
+                  Нет прав на изменение статуса потерянных заказов.
+                </div>
+              )}
+              {foundLostUnits.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#166534", marginBottom: 6 }}>
+                    Уже отмечены найденными ({foundLostUnits.length})
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {foundLostUnits.map((item) => (
+                      <span
+                        key={`found-${item.barcode}`}
+                        style={{
+                          fontSize: 12,
+                          background: "#ecfdf5",
+                          color: "#166534",
+                          border: "1px solid #86efac",
+                          borderRadius: 9999,
+                          padding: "4px 10px",
+                        }}
+                      >
+                        {item.barcode}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -305,6 +305,7 @@ export default function UnitDetailPage() {
       warehouse_did_not_issue: "Склад не выдал",
       in_progress: "В работе",
       no_report: "Отчета нет",
+      found: "Найден",
     };
 
     return statusMap[status] || status;
@@ -1061,6 +1062,7 @@ export default function UnitDetailPage() {
                   <option value="warehouse_did_not_issue">Склад не выдал</option>
                   <option value="in_progress">В работе</option>
                   <option value="no_report">Отчета нет</option>
+                  <option value="found">Найден</option>
                 </select>
                 <div>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>

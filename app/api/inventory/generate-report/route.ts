@@ -66,113 +66,222 @@ export async function POST(req: Request) {
     }
 
     // Get session details
-    const { data: session } = await supabase
+    let session: any = null;
+    const { data: sessionWithUsers, error: sessionWithUsersError } = await supabase
       .from("inventory_sessions")
-      .select("id, status, started_at, closed_at, warehouse_id")
+      .select("id, status, started_at, closed_at, warehouse_id, started_by, closed_by")
       .eq("id", sessionId)
       .single();
+    if (sessionWithUsersError) {
+      const { data: sessionFallback, error: sessionFallbackError } = await supabase
+        .from("inventory_sessions")
+        .select("id, status, started_at, closed_at, warehouse_id")
+        .eq("id", sessionId)
+        .single();
+      if (sessionFallbackError || !sessionFallback) {
+        return NextResponse.json({ error: "Сессия не найдена" }, { status: 404 });
+      }
+      session = sessionFallback;
+    } else {
+      session = sessionWithUsers;
+    }
 
     if (!session || session.warehouse_id !== profile.warehouse_id) {
       return NextResponse.json({ error: "Сессия не найдена" }, { status: 404 });
     }
 
     // Get full report data
-    const reportRes = await fetch(
-      `${req.headers.get("origin")}/api/inventory/session-report?sessionId=${sessionId}`,
-      {
-        headers: {
-          cookie: req.headers.get("cookie") || "",
-        },
-      }
-    );
+    const reportUrl = new URL("/api/inventory/session-report", req.url);
+    reportUrl.searchParams.set("sessionId", sessionId);
+    const reportRes = await fetch(reportUrl.toString(), {
+      headers: {
+        cookie: req.headers.get("cookie") || "",
+      },
+    });
 
     if (!reportRes.ok) {
       return NextResponse.json({ error: "Ошибка получения данных отчёта" }, { status: 500 });
     }
 
     const reportData = await reportRes.json();
+    const rows = Array.isArray(reportData?.rows) ? reportData.rows : [];
+    const totals = reportData?.totals || {
+      cellsTotal: 0,
+      cellsScanned: 0,
+      cellsWithDiff: 0,
+      unitsExpectedTotal: 0,
+      unitsScannedTotal: 0,
+    };
+    const reportSession = reportData?.session || {};
 
-    // Generate CSV report (simple format, can be opened in Excel)
-    const csvLines: string[] = [];
-    
-    // Header
-    csvLines.push("Отчёт по инвентаризации");
-    csvLines.push(`Дата создания: ${new Date().toLocaleString("ru-RU")}`);
-    csvLines.push(`Сессия: ${sessionId}`);
-    csvLines.push(`Статус: ${session.status}`);
-    csvLines.push(`Начата: ${new Date(session.started_at).toLocaleString("ru-RU")}`);
-    if (session.closed_at) {
-      csvLines.push(`Завершена: ${new Date(session.closed_at).toLocaleString("ru-RU")}`);
-    }
-    csvLines.push("");
-    
-    // Summary
-    csvLines.push("Общие показатели:");
-    csvLines.push(`Всего ячеек,${reportData.totals.cellsTotal}`);
-    csvLines.push(`Отсканировано,${reportData.totals.cellsScanned}`);
-    csvLines.push(`Ячеек с расхождениями,${reportData.totals.cellsWithDiff}`);
-    csvLines.push(`Ожидалось заказов,${reportData.totals.unitsExpectedTotal}`);
-    csvLines.push(`Найдено заказов,${reportData.totals.unitsScannedTotal}`);
-    csvLines.push("");
-    
-    // Details
-    csvLines.push("Детали по ячейкам:");
-    csvLines.push("Ячейка,Тип,Ожидалось,Найдено,Не найдено,Лишние,Неизвестные");
-    
-    for (const row of reportData.rows) {
-      csvLines.push(
-        `${row.cell.code},${row.cell.cell_type},${row.expectedCount},${row.scannedCount},${row.missingCount},${row.extraCount},${row.unknownCount}`
+    const startedByName = reportSession?.started_by_name || reportSession?.started_by || "—";
+    const closedByName = reportSession?.closed_by_name || reportSession?.closed_by || "—";
+    const { PDFDocument, rgb } = await import("pdf-lib");
+    const fontkit = (await import("@pdf-lib/fontkit")).default;
+    const robotoVfsModule = (await import("pdfmake/build/vfs_fonts")) as any;
+    const robotoVfs = (robotoVfsModule?.default || robotoVfsModule) as Record<string, string>;
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
+    const regularBase64 = robotoVfs["Roboto-Regular.ttf"];
+    const boldBase64 = robotoVfs["Roboto-Medium.ttf"] || robotoVfs["Roboto-Bold.ttf"];
+    if (!regularBase64 || !boldBase64) {
+      return NextResponse.json(
+        { error: "Не удалось загрузить шрифты Roboto для PDF акта" },
+        { status: 500 },
       );
     }
-    
-    // Подробная информация по расхождениям
-    csvLines.push("");
-    csvLines.push("ПОДРОБНАЯ ИНФОРМАЦИЯ ПО РАСХОЖДЕНИЯМ:");
-    csvLines.push("");
-    
-    for (const row of reportData.rows) {
-      const hasDiff = row.missingCount > 0 || row.extraCount > 0 || row.unknownCount > 0;
-      if (!hasDiff) continue; // Пропускаем ячейки без расхождений
-      
-      csvLines.push(`Ячейка: ${row.cell.code} (${row.cell.cell_type})`);
-      
-      if (row.missingCount > 0 && row.missing) {
-        csvLines.push(`  НЕ НАЙДЕНО (${row.missingCount}):`);
-        row.missing.forEach((barcode: string) => {
-          csvLines.push(`    ${barcode}`);
-        });
+
+    const fontBytes = Buffer.from(regularBase64, "base64");
+    const boldFontBytes = Buffer.from(boldBase64, "base64");
+
+    const font = await pdfDoc.embedFont(fontBytes);
+    const boldFont = await pdfDoc.embedFont(boldFontBytes);
+    const pageWidth = 595.28; // A4 portrait
+    const pageHeight = 841.89;
+    const margin = 40;
+    const maxTextWidth = pageWidth - margin * 2;
+    const lineHeight = 14;
+    let page = pdfDoc.addPage([pageWidth, pageHeight]);
+    let y = pageHeight - margin;
+
+    const ensureSpace = (lines = 1) => {
+      if (y - lines * lineHeight < margin) {
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
+        y = pageHeight - margin;
       }
-      
-      if (row.extraCount > 0 && row.extra) {
-        csvLines.push(`  ЛИШНИЕ (${row.extraCount}):`);
-        row.extra.forEach((barcode: string) => {
-          csvLines.push(`    ${barcode}`);
-        });
+    };
+
+    const splitLongToken = (token: string, maxLen = 26): string[] => {
+      if (token.length <= maxLen) return [token];
+      const parts: string[] = [];
+      for (let i = 0; i < token.length; i += maxLen) parts.push(token.slice(i, i + maxLen));
+      return parts;
+    };
+
+    const wrapText = (text: string, textFont: any, size: number): string[] => {
+      const words = text
+        .split(/\s+/)
+        .flatMap((word) => splitLongToken(word))
+        .filter((w) => w.length > 0);
+      const lines: string[] = [];
+      let current = "";
+      for (const word of words) {
+        const candidate = current ? `${current} ${word}` : word;
+        if (textFont.widthOfTextAtSize(candidate, size) <= maxTextWidth) {
+          current = candidate;
+        } else {
+          if (current) lines.push(current);
+          current = word;
+        }
       }
-      
-      if (row.unknownCount > 0 && row.unknown) {
-        csvLines.push(`  НЕИЗВЕСТНЫЕ (${row.unknownCount}):`);
-        row.unknown.forEach((barcode: string) => {
-          csvLines.push(`    ${barcode}`);
-        });
+      if (current) lines.push(current);
+      return lines.length > 0 ? lines : [""];
+    };
+
+    const drawText = (text: string, opts?: { bold?: boolean; size?: number; color?: any }) => {
+      const size = opts?.size ?? 10;
+      const textFont = opts?.bold ? boldFont : font;
+      const color = opts?.color ?? rgb(0.1, 0.1, 0.1);
+      const lines = wrapText(text, textFont, size);
+      ensureSpace(lines.length);
+      lines.forEach((line) => {
+        page.drawText(line, { x: margin, y, size, font: textFont, color });
+        y -= lineHeight;
+      });
+    };
+
+    const drawSpacer = (px = 8) => {
+      y -= px;
+      if (y < margin) {
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
+        y = pageHeight - margin;
       }
-      
-      csvLines.push(""); // Пустая строка между ячейками
+    };
+
+    const asList = (value: unknown): string[] => (Array.isArray(value) ? value.map((v) => String(v)) : []);
+
+    drawText("АКТ ИНВЕНТАРИЗАЦИИ", { bold: true, size: 16 });
+    drawText(`Дата формирования: ${new Date().toLocaleString("ru-RU")}`, { size: 10 });
+    drawText(`Сессия: ${sessionId}`, { size: 10 });
+    drawSpacer(4);
+    drawText(`Статус сессии: ${reportSession.status || session.status || "—"}`, { size: 10 });
+    drawText(`Начата: ${reportSession.started_at ? new Date(reportSession.started_at).toLocaleString("ru-RU") : "—"}`, { size: 10 });
+    drawText(`Завершена: ${reportSession.closed_at ? new Date(reportSession.closed_at).toLocaleString("ru-RU") : "—"}`, { size: 10 });
+    drawText(`Запустил инвентаризацию: ${startedByName}`, { size: 10 });
+    drawText(`Закрыл инвентаризацию: ${closedByName}`, { size: 10 });
+    drawText(`Сформировал акт: ${profile.full_name || authData.user.id}`, { size: 10 });
+    drawSpacer(10);
+
+    drawText("СВОДКА", { bold: true, size: 13 });
+    drawText(`- Всего ячеек в сессии: ${totals.cellsTotal}`, { size: 10 });
+    drawText(`- Отсканировано ячеек: ${totals.cellsScanned}`, { size: 10 });
+    drawText(`- Ячеек с расхождениями: ${totals.cellsWithDiff}`, { size: 10 });
+    drawText(`- Ожидалось юнитов: ${totals.unitsExpectedTotal}`, { size: 10 });
+    drawText(`- Отсканировано юнитов: ${totals.unitsScannedTotal}`, { size: 10 });
+    drawSpacer(10);
+
+    drawText("ДЕТАЛИ ПО ЯЧЕЙКАМ", { bold: true, size: 13 });
+    if (rows.length === 0) {
+      drawText("Данные отсутствуют.", { size: 10 });
+    } else {
+      rows.forEach((row: any, idx: number) => {
+        const scanned = asList(row.scanned);
+        const lost = asList(row.lost).length > 0 ? asList(row.lost) : asList(row.missing);
+        const extra = asList(row.extra);
+        const unknown = asList(row.unknown);
+        drawSpacer(6);
+        drawText(`${idx + 1}. Ячейка ${row.cell?.code || "—"} (${row.cell?.cell_type || "—"})`, {
+          bold: true,
+          size: 11,
+        });
+        drawText(`   Статус: ${row.status || "—"}`, { size: 10 });
+        drawText(`   Сканировал: ${row.scannedByName || row.scannedBy || "—"}`, { size: 10 });
+        drawText(
+          `   Время скана: ${row.scannedAt ? new Date(row.scannedAt).toLocaleString("ru-RU") : "—"}`,
+          { size: 10 },
+        );
+        drawText(
+          `   Показатели: ожидалось=${row.expectedCount ?? 0}, отсканировано=${row.scannedCount ?? 0}, потеряно=${row.lostCount ?? row.missingCount ?? 0}, лишние=${row.extraCount ?? 0}, неизвестные=${row.unknownCount ?? 0}`,
+          { size: 10 },
+        );
+        drawText(`   Что сканировали: ${scanned.join(", ") || "—"}`, { size: 9 });
+        drawText(`   Потерянные (не отсканированы): ${lost.join(", ") || "—"}`, { size: 9 });
+        drawText(`   Лишние: ${extra.join(", ") || "—"}`, { size: 9 });
+        drawText(`   Неизвестные: ${unknown.join(", ") || "—"}`, { size: 9 });
+      });
     }
 
-    const csvContent = csvLines.join("\n");
-    const csvBuffer = Buffer.from("\ufeff" + csvContent, "utf-8"); // Add BOM for Excel
-    
-    // Save to Supabase Storage
-    const fileName = `inventory-report-${sessionId}-${Date.now()}.csv`;
+    const pdfBytes = await pdfDoc.save();
+    const fileBuffer = Buffer.from(pdfBytes);
+    const fileName = `inventory-act-${sessionId}-${Date.now()}.pdf`;
     const filePath = `inventory-reports/${fileName}`;
 
-    console.log("Attempting to upload report:", { fileName, filePath, bufferSize: csvBuffer.length });
+    console.log("Attempting to upload report:", { fileName, filePath, bufferSize: fileBuffer.length });
+
+    const { data: bucketInfo, error: bucketInfoError } = await supabaseAdmin.storage.getBucket(
+      "warehouse-files",
+    );
+    const allowedMimeTypes =
+      ((bucketInfo as any)?.allowed_mime_types as string[] | undefined) ||
+      ((bucketInfo as any)?.allowedMimeTypes as string[] | undefined) ||
+      null;
+
+    if (Array.isArray(allowedMimeTypes) && allowedMimeTypes.length > 0 && !allowedMimeTypes.includes("application/pdf")) {
+      return NextResponse.json(
+        {
+          error: "Bucket warehouse-files не разрешает application/pdf. Добавьте этот MIME в allowed_mime_types.",
+          allowedMimeTypes,
+        },
+        { status: 500 },
+      );
+    }
+
+    const uploadMime = "application/pdf";
 
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
       .from("warehouse-files")
-      .upload(filePath, csvBuffer, {
-        contentType: "text/csv",
+      .upload(filePath, fileBuffer, {
+        contentType: uploadMime,
         upsert: false,
       });
 
@@ -183,7 +292,6 @@ export async function POST(req: Request) {
         cause: (uploadError as any)?.cause,
         statusCode: (uploadError as any)?.statusCode,
       });
-      
       return NextResponse.json(
         { 
           error: "Ошибка сохранения файла", 
@@ -202,19 +310,24 @@ export async function POST(req: Request) {
     const { data: urlData } = supabaseAdmin.storage
       .from("warehouse-files")
       .getPublicUrl(filePath);
+    const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
+      .from("warehouse-files")
+      .createSignedUrl(filePath, 60 * 60);
+    const downloadUrl = signedUrlData?.signedUrl || urlData.publicUrl;
 
     // Audit log
     await supabase.rpc("audit_log_event", {
       p_action: "inventory.generate_report",
       p_entity_type: "inventory_session",
       p_entity_id: sessionId,
-      p_summary: `Сгенерирован отчёт по инвентаризации`,
+      p_summary: `Сгенерирован акт инвентаризации`,
       p_meta: {
         session_id: sessionId,
         file_path: filePath,
         file_name: fileName,
         generated_by: authData.user.id,
         generated_by_name: profile.full_name,
+        format: "pdf-a4-act",
       },
     });
 
@@ -223,6 +336,8 @@ export async function POST(req: Request) {
       filePath,
       fileName,
       publicUrl: urlData.publicUrl,
+      signedUrl: signedUrlData?.signedUrl ?? null,
+      downloadUrl,
       sessionId,
     });
   } catch (e: any) {

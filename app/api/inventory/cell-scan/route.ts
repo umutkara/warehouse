@@ -113,6 +113,15 @@ export async function POST(req: Request) {
       }
     }
 
+    const { data: expectedBeforeCloseUnits } = await supabase
+      .from("units")
+      .select("barcode")
+      .eq("warehouse_id", profile.warehouse_id)
+      .eq("cell_id", cell.id);
+    const expectedBeforeCloseBarcodes = (expectedBeforeCloseUnits || [])
+      .map((u: { barcode: string | null }) => u.barcode)
+      .filter((b): b is string => Boolean(b));
+
     // Use RPC function to bypass PostgREST schema cache issues
     // This function uses direct SQL and doesn't rely on table schema cache
     const { data: rpcResult, error: rpcError } = await supabase.rpc("inventory_save_cell_scan", {
@@ -156,55 +165,12 @@ export async function POST(req: Request) {
       // Don't fail the request - continue with the scan
     }
     
-    // CRITICAL: Apply changes to actual units.cell_id by calling inventory_close_cell
-    // This function updates units table based on scanned barcodes
-    const { data: closeResult, error: closeError } = await supabase.rpc("inventory_close_cell", {
-      p_cell_code: cell.code,
-      p_scanned_barcodes: normalizedBarcodes,
-    });
-
-    if (closeError) {
-      console.error("inventory_close_cell RPC error:", closeError);
-      // Log error but don't fail - scan was saved, just not applied
-      // Return warning that changes were saved but not applied
-      return NextResponse.json(
-        { 
-          error: "Ошибка применения изменений к юнитам", 
-          details: closeError.message,
-          warning: "Сканирование сохранено, но изменения не применены к реальным юнитам",
-          code: closeError.code 
-        },
-        { status: 500 }
-      );
-    }
-
-    const closeData = typeof closeResult === "string" ? JSON.parse(closeResult) : closeResult;
-    
-    if (!closeData?.ok) {
-      console.error("inventory_close_cell returned error:", closeData);
-      return NextResponse.json(
-        { 
-          error: closeData?.error || "Ошибка применения изменений к юнитам",
-          warning: "Сканирование сохранено, но изменения не применены к реальным юнитам"
-        },
-        { status: 400 }
-      );
-    }
-
-    // Changes applied successfully
-    // Get expected units (что должно быть в ячейке по БД) AFTER applying changes
-    const { data: expectedUnits } = await supabase
-      .from("units")
-      .select("barcode")
-      .eq("warehouse_id", profile.warehouse_id)
-      .eq("cell_id", cell.id);
-
-    const expectedBarcodes = (expectedUnits || [])
-      .map((u: { barcode: string | null }) => u.barcode)
-      .filter((b): b is string => Boolean(b));
+    // Policy: inventory scan must not mutate real unit locations.
+    // Missing items are treated as "lost" in report, not removed from cell automatically.
+    const expectedBarcodes = expectedBeforeCloseBarcodes;
     const scannedBarcodes = normalizedBarcodes;
 
-    // Вычислить diff (после применения изменений diff должен быть пустым если всё правильно)
+    // Вычислить diff относительно фактического состояния ячейки до применения инвентаризации.
     const missing = expectedBarcodes.filter((b: string) => !scannedBarcodes.includes(b));
     const extra = scannedBarcodes.filter((b: string) => !expectedBarcodes.includes(b));
     const unknown = scannedBarcodes.filter((b: string) => !unitsMap.has(b));
@@ -214,15 +180,14 @@ export async function POST(req: Request) {
       p_action: "inventory.cell_scan",
       p_entity_type: "cell",
       p_entity_id: cell.id,
-      p_summary: `Сканирование ячейки ${cell.code}: добавлено ${closeData.added || 0}, удалено ${closeData.removed || 0}`,
+      p_summary: `Сканирование ячейки ${cell.code}: missing=${missing.length}, extra=${extra.length}, unknown=${unknown.length}`,
       p_meta: {
         cell_id: cell.id,
         cell_code: cell.code,
         session_id: inventorySessionId,
         scanned_count: scannedBarcodes.length,
         expected_count: expectedBarcodes.length,
-        added: closeData.added || 0,
-        removed: closeData.removed || 0,
+        policy_applied_to_units: false,
         missing,
         extra,
         unknown,
@@ -234,19 +199,7 @@ export async function POST(req: Request) {
       // Don't fail the request if audit logging fails
     }
 
-    // ✨ НОВОЕ: Проверить завершение всех заданий и автоматически закрыть если нужно
-    const { data: autoCloseResult, error: autoCloseError } = await supabase.rpc(
-      "inventory_check_and_auto_close",
-      { p_session_id: inventorySessionId }
-    );
-
-    let inventoryAutoClosed = false;
-    if (!autoCloseError && autoCloseResult) {
-      const closeData = typeof autoCloseResult === "string" 
-        ? JSON.parse(autoCloseResult) 
-        : autoCloseResult;
-      inventoryAutoClosed = closeData.autoClosed || false;
-    }
+    const inventoryAutoClosed = false;
 
     return NextResponse.json({
       ok: true,
@@ -271,10 +224,11 @@ export async function POST(req: Request) {
         unknown,
       },
       applied: {
-        added: closeData.added || 0,
-        removed: closeData.removed || 0,
-        addedBarcodes: closeData.addedBarcodes || [],
-        removedBarcodes: closeData.removedBarcodes || [],
+        added: 0,
+        removed: 0,
+        addedBarcodes: [],
+        removedBarcodes: [],
+        policy: "deferred_manual_reconciliation",
       },
     });
   } catch (e: any) {
