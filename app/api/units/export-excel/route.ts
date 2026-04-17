@@ -3,6 +3,24 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import * as XLSX from "xlsx";
 
+const OPS_STATUS_LABELS: Record<string, string> = {
+  partner_accepted_return: "Партнер принял на возврат",
+  partner_rejected_return: "Партнер не принял на возврат",
+  sent_to_sc: "Передан в СЦ",
+  delivered_to_rc: "Товар доставлен на РЦ",
+  client_accepted: "Клиент принял",
+  client_rejected: "Клиент не принял",
+  sent_to_client: "Товар отправлен клиенту",
+  delivered_to_pudo: "Товар доставлен на ПУДО",
+  case_cancelled_cc: "Кейс отменен (Направлен КК)",
+  postponed_1: "Перенос",
+  postponed_2: "Перенос 2",
+  warehouse_did_not_issue: "Склад не выдал",
+  in_progress: "В работе",
+  no_report: "Отчета нет",
+  found: "Найден",
+};
+
 /**
  * GET /api/units/export-excel
  * Exports units to Excel-compatible CSV with optional history
@@ -261,6 +279,8 @@ export async function GET(req: Request) {
     const headers = [
       "Штрихкод",
       "Статус",
+      "OPS статус",
+      "OPS комментарий",
       "Товар",
       "Партнер",
       "Цена",
@@ -307,6 +327,8 @@ export async function GET(req: Request) {
       const row: string[] = [
         normalizedBarcode,
         unit.status || "",
+        unit?.meta?.ops_status ? OPS_STATUS_LABELS[unit.meta.ops_status] || unit.meta.ops_status : "",
+        unit?.meta?.ops_status_comment || "",
         unit.product_name || "",
         unit.partner_name || "",
         unit.price ? unit.price.toFixed(2) : "",
