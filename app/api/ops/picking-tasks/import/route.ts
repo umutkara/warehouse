@@ -158,10 +158,13 @@ export async function POST(req: Request) {
         };
       })
       .filter((unit) => {
-        const isInStorageOrShipping =
-          unit.cell && (unit.cell.cell_type === "storage" || unit.cell.cell_type === "shipping");
+        const isInAllowedSourceCell =
+          unit.cell &&
+          (unit.cell.cell_type === "storage" ||
+            unit.cell.cell_type === "shipping" ||
+            unit.cell.cell_type === "rejected");
         const isNotInTasks = !unitIdsInTasks.has(unit.id);
-        return isInStorageOrShipping && isNotInTasks;
+        return isInAllowedSourceCell && isNotInTasks;
       });
 
     // Map normalized barcode -> unit (detect duplicates)
