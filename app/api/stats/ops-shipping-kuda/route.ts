@@ -249,7 +249,9 @@ async function fetchTaskUnitsByTaskIds(taskIds: string[]): Promise<{ data: TaskU
       .select("picking_task_id, unit_id")
       .in("picking_task_id", chunk);
 
-    if (error) return { data: [], error: error.message };
+    if (error) {
+      return { data: [], error: error.message };
+    }
     if (data?.length) all.push(...(data as TaskUnitRow[]));
   }
 
@@ -376,7 +378,11 @@ async function fetchReturnedRowsByPeriod(
   return { data: all };
 }
 
-async function fetchAllShipmentsByUnitIds(unitIds: string[]): Promise<{ data: OutboundShipmentRow[]; error?: string }> {
+async function fetchAllShipmentsByUnitIds(
+  unitIds: string[],
+  fromIso: string,
+  toIso: string,
+): Promise<{ data: OutboundShipmentRow[]; error?: string }> {
   if (unitIds.length === 0) return { data: [] };
   const all: OutboundShipmentRow[] = [];
 
@@ -385,9 +391,13 @@ async function fetchAllShipmentsByUnitIds(unitIds: string[]): Promise<{ data: Ou
     const { data, error } = await supabaseAdmin
       .from("outbound_shipments")
       .select("unit_id, out_at, returned_at")
-      .in("unit_id", chunk);
+      .in("unit_id", chunk)
+      .gte("out_at", fromIso)
+      .lte("out_at", toIso);
 
-    if (error) return { data: [], error: error.message };
+    if (error) {
+      return { data: [], error: error.message };
+    }
     if (data?.length) all.push(...(data as OutboundShipmentRow[]));
   }
 
@@ -405,7 +415,9 @@ async function fetchUnitsMeta(unitIds: string[]): Promise<{ data: UnitMetaRow[];
       .select("id, barcode, meta")
       .in("id", chunk);
 
-    if (error) return { data: [], error: error.message };
+    if (error) {
+      return { data: [], error: error.message };
+    }
     if (data?.length) all.push(...(data as UnitMetaRow[]));
   }
 
@@ -485,7 +497,9 @@ async function fetchUnitMovesToBin(unitIds: string[], binCellIds: string[]): Pro
       .in("unit_id", chunk)
       .in("to_cell_id", binCellIds);
 
-    if (error) return { data: [], error: error.message };
+    if (error) {
+      return { data: [], error: error.message };
+    }
     if (data?.length) all.push(...(data as UnitMoveRow[]));
   }
 
@@ -597,8 +611,18 @@ export async function GET(req: Request) {
   }
 
   const createdUnitIdsArray = Array.from(createdUnitIds);
-  const unitsMetaRes = await fetchUnitsMeta(createdUnitIdsArray);
+  const [unitsMetaRes, createdUnitShipmentsRes, binCellIdsRes] = await Promise.all([
+    fetchUnitsMeta(createdUnitIdsArray),
+    fetchAllShipmentsByUnitIds(createdUnitIdsArray, dateRange.fromIso, dateRange.toIso),
+    fetchBinCellIds(auth.profile.warehouse_id),
+  ]);
   if (unitsMetaRes.error) return NextResponse.json({ error: unitsMetaRes.error }, { status: 400 });
+  if (createdUnitShipmentsRes.error) {
+    return NextResponse.json({ error: createdUnitShipmentsRes.error }, { status: 400 });
+  }
+  if (binCellIdsRes.error) {
+    return NextResponse.json({ error: binCellIdsRes.error }, { status: 400 });
+  }
 
   const unitHasOpsNs = new Map<string, boolean>();
   const unitBarcodeById = new Map<string, string>();
@@ -609,43 +633,25 @@ export async function GET(req: Request) {
     }
   }
 
-  const createdUnitShipmentsRes = await fetchAllShipmentsByUnitIds(createdUnitIdsArray);
-  if (createdUnitShipmentsRes.error) {
-    return NextResponse.json({ error: createdUnitShipmentsRes.error }, { status: 400 });
-  }
-
-  const binCellIdsRes = await fetchBinCellIds(auth.profile.warehouse_id);
-  if (binCellIdsRes.error) {
-    return NextResponse.json({ error: binCellIdsRes.error }, { status: 400 });
-  }
-
   const binMovesRes = await fetchUnitMovesToBin(createdUnitIdsArray, binCellIdsRes.data);
+
   if (binMovesRes.error) {
     return NextResponse.json({ error: binMovesRes.error }, { status: 400 });
   }
 
   const outTimesByUnitAndDay = new Map<string, Map<string, string[]>>();
-  let outRowsTotal = 0;
-  let outRowsKeptInRange = 0;
-  let outRowsDroppedByDayFilter = 0;
   for (const shipment of createdUnitShipmentsRes.data) {
-    outRowsTotal += 1;
     if (!shipment.unit_id || !shipment.out_at) continue;
     const day = dayInTimeZone(shipment.out_at);
     if (!dateKeySet.has(day)) {
-      outRowsDroppedByDayFilter += 1;
       continue;
     }
-    outRowsKeptInRange += 1;
     const byDay = outTimesByUnitAndDay.get(shipment.unit_id) || new Map<string, string[]>();
     const times = byDay.get(day) || [];
     times.push(shipment.out_at);
     byDay.set(day, times);
     outTimesByUnitAndDay.set(shipment.unit_id, byDay);
   }
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H1_day_filter", location: "app/api/stats/ops-shipping-kuda/route.ts:out-times-map", message: "OUT rows kept vs dropped by target day filter", data: { from, to, outRowsTotal, outRowsKeptInRange, outRowsDroppedByDayFilter }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   const binMoveTimesByUnit = new Map<string, string[]>();
   for (const move of binMovesRes.data) {
@@ -750,32 +756,16 @@ export async function GET(req: Request) {
     const dayTasks = tasksByTargetDay.get(day) || [];
     let outCount = 0;
     let returnedCount = 0;
-    let dayTasksWithoutUnits = 0;
-    let dayTasksWithoutOutButHasOutOutsideDay = 0;
 
     for (const task of dayTasks) {
-      if (task.unitIds.length === 0) {
-        dayTasksWithoutUnits += 1;
-      }
       const hasOut = task.unitIds.some((unitId) => hasOutOnDay(unitId, day));
       const hasReturned = task.unitIds.some((unitId) => hasReturnedAfterOutOnDay(unitId, day));
-      const hasOutOutsideDay = task.unitIds.some((unitId) => {
-        const byDay = outTimesByUnitAndDay.get(unitId);
-        if (!byDay) return false;
-        for (const [outDay, outTimes] of byDay.entries()) {
-          if (outDay !== day && outTimes.length > 0) return true;
-        }
-        return false;
-      });
 
       if (hasOut) {
         outCount += 1;
         kudaOut.set(task.kuda, (kudaOut.get(task.kuda) || 0) + 1);
         outTaskIds.add(task.taskId);
       } else {
-        if (hasOutOutsideDay) {
-          dayTasksWithoutOutButHasOutOutsideDay += 1;
-        }
         const dayNotOutUnits = notOutUnitIdsByDay.get(day) || new Set<string>();
         task.unitIds.forEach((unitId) => {
           notOutUnitIds.add(unitId);
@@ -819,9 +809,6 @@ export async function GET(req: Request) {
 
     dayOut.set(day, outCount);
     dayReturned.set(day, returnedCount);
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H2_task_classification", location: "app/api/stats/ops-shipping-kuda/route.ts:day-loop-summary", message: "Per-day task classification for OUT and missing units", data: { day, tasksTotal: dayTasks.length, outCount, returnedCount, notOutTasks: Math.max(0, dayTasks.length - outCount), dayTasksWithoutUnits, dayTasksWithoutOutButHasOutOutsideDay }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
   }
 
   const byDay = dateKeys.map((dateKey) => {
@@ -866,9 +853,6 @@ export async function GET(req: Request) {
         .sort((a, b) => b.accepted_in_bin_at.localeCompare(a.accepted_in_bin_at)),
     }))
     .sort((a, b) => b.out_returned_tasks - a.out_returned_tasks || a.seller_name.localeCompare(b.seller_name, "ru"));
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H15_merchant-seller-split", location: "app/api/stats/ops-shipping-kuda/route.ts:merchant-seller-breakdown", message: "Split merchant KUDA by parsed seller names", data: { from, to, merchantSellerReturnedBreakdownTop: merchantSellerReturnedBreakdown.slice(0, 12) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   const summary = byDay.reduce(
     (acc, day) => {
@@ -879,9 +863,6 @@ export async function GET(req: Request) {
     },
     { total_tasks: 0, out_tasks: 0, out_returned_tasks: 0 }
   );
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H3_summary_vs_units", location: "app/api/stats/ops-shipping-kuda/route.ts:summary-vs-units", message: "Compare not-out by tasks and by unique units", data: { from, to, totalTasks: summary.total_tasks, outTasks: summary.out_tasks, notOutByTasks: Math.max(0, summary.total_tasks - summary.out_tasks), notOutUnitIdsCount: notOutUnitIds.size }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   const notOutUnitsRes = await fetchUnitsCellIds(Array.from(notOutUnitIds));
   if (notOutUnitsRes.error) {
@@ -919,16 +900,6 @@ export async function GET(req: Request) {
       })
     ).values()
   ).sort((a, b) => a.code.localeCompare(b.code, "ru"));
-  const notOutCellCodeByUnit = notOutUnitsRes.data.map((row) => {
-    if (!row.cell_id) return "Без ячейки";
-    const cellInfo = cellInfoById.get(row.cell_id);
-    return cellInfo?.code || row.cell_id;
-  });
-  const notOutKgtCount = notOutCellCodeByUnit.filter((code) => /kqt/i.test(String(code))).length;
-  const notOutMbtCount = Math.max(0, notOutCellCodeByUnit.length - notOutKgtCount);
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H4_cell_distribution", location: "app/api/stats/ops-shipping-kuda/route.ts:not-out-cells", message: "Not-out unit placement and MBT/KGT split", data: { from, to, notOutUnitsRows: notOutUnitsRes.data.length, uniqueNotOutCells: notOutCells.length, notOutKgtCount, notOutMbtCount, sampleCellCodes: notOutCellCodeByUnit.slice(0, 20) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   const notOutUnitIdsArray = Array.from(notOutUnitIds);
   const pickingCellIdsRes = await fetchPickingCellIds(auth.profile.warehouse_id);
@@ -947,14 +918,6 @@ export async function GET(req: Request) {
       latestPickingMoveByUnit.set(move.unit_id, move.created_at);
     }
   }
-  const notOutWithoutCurrentCell = notOutUnitsRes.data.filter((row) => !row.cell_id).map((row) => row.id);
-  const notOutWithoutCurrentCellButWithPickingHistory = notOutWithoutCurrentCell.filter((unitId) =>
-    latestPickingMoveByUnit.has(unitId)
-  );
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H5_picking_history_available", location: "app/api/stats/ops-shipping-kuda/route.ts:not-out-picking-history", message: "Check if not-out units without current cell have picking history", data: { from, to, notOutUnitsCount: notOutUnitIdsArray.length, withoutCurrentCellCount: notOutWithoutCurrentCell.length, withPickingHistoryCount: latestPickingMoveByUnit.size, withoutCurrentCellButWithPickingHistoryCount: notOutWithoutCurrentCellButWithPickingHistory.length, sampleWithoutCellButWithPickingHistory: notOutWithoutCurrentCellButWithPickingHistory.slice(0, 12) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
-
   const latestPickingCellByUnit = new Map<string, { created_at: string; to_cell_id: string }>();
   for (const move of notOutPickingMovesRes.data) {
     if (!move.unit_id || !move.created_at || !move.to_cell_id) continue;
@@ -1025,7 +988,6 @@ export async function GET(req: Request) {
     /(kqt|kgt)/i.test(String(code))
   ).length;
   const notOutMbtCountEffective = Math.max(0, notOutCellCodeByUnitEffective.length - notOutKgtCountEffective);
-  const notOutKqtCountEffective = notOutCellCodeByUnitEffective.filter((code) => /kqt/i.test(String(code))).length;
 
   const notOutZoneCounts = new Map<string, number>();
   for (const row of notOutUnitsRes.data) {
@@ -1038,41 +1000,6 @@ export async function GET(req: Request) {
   const notOutZoneBreakdown = Array.from(notOutZoneCounts.entries())
     .map(([zone, count]) => ({ zone, count }))
     .sort((a, b) => b.count - a.count || a.zone.localeCompare(b.zone));
-
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H6_fallback_to_picking", location: "app/api/stats/ops-shipping-kuda/route.ts:not-out-fallback-applied", message: "Apply fallback to latest picking cell for not-out units without current cell", data: { from, to, notOutUnitsCount: notOutUnitsRes.data.length, fallbackAppliedUnitsCount: fallbackCellIdByUnit.size, unresolvedWithoutCellCount: notOutUnitsRes.data.filter((row) => !effectiveCellIdByUnit.get(row.id)).length, oldNotOutKgtCount: notOutKgtCount, oldNotOutMbtCount: notOutMbtCount, newNotOutKgtCount: notOutKgtCountEffective, newNotOutMbtCount: notOutMbtCountEffective, newUniqueCells: notOutCellsEffective.length, sampleNewCellCodes: notOutCellCodeByUnitEffective.slice(0, 20) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H7_pattern_kqt_vs_kgt", location: "app/api/stats/ops-shipping-kuda/route.ts:kqt-vs-kgt", message: "Compare KQT vs KGT match counts on effective not-out cells", data: { from, to, notOutUnitsCount: notOutCellCodeByUnitEffective.length, kqtMatches: notOutKqtCountEffective, kgtMatches: notOutKgtCountEffective, sampleCodes: Array.from(new Set(notOutCellCodeByUnitEffective)).slice(0, 20) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H9_not_out_zone_breakdown", location: "app/api/stats/ops-shipping-kuda/route.ts:not-out-zone-breakdown", message: "Not-out distribution by effective zone", data: { from, to, notOutZoneBreakdown }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
-
-  for (const day of dateKeys) {
-    const shouldLogDayDetail = dateKeys.length <= 2 || day === from || day === to;
-    if (!shouldLogDayDetail) continue;
-    const dayUnitIds = Array.from(notOutUnitIdsByDay.get(day) || new Set<string>());
-    const currentCellMissingCount = dayUnitIds.filter((unitId) => {
-      const row = notOutUnitsRes.data.find((item) => item.id === unitId);
-      return !row?.cell_id;
-    }).length;
-    const fallbackAppliedCount = dayUnitIds.filter((unitId) => fallbackCellIdByUnit.has(unitId)).length;
-    const sampleEffectiveCodes = dayUnitIds
-      .slice(0, 20)
-      .map((unitId) => {
-        const effectiveCellId = effectiveCellIdByUnit.get(unitId) || null;
-        if (!effectiveCellId) return "Без ячейки";
-        return cellInfoById.get(effectiveCellId)?.code || effectiveCellId;
-      });
-    const dayNotOutBarcodes = dayUnitIds
-      .map((unitId) => unitBarcodeById.get(unitId) || unitId)
-      .filter(Boolean)
-      .slice(0, 50);
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-not-out", hypothesisId: "H8_day_specific_not_out", location: "app/api/stats/ops-shipping-kuda/route.ts:day-specific-not-out", message: "Day-specific not-out unit cell diagnostics", data: { day, from, to, dayNotOutUnitsCount: dayUnitIds.length, currentCellMissingCount, fallbackAppliedCount, sampleEffectiveCodes, dayNotOutBarcodes }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-  }
 
   const includedTaskIds = Array.from(
     new Set(Array.from(tasksByTargetDay.values()).flatMap((rows) => rows.map((row) => row.taskId)))
@@ -1116,16 +1043,7 @@ export async function GET(req: Request) {
     .filter((task): task is PickingTaskRow => Boolean(task));
   const outTasksWithPickedAt = outTasksForPeriod.filter((task) => Boolean(task.picked_at)).length;
   const outTasksWithoutPickedAt = Math.max(0, outTasksForPeriod.length - outTasksWithPickedAt);
-  const includedTasksWithPickedAt = scannedTasks.length;
-  const includedTasksWithoutPickedAt = Math.max(0, includedTasks.length - includedTasksWithPickedAt);
   const includedTasksWithCompletedAt = includedTasks.filter((task) => Boolean(task.completed_at)).length;
-  const outTasksWithCompletedAt = outTasksForPeriod.filter((task) => Boolean(task.completed_at)).length;
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-team-efficiency", hypothesisId: "H10_metric_definition_gap", location: "app/api/stats/ops-shipping-kuda/route.ts:team-efficiency-source-metrics", message: "Compare source metrics behind scanned_orders and out_tasks", data: { from, to, includedTasks: includedTasks.length, includedTasksWithPickedAt, includedTasksWithoutPickedAt, includedTasksWithCompletedAt, outTasks: outTasksForPeriod.length, outTasksWithPickedAt, outTasksWithoutPickedAt, outTasksWithCompletedAt }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "investigate-team-efficiency", hypothesisId: "H11_out_without_pick_scan", location: "app/api/stats/ops-shipping-kuda/route.ts:team-efficiency-samples", message: "Sample task IDs for out without picked_at and picked with no out", data: { from, to, sampleOutWithoutPickedAtTaskIds: outTasksForPeriod.filter((task) => !task.picked_at).slice(0, 20).map((task) => task.id), samplePickedAtWithoutOutTaskIds: includedTasks.filter((task) => task.picked_at && !outTaskIds.has(task.id)).slice(0, 20).map((task) => task.id) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   const tasksByTsdUser = new Map<string, number>();
   for (const task of scannedTasks) {
@@ -1167,9 +1085,6 @@ export async function GET(req: Request) {
       tasks_count: shippedTasksByUser.get(userId) || 0,
     }))
     .sort((a, b) => b.tasks_count - a.tasks_count || a.user_name.localeCompare(b.user_name, "ru"));
-  // #region agent log
-  fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H13_unit-timeline-and-shipping-by-user", location: "app/api/stats/ops-shipping-kuda/route.ts:team-efficiency-new-metrics", message: "First/last picked unit and shipped tasks by user", data: { from, to, firstStartedUnit, lastStartedUnit, shippedTasksByUserTop: shipped_tasks_per_user.slice(0, 10) }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
 
   return NextResponse.json({
     ok: true,

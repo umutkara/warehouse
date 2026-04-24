@@ -801,17 +801,8 @@ export default function SLAPage() {
 
       const json = await res.json();
       if (res.ok && json.ok) {
-        const april21Row = Array.isArray(json.by_day)
-          ? json.by_day.find((row: any) => String(row?.date || "") === "2026-04-21") || null
-          : null;
-        // #region agent log
-        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "discrepancy-pre-fix", hypothesisId: "H6", location: "app/app/sla/page.tsx:loadOpsShippingStats:success", message: "Frontend received stats payload", data: { from, to, summary: json.summary, april21Row, byKudaCount: Array.isArray(json.by_kuda) ? json.by_kuda.length : null }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         setOpsShippingStats(json);
       } else {
-        // #region agent log
-        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "discrepancy-pre-fix", hypothesisId: "H6", location: "app/app/sla/page.tsx:loadOpsShippingStats:error", message: "Frontend received non-ok stats response", data: { from, to, status: res.status, error: json?.error || null }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         setOpsShippingError(json.error || "Ошибка загрузки статистики OPS Shipping");
       }
     } catch (e: any) {

@@ -257,9 +257,15 @@ const OpsShippingTrendChart = memo(function OpsShippingTrendChart({
 
 const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
   data,
+  merchantBreakdown,
   topLimit,
 }: {
   data: OpsShippingByKuda[];
+  merchantBreakdown: Array<{
+    seller_name: string;
+    out_returned_tasks: number;
+    returned_orders: Array<{ barcode: string; accepted_in_bin_at: string }>;
+  }>;
   topLimit: number;
 }) {
   const [kudaTooltip, setKudaTooltip] = useState<{
@@ -276,7 +282,21 @@ const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
     setKudaTooltip(null);
   }, []);
 
-  const rowsWithReturned = data
+  const merchantSplitRows: OpsShippingByKuda[] = (merchantBreakdown || [])
+    .filter((row) => Number(row.out_returned_tasks || 0) > 0)
+    .map((row) => ({
+      kuda: `Мерчант: ${row.seller_name}`,
+      created_tasks: 0,
+      out_tasks: 0,
+      out_returned_tasks: row.out_returned_tasks,
+      returned_orders: row.returned_orders || [],
+    }));
+  const nonMerchantRows = data.filter(
+    (row) => String(row.kuda || "").trim().toLowerCase() !== "мерчант"
+  );
+  const composedRows = [...nonMerchantRows, ...merchantSplitRows];
+
+  const rowsWithReturned = composedRows
     .filter((row) => row.out_returned_tasks > 0)
     .sort((a, b) => b.out_returned_tasks - a.out_returned_tasks || b.out_tasks - a.out_tasks);
   const rowsToDisplay = topLimit > 0 ? rowsWithReturned.slice(0, topLimit) : rowsWithReturned;
@@ -802,14 +822,14 @@ export default function StatisticsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
+  /** True while a stats request is in flight; used so the 60s poller does not stack requests (slow wide-range loads can exceed 60s, which previously left only "stale" responses). */
+  const opsStatsInFlightRef = useRef(false);
 
   async function loadOpsShippingStats(from: string, to: string) {
     const requestSeq = ++requestSeqRef.current;
+    opsStatsInFlightRef.current = true;
     setLoading(true);
     setError(null);
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H15", location: "app/app/statistics/page.tsx:loadOpsShippingStats:start", message: "Start statistics request", data: { requestSeq, from, to }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     try {
       const params = new URLSearchParams({ from, to });
       const res = await fetch(`/api/stats/ops-shipping-kuda?${params.toString()}`, { cache: "no-store" });
@@ -821,20 +841,11 @@ export default function StatisticsPage() {
 
       const json = await res.json();
       if (requestSeq !== requestSeqRef.current) {
-        // #region agent log
-        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H15", location: "app/app/statistics/page.tsx:loadOpsShippingStats:stale", message: "Ignore stale statistics response", data: { requestSeq, currentSeq: requestSeqRef.current, from, to, ok: res.ok }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         return;
       }
       if (res.ok && json.ok) {
-        // #region agent log
-        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H15", location: "app/app/statistics/page.tsx:loadOpsShippingStats:success", message: "Apply statistics response", data: { requestSeq, from, to, summary: json.summary }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         setStats(json);
       } else {
-        // #region agent log
-        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H15", location: "app/app/statistics/page.tsx:loadOpsShippingStats:error", message: "Statistics response is non-ok", data: { requestSeq, from, to, status: res.status, error: json?.error || null }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         setError(json.error || "Ошибка загрузки статистики");
       }
     } catch (e: any) {
@@ -842,47 +853,20 @@ export default function StatisticsPage() {
       setError(e.message || "Ошибка загрузки статистики");
     } finally {
       if (requestSeq === requestSeqRef.current) {
+        opsStatsInFlightRef.current = false;
         setLoading(false);
       }
     }
   }
 
   useEffect(() => {
-    loadOpsShippingStats(fromDate, toDate);
-    const interval = setInterval(() => loadOpsShippingStats(fromDate, toDate), 60000);
+    void loadOpsShippingStats(fromDate, toDate);
+    const interval = setInterval(() => {
+      if (opsStatsInFlightRef.current) return;
+      void loadOpsShippingStats(fromDate, toDate);
+    }, 60000);
     return () => clearInterval(interval);
   }, [fromDate, toDate]);
-
-  useEffect(() => {
-    if (!stats) return;
-    const outOnly = Math.max(0, stats.summary.out_tasks - stats.summary.out_returned_tasks);
-    const notOut = Math.max(0, stats.summary.total_tasks - stats.summary.out_tasks);
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H16", location: "app/app/statistics/page.tsx:metric-mapping", message: "Displayed top metrics mapping", data: { from: stats.filters.from, to: stats.filters.to, cards: { createdTasks: stats.summary.total_tasks, uniqueDirectionOut: stats.summary.out_tasks, outReturnedToBin: stats.summary.out_returned_tasks, kudaCategoriesReference: stats.summary.kuda_categories } }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H17", location: "app/app/statistics/page.tsx:metric-partition", message: "Partition metrics into exclusive buckets", data: { from: stats.filters.from, to: stats.filters.to, createdTasks: stats.summary.total_tasks, outOnly, outReturned: stats.summary.out_returned_tasks, notOut, partitionSum: outOnly + stats.summary.out_returned_tasks + notOut }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-    const byKudaOutSum = stats.by_kuda.reduce((acc, row) => acc + Number(row.out_tasks || 0), 0);
-    const byKudaReturnedSum = stats.by_kuda.reduce(
-      (acc, row) => acc + Number(row.out_returned_tasks || 0),
-      0
-    );
-    const byKudaOutOnlySum = stats.by_kuda.reduce(
-      (acc, row) =>
-        acc + Math.max(0, Number(row.out_tasks || 0) - Number(row.out_returned_tasks || 0)),
-      0
-    );
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "discrepancy-pre-fix", hypothesisId: "H18", location: "app/app/statistics/page.tsx:chart-card-consistency", message: "Compare by_kuda sums vs top cards", data: { from: stats.filters.from, to: stats.filters.to, summary: { totalTasks: stats.summary.total_tasks, outTasks: stats.summary.out_tasks, outReturnedTasks: stats.summary.out_returned_tasks, outOnlyCard: outOnly }, byKuda: { outSum: byKudaOutSum, returnedSum: byKudaReturnedSum, outOnlySum: byKudaOutOnlySum, categories: stats.by_kuda.length } }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H12_team_efficiency_display", location: "app/app/statistics/page.tsx:team-efficiency-display", message: "Display values for TSD scans vs completed/out", data: { from: stats.filters.from, to: stats.filters.to, teamEfficiency: stats.summary.team_efficiency ? { scannedOrdersCount: stats.summary.team_efficiency.scanned_orders_count, completedOrdersCount: stats.summary.team_efficiency.completed_orders_count || 0, outTasksCount: stats.summary.team_efficiency.out_tasks_count || 0, outWithoutTsdScan: stats.summary.team_efficiency.out_tasks_without_tsd_scan_count || 0, firstStartedUnitBarcode: stats.summary.team_efficiency.first_started_unit_barcode || null, firstStartedUnitAt: stats.summary.team_efficiency.first_started_unit_at || null, lastStartedUnitBarcode: stats.summary.team_efficiency.last_started_unit_barcode || null, lastStartedUnitAt: stats.summary.team_efficiency.last_started_unit_at || null, shippedTasksPerUserCount: (stats.summary.team_efficiency.shipped_tasks_per_user || []).length } : null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-    // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H14_pie_top10_returned", location: "app/app/statistics/page.tsx:pie-top10-data", message: "Top 10 returned sellers data for pie chart", data: { from: stats.filters.from, to: stats.filters.to, top10: stats.by_kuda.filter((row) => Number(row.out_returned_tasks || 0) > 0).sort((a, b) => Number(b.out_returned_tasks || 0) - Number(a.out_returned_tasks || 0)).slice(0, 10).map((row) => ({ kuda: row.kuda, returned: row.out_returned_tasks })) }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
-  }, [stats]);
 
   return (
     <div
@@ -1300,7 +1284,11 @@ export default function StatisticsPage() {
                     );
                   })}
                 </div>
-                <OpsShippingKudaBars data={stats.by_kuda} topLimit={kudaTopLimit} />
+                <OpsShippingKudaBars
+                  data={stats.by_kuda}
+                  merchantBreakdown={stats.merchant_seller_returned_breakdown || []}
+                  topLimit={kudaTopLimit}
+                />
               </div>
             </div>
             <div style={{ marginBottom: 8 }}>

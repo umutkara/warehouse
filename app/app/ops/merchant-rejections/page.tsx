@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Unit = {
@@ -66,14 +66,24 @@ export default function MerchantRejectionsPage() {
   const [page, setPage] = useState(1);
   const [pageJumpInput, setPageJumpInput] = useState("1");
   const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [ticketStatus, setTicketStatus] = useState<"all" | "open" | "resolved">("all");
   const [scope, setScope] = useState<"all" | "active" | "archived">("all");
   const [ageFilter, setAgeFilter] = useState<"all" | "24h" | "48h" | "7d">("all");
   const [sortBy, setSortBy] = useState<"created_desc" | "created_asc" | "age_desc" | "age_asc">("created_desc");
+  const [searchInput, setSearchInput] = useState("");
   const [searchBarcode, setSearchBarcode] = useState("");
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setSearchBarcode(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchInput]);
 
   const [showModal, setShowModal] = useState(false);
   const [modalAction, setModalAction] = useState<"create" | "resolve" | "partner_rejected" | null>(null);
@@ -95,7 +105,8 @@ export default function MerchantRejectionsPage() {
   }, [page]);
 
   async function loadUnits() {
-    setLoading(true);
+    const requestId = ++requestIdRef.current;
+    setIsFetching(true);
     setError(null);
 
     try {
@@ -112,6 +123,8 @@ export default function MerchantRejectionsPage() {
         cache: "no-store",
       });
 
+      if (requestId !== requestIdRef.current) return;
+
       if (!res.ok) {
         if (res.status === 401) {
           router.push("/login");
@@ -123,6 +136,7 @@ export default function MerchantRejectionsPage() {
       }
 
       const json = await res.json();
+      if (requestId !== requestIdRef.current) return;
       setUnits(json.units || []);
       setTotal(Number(json.total || 0));
       setTotalPages(Number(json.total_pages || 1));
@@ -130,9 +144,14 @@ export default function MerchantRejectionsPage() {
         setPage(json.page);
       }
     } catch (e: any) {
-      setError("Ошибка загрузки");
+      if (requestId === requestIdRef.current) {
+        setError("Ошибка загрузки");
+      }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setIsFetching(false);
+        setInitialLoading(false);
+      }
     }
   }
 
@@ -219,8 +238,9 @@ export default function MerchantRejectionsPage() {
     setPageJumpInput(String(targetPage));
   }
 
-  const filteredBySearch = searchBarcode.trim()
-    ? units.filter((u) => u.barcode.toLowerCase().includes(searchBarcode.trim().toLowerCase()))
+  const localSearch = searchInput.trim().toLowerCase();
+  const filteredBySearch = localSearch
+    ? units.filter((u) => u.barcode.toLowerCase().includes(localSearch))
     : units;
   const pageFrom = total === 0 ? 0 : (page - 1) * 30 + 1;
   const pageTo = total === 0 ? 0 : Math.min(page * 30, total);
@@ -231,7 +251,7 @@ export default function MerchantRejectionsPage() {
     (u) => u.ticket.created && (u.ticket.status === "resolved" || u.ticket.status === "partner_rejected")
   ).length;
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div style={styles.container}>
         <div style={{ textAlign: "center", padding: 40 }}>Загрузка...</div>
@@ -239,7 +259,7 @@ export default function MerchantRejectionsPage() {
     );
   }
 
-  if (error) {
+  if (error && units.length === 0) {
     return (
       <div style={styles.container}>
         <div style={{ ...styles.error, marginTop: 40 }}>{error}</div>
@@ -252,6 +272,7 @@ export default function MerchantRejectionsPage() {
     setTicketStatus("all");
     setAgeFilter("all");
     setSortBy("created_desc");
+    setSearchInput("");
     setSearchBarcode("");
     setPage(1);
   }
@@ -262,7 +283,8 @@ export default function MerchantRejectionsPage() {
         <h1 style={styles.title}>🚫 Мерчант не принял</h1>
         <div style={styles.subtitle}>
           Активные и архивные кейсы мерчант-отказа. Всего по всем страницам: <strong>{total}</strong>
-          {searchBarcode.trim() && ` (на странице: ${filteredBySearch.length})`}
+          {searchInput.trim() && ` (на странице: ${filteredBySearch.length})`}
+          {isFetching && " • Обновляем..."}
         </div>
         <div style={styles.kpiRow}>
           <span style={styles.kpiChip}>Активные (стр.): {activeOnPage}</span>
@@ -319,8 +341,8 @@ export default function MerchantRejectionsPage() {
           <label style={styles.filterLabel}>Поиск по заказу:</label>
           <input
             type="text"
-            value={searchBarcode}
-            onChange={(e) => setSearchBarcode(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Штрихкод или часть"
             style={styles.searchInput}
           />

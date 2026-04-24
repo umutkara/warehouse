@@ -4,6 +4,52 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
+const TopIcons = {
+  Units: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="6" width="12" height="10" rx="1" />
+      <path d="M7 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+    </svg>
+  ),
+  Admin: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6v4M10 13h.01" />
+      <path d="M4.5 15.5l2.2-2.2M15.5 15.5l-2.2-2.2" />
+    </svg>
+  ),
+  SLA: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6v4l3 2" />
+    </svg>
+  ),
+  Statistics: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 16V9M10 16V5M16 16V11" />
+      <path d="M3 16h14" />
+    </svg>
+  ),
+  Docs: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3h8l3 3v11a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1z" />
+      <path d="M9 8h4M9 12h4M9 16h2" />
+    </svg>
+  ),
+  Map: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6l4-2 6 2 4-2v10l-4 2-6-2-4 2V6z" />
+    </svg>
+  ),
+  Logout: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3H5a1 1 0 00-1 1v12a1 1 0 001 1h3" />
+      <path d="M12 7l4 3-4 3" />
+      <path d="M16 10H8" />
+    </svg>
+  ),
+};
+
 export default function TopBarExcel() {
   const router = useRouter();
   const [role, setRole] = useState<string>("guest");
@@ -79,7 +125,7 @@ export default function TopBarExcel() {
           e.currentTarget.style.borderColor = "var(--color-border)";
         }}
       >
-        📦 Список заказов
+        <TopIcons.Units /> Список заказов
       </button>
 
       {role === "admin" && (
@@ -111,7 +157,7 @@ export default function TopBarExcel() {
             e.currentTarget.style.borderColor = "#111827";
           }}
         >
-          🛠️ Админ панель
+          <TopIcons.Admin /> Админ панель
         </button>
       )}
 
@@ -147,7 +193,7 @@ export default function TopBarExcel() {
             e.currentTarget.style.borderColor = "var(--color-border)";
           }}
         >
-          📊 SLA
+          <TopIcons.SLA /> SLA
         </button>
       )}
 
@@ -182,7 +228,7 @@ export default function TopBarExcel() {
             e.currentTarget.style.borderColor = "var(--color-border)";
           }}
         >
-          📈 Статистика
+          <TopIcons.Statistics /> Статистика
         </button>
       )}
 
@@ -217,7 +263,7 @@ export default function TopBarExcel() {
           e.currentTarget.style.borderColor = "var(--color-border)";
         }}
       >
-        📖 Справочник
+        <TopIcons.Docs /> Справочник
       </button>
 
       {/* Warehouse Map Button */}
@@ -251,7 +297,7 @@ export default function TopBarExcel() {
           e.currentTarget.style.borderColor = "var(--color-border)";
         }}
       >
-        🗺️ Карта склада
+        <TopIcons.Map /> Карта склада
       </button>
 
       {/* Logout Button */}
@@ -285,7 +331,7 @@ export default function TopBarExcel() {
           e.currentTarget.style.borderColor = "#dc2626";
         }}
       >
-        🚪 Выход
+        <TopIcons.Logout /> Выход
       </button>
     </header>
   );
