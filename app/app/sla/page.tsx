@@ -89,6 +89,62 @@ type PartnerRejectedUnit = {
   courier_name?: string | null;
 };
 
+type OpsShippingByDay = {
+  date: string;
+  created_tasks: number;
+  out_tasks: number;
+  out_returned_tasks: number;
+  kuda_breakdown: Array<{
+    kuda: string;
+    created_tasks: number;
+  }>;
+};
+
+type OpsShippingByKuda = {
+  kuda: string;
+  created_tasks: number;
+  out_tasks: number;
+  out_returned_tasks: number;
+};
+
+type OpsShippingStats = {
+  filters: {
+    from: string;
+    to: string;
+    excluded_scenario_keyword: string;
+    excluded_kuda: string[];
+    excluded_ops_mark: string;
+  };
+  summary: {
+    total_tasks: number;
+    out_tasks: number;
+    out_returned_tasks: number;
+    kuda_categories: number;
+    excluded_by_keyword: number;
+    excluded_by_kuda: number;
+    excluded_by_ops_ns: number;
+  };
+  by_day: OpsShippingByDay[];
+  by_kuda: OpsShippingByKuda[];
+};
+
+function getTodayDateUtc() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getDateDaysAgoUtc(daysAgo: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatShortDate(dateIso: string) {
+  return new Date(`${dateIso}T00:00:00.000Z`).toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
 // ⚡ OPTIMIZATION: Memoized MetricCard component
 const MetricCard = memo(function MetricCard({
   title,
@@ -298,6 +354,210 @@ const DonutChart = memo(function DonutChart({ value, max, label, color = "#2563e
   );
 });
 
+const OpsShippingTrendChart = memo(function OpsShippingTrendChart({
+  data,
+}: {
+  data: OpsShippingByDay[];
+}) {
+  if (data.length === 0) {
+    return (
+      <div style={{ textAlign: "center", color: "#9ca3af", padding: "40px 0" }}>
+        Нет данных за выбранный период
+      </div>
+    );
+  }
+
+  const width = 760;
+  const height = 280;
+  const paddingLeft = 40;
+  const paddingRight = 16;
+  const paddingTop = 20;
+  const paddingBottom = 40;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const maxValue = Math.max(
+    1,
+    ...data.flatMap((day) => [day.created_tasks, day.out_tasks, day.out_returned_tasks])
+  );
+
+  const pointX = (index: number) =>
+    data.length === 1
+      ? paddingLeft + chartWidth / 2
+      : paddingLeft + (index / (data.length - 1)) * chartWidth;
+
+  const pointY = (value: number) =>
+    paddingTop + ((maxValue - value) / maxValue) * chartHeight;
+
+  const buildPath = (valueGetter: (row: OpsShippingByDay) => number) =>
+    data
+      .map((row, index) => `${index === 0 ? "M" : "L"} ${pointX(index)} ${pointY(valueGetter(row))}`)
+      .join(" ");
+
+  const createdPath = buildPath((row) => row.created_tasks);
+  const outPath = buildPath((row) => row.out_tasks);
+  const returnedPath = buildPath((row) => row.out_returned_tasks);
+
+  const labelStep = Math.max(1, Math.floor(data.length / 6));
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: "100%", height: "auto", display: "block" }}
+      >
+        {[0, 1, 2, 3, 4].map((step) => {
+          const value = Math.round((maxValue / 4) * (4 - step));
+          const y = paddingTop + (step / 4) * chartHeight;
+          return (
+            <g key={step}>
+              <line
+                x1={paddingLeft}
+                x2={width - paddingRight}
+                y1={y}
+                y2={y}
+                stroke="#f3f4f6"
+                strokeWidth="1"
+              />
+              <text x={4} y={y + 4} fontSize="11" fill="#9ca3af">
+                {value}
+              </text>
+            </g>
+          );
+        })}
+
+        <path d={createdPath} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" />
+        <path d={outPath} fill="none" stroke="#7c3aed" strokeWidth="3" strokeLinecap="round" />
+        <path d={returnedPath} fill="none" stroke="#dc2626" strokeWidth="3" strokeLinecap="round" />
+
+        {data.map((row, index) => {
+          if (index % labelStep !== 0 && index !== data.length - 1) return null;
+          return (
+            <text
+              key={row.date}
+              x={pointX(index)}
+              y={height - 12}
+              textAnchor="middle"
+              fontSize="11"
+              fill="#9ca3af"
+            >
+              {formatShortDate(row.date)}
+            </text>
+          );
+        })}
+      </svg>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 600 }}>● Создано задач</div>
+        <div style={{ fontSize: 12, color: "#7c3aed", fontWeight: 600 }}>● Есть OUT</div>
+        <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>● OUT → вернулось</div>
+      </div>
+    </div>
+  );
+});
+
+const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
+  data,
+}: {
+  data: OpsShippingByKuda[];
+}) {
+  const rowsWithOut = data
+    .filter((row) => row.out_tasks > 0)
+    .sort((a, b) => b.out_tasks - a.out_tasks || b.out_returned_tasks - a.out_returned_tasks);
+
+  if (rowsWithOut.length === 0) {
+    return (
+      <div style={{ textAlign: "center", color: "#9ca3af", padding: "40px 0" }}>
+        Нет мерчантов с выехавшими заказами (OUT) в выбранном периоде
+      </div>
+    );
+  }
+
+  const maxOut = Math.max(1, ...rowsWithOut.map((row) => row.out_tasks));
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
+          ● Уникальное направление (OUT)
+        </div>
+        <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 700 }}>
+          ● OUT → вернулось
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          padding: 12,
+          overflowX: "auto",
+          overflowY: "hidden",
+          background: "#fff",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridAutoFlow: "column",
+            gridAutoColumns: "minmax(56px, 56px)",
+            gap: 10,
+            alignItems: "end",
+            minHeight: 300,
+            paddingBottom: 8,
+          }}
+        >
+          {rowsWithOut.map((row) => {
+            const outHeight = Math.max(2, Math.round((row.out_tasks / maxOut) * 200));
+            const retHeight = Math.max(2, Math.round((row.out_returned_tasks / maxOut) * 200));
+            return (
+              <div key={row.kuda} style={{ display: "grid", gap: 6, justifyItems: "center" }}>
+                <div style={{ display: "flex", gap: 5, alignItems: "end", height: 210 }}>
+                  <div
+                    title={`OUT: ${row.out_tasks}`}
+                    style={{
+                      width: 16,
+                      height: outHeight,
+                      borderRadius: 6,
+                      background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                    }}
+                  />
+                  <div
+                    title={`OUT→RET: ${row.out_returned_tasks}`}
+                    style={{
+                      width: 16,
+                      height: retHeight,
+                      borderRadius: 6,
+                      background: "linear-gradient(180deg, #ef4444 0%, #dc2626 100%)",
+                    }}
+                  />
+                </div>
+                <div style={{ fontSize: 10, lineHeight: 1.1, color: "#6b7280", textAlign: "center" }}>
+                  {row.out_tasks} / {row.out_returned_tasks}
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#374151",
+                    textAlign: "center",
+                    width: "100%",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                  title={row.kuda}
+                >
+                  {row.kuda}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function SLAPage() {
   const router = useRouter();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -344,6 +604,11 @@ export default function SLAPage() {
   });
   const [partnerRejectedUnits, setPartnerRejectedUnits] = useState<PartnerRejectedUnit[]>([]);
   const [loadingPartnerRejected, setLoadingPartnerRejected] = useState(false);
+  const [opsShippingFromDate, setOpsShippingFromDate] = useState<string>(() => getDateDaysAgoUtc(13));
+  const [opsShippingToDate, setOpsShippingToDate] = useState<string>(() => getTodayDateUtc());
+  const [opsShippingStats, setOpsShippingStats] = useState<OpsShippingStats | null>(null);
+  const [loadingOpsShippingStats, setLoadingOpsShippingStats] = useState(false);
+  const [opsShippingError, setOpsShippingError] = useState<string | null>(null);
 
   useEffect(() => {
     loadMetrics();
@@ -356,6 +621,14 @@ export default function SLAPage() {
     }, 60000); // Refresh every minute
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    loadOpsShippingStats(opsShippingFromDate, opsShippingToDate);
+    const interval = setInterval(() => {
+      loadOpsShippingStats(opsShippingFromDate, opsShippingToDate);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [opsShippingFromDate, opsShippingToDate]);
 
   async function loadMetrics() {
     setLoading(true);
@@ -509,6 +782,42 @@ export default function SLAPage() {
       console.error("Failed to load partner rejected units:", e);
     } finally {
       setLoadingPartnerRejected(false);
+    }
+  }
+
+  async function loadOpsShippingStats(from: string, to: string) {
+    setLoadingOpsShippingStats(true);
+    setOpsShippingError(null);
+    try {
+      const params = new URLSearchParams({ from, to });
+      const res = await fetch(`/api/stats/ops-shipping-kuda?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        const april21Row = Array.isArray(json.by_day)
+          ? json.by_day.find((row: any) => String(row?.date || "") === "2026-04-21") || null
+          : null;
+        // #region agent log
+        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "discrepancy-pre-fix", hypothesisId: "H6", location: "app/app/sla/page.tsx:loadOpsShippingStats:success", message: "Frontend received stats payload", data: { from, to, summary: json.summary, april21Row, byKudaCount: Array.isArray(json.by_kuda) ? json.by_kuda.length : null }, timestamp: Date.now() }) }).catch(() => {});
+        // #endregion
+        setOpsShippingStats(json);
+      } else {
+        // #region agent log
+        fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "discrepancy-pre-fix", hypothesisId: "H6", location: "app/app/sla/page.tsx:loadOpsShippingStats:error", message: "Frontend received non-ok stats response", data: { from, to, status: res.status, error: json?.error || null }, timestamp: Date.now() }) }).catch(() => {});
+        // #endregion
+        setOpsShippingError(json.error || "Ошибка загрузки статистики OPS Shipping");
+      }
+    } catch (e: any) {
+      setOpsShippingError(e.message || "Ошибка загрузки статистики OPS Shipping");
+    } finally {
+      setLoadingOpsShippingStats(false);
     }
   }
 
@@ -701,6 +1010,7 @@ export default function SLAPage() {
             loadMetrics();
             loadShippingSLAMetrics();
             loadPartnerRejectedUnits();
+            loadOpsShippingStats(opsShippingFromDate, opsShippingToDate);
           }}
           disabled={loading}
           style={{
