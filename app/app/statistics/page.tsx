@@ -500,7 +500,6 @@ const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
 const OpsShippingReturnedPie = memo(function OpsShippingReturnedPie({
   data,
   merchantBreakdown,
-  totalReturnedOverall,
   topLimit = 10,
 }: {
   data: OpsShippingByKuda[];
@@ -509,7 +508,6 @@ const OpsShippingReturnedPie = memo(function OpsShippingReturnedPie({
     out_returned_tasks: number;
     returned_orders: Array<{ barcode: string; accepted_in_bin_at: string }>;
   }>;
-  totalReturnedOverall: number;
   topLimit?: number;
 }) {
   const [selectedSlice, setSelectedSlice] = useState<{
@@ -545,7 +543,6 @@ const OpsShippingReturnedPie = memo(function OpsShippingReturnedPie({
   }
 
   const total = composedRows.reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0);
-  const top10CoveragePct = totalReturnedOverall > 0 ? (total / totalReturnedOverall) * 100 : 0;
   const topSlice = composedRows[0];
   const topSlicePct = total > 0 ? (Number(topSlice?.out_returned_tasks || 0) / total) * 100 : 0;
   const cx = 120;
@@ -645,19 +642,6 @@ const OpsShippingReturnedPie = memo(function OpsShippingReturnedPie({
             Топ: {topSlice.kuda} ({Number(topSlice.out_returned_tasks || 0)} / {topSlicePct.toFixed(1)}%)
           </span>
         )}
-        <span
-          style={{
-            fontSize: 11,
-            color: "#93c5fd",
-            border: "1px solid #1e3a8a",
-            borderRadius: 999,
-            background: "rgba(30,58,138,0.2)",
-            padding: "3px 8px",
-            fontWeight: 700,
-          }}
-        >
-          Top 10 покрытие: {total} из {totalReturnedOverall} ({top10CoveragePct.toFixed(1)}%)
-        </span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 10, alignItems: "start" }}>
         <div style={{ position: "relative", width: 240, height: 240, margin: "0 auto" }}>
@@ -896,7 +880,7 @@ export default function StatisticsPage() {
     fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H12_team_efficiency_display", location: "app/app/statistics/page.tsx:team-efficiency-display", message: "Display values for TSD scans vs completed/out", data: { from: stats.filters.from, to: stats.filters.to, teamEfficiency: stats.summary.team_efficiency ? { scannedOrdersCount: stats.summary.team_efficiency.scanned_orders_count, completedOrdersCount: stats.summary.team_efficiency.completed_orders_count || 0, outTasksCount: stats.summary.team_efficiency.out_tasks_count || 0, outWithoutTsdScan: stats.summary.team_efficiency.out_tasks_without_tsd_scan_count || 0, firstStartedUnitBarcode: stats.summary.team_efficiency.first_started_unit_barcode || null, firstStartedUnitAt: stats.summary.team_efficiency.first_started_unit_at || null, lastStartedUnitBarcode: stats.summary.team_efficiency.last_started_unit_barcode || null, lastStartedUnitAt: stats.summary.team_efficiency.last_started_unit_at || null, shippedTasksPerUserCount: (stats.summary.team_efficiency.shipped_tasks_per_user || []).length } : null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     // #region agent log
-    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H14_pie_top10_returned", location: "app/app/statistics/page.tsx:pie-top10-data", message: "Top 10 returned sellers data for pie chart", data: { from: stats.filters.from, to: stats.filters.to, totalReturnedOverall: Number(stats.summary.out_returned_tasks || 0), top10Total: stats.by_kuda.filter((row) => Number(row.out_returned_tasks || 0) > 0).sort((a, b) => Number(b.out_returned_tasks || 0) - Number(a.out_returned_tasks || 0)).slice(0, 10).reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0), top10: stats.by_kuda.filter((row) => Number(row.out_returned_tasks || 0) > 0).sort((a, b) => Number(b.out_returned_tasks || 0) - Number(a.out_returned_tasks || 0)).slice(0, 10).map((row) => ({ kuda: row.kuda, returned: row.out_returned_tasks })) }, timestamp: Date.now() }) }).catch(() => {});
+    fetch("http://127.0.0.1:7370/ingest/24317d64-e0d6-4945-91b0-f5cf6390eaf2", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "696a64" }, body: JSON.stringify({ sessionId: "696a64", runId: "post-fix", hypothesisId: "H14_pie_top10_returned", location: "app/app/statistics/page.tsx:pie-top10-data", message: "Top 10 returned sellers data for pie chart", data: { from: stats.filters.from, to: stats.filters.to, top10: stats.by_kuda.filter((row) => Number(row.out_returned_tasks || 0) > 0).sort((a, b) => Number(b.out_returned_tasks || 0) - Number(a.out_returned_tasks || 0)).slice(0, 10).map((row) => ({ kuda: row.kuda, returned: row.out_returned_tasks })) }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
   }, [stats]);
 
@@ -1323,7 +1307,6 @@ export default function StatisticsPage() {
               <OpsShippingReturnedPie
                 data={stats.by_kuda}
                 merchantBreakdown={stats.merchant_seller_returned_breakdown || []}
-                totalReturnedOverall={Number(stats.summary.out_returned_tasks || 0)}
                 topLimit={10}
               />
             </div>
