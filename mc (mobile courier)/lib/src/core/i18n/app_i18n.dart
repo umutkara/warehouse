@@ -5,7 +5,7 @@ enum AppLang { ru, az }
 
 class AppLangController {
   AppLangController([AppLang initial = AppLang.ru])
-      : lang = ValueNotifier<AppLang>(initial);
+    : lang = ValueNotifier<AppLang>(initial);
 
   final ValueNotifier<AppLang> lang;
 
@@ -85,8 +85,7 @@ const Map<String, String> _ru = <String, String>{
       'Точка дропа не создается, заказ остается у курьера.',
   'ops.dialog.comment_required': 'Комментарий (обязательно)',
   'ops.dialog.comment_optional': 'Комментарий (опционально)',
-  'ops.dialog.sig_reject_required':
-      'Подпись отказавшей стороны (обязательно):',
+  'ops.dialog.sig_reject_required': 'Подпись отказавшей стороны (обязательно):',
   'ops.dialog.sig_accept_required':
       'Подпись принимающей стороны (обязательно):',
   'ops.dialog.sig_clear': 'Очистить подпись',
@@ -110,6 +109,10 @@ const Map<String, String> _ru = <String, String>{
   'tasks.my_tasks': 'Мои задачи',
   'tasks.no_active_tasks': 'Пока нет активных задач',
   'tasks.transfer_selected': 'Передать выбранные ({count})',
+  'tasks.finish_route_none': 'Нет выбранных заказов для завершения рейса',
+  'tasks.finish_route_self_pickup_only':
+      'Самостоятельный забор, сдается только при закрытии смены на склад',
+  'tasks.finish_route_bulk_snack': 'Рейс завершен для заказов: {count}',
   'tasks.pickup_confirmed': 'Забор подтвержден',
   'tasks.transfer.title': 'Передать заказы',
   'tasks.transfer.body':
@@ -122,7 +125,10 @@ const Map<String, String> _ru = <String, String>{
   'tasks.pickup_reject.title': 'Незабор',
   'tasks.pickup_reject.reason_hint': 'Укажите причину незабора',
   'common.save': 'Сохранить',
+  'common.yes': 'Да',
+  'common.no': 'Нет',
   'tasks.pickup_reject_saved_for': 'Незабор сохранен: {barcode}',
+  'tasks.pickup_confirm_dialog.title': 'Забрать?',
   'tasks.pending.title': 'Задания от логистов — неподтвержденные ({count})',
   'tasks.pending.subtitle': 'Подтвердите забор или укажите незабор с причиной',
   'tasks.pending.body':
@@ -136,7 +142,6 @@ const Map<String, String> _ru = <String, String>{
   'tasks.pending.scenario': 'Сценарий: {scenario}',
   'tasks.pending.confirm_bulk': 'Подтвердить забор ({count})',
   'tasks.pending.reject_bulk': 'Незабор ({count})',
-  'tasks.pending.not_found': 'Данного заказа нет',
   'tasks.pending.scan_confirm_title': 'Сканировать и подтвердить',
   'tasks.pending.scan_confirm_snack': 'Забор подтвержден сканом: {barcode}',
   'tasks.no_scenario': 'Без сценария',
@@ -176,8 +181,7 @@ const Map<String, String> _ru = <String, String>{
   'shift.current.active_tasks': 'Активных задач: {count}',
   'shift.summary.title': 'Сводка смены',
   'shift.metric.assigned': 'Назначено',
-  'shift.metric.in_route': 'В маршруте',
-  'shift.metric.delivered': 'Доставлено/возврат',
+  'shift.metric.delivered': 'Доставлено',
   'shift.metric.problematic': 'Проблемные',
   'shift.close.title': 'Закрытие смены',
   'shift.close.body1': 'Передайте на склад оставшиеся заказы до конца смены.',
@@ -253,8 +257,7 @@ const Map<String, String> _az = <String, String>{
 
   'pickup.confirm': 'Götürməni təsdiqlə',
   'pickup.reject': 'Götürülmədi',
-  'self_pickup.block':
-      'Özün götürmə. Yalnız növbə bağlananda təhvil verilir.',
+  'self_pickup.block': 'Özün götürmə. Yalnız növbə bağlananda təhvil verilir.',
   'drop.undo.snack': 'Drop ləğv edildi',
   'drop.undo': 'Drop-u ləğv et',
   'ops.snack.drop_sent': 'Drop OPS statusu ilə göndərildi',
@@ -268,10 +271,8 @@ const Map<String, String> _az = <String, String>{
       'Drop nöqtəsi yaradılmır, sifariş kuryerdə qalır.',
   'ops.dialog.comment_required': 'Şərh (mütləq)',
   'ops.dialog.comment_optional': 'Şərh (opsional)',
-  'ops.dialog.sig_reject_required':
-      'İmtina edən tərəfin imzası (mütləq):',
-  'ops.dialog.sig_accept_required':
-      'Qəbul edən tərəfin imzası (mütləq):',
+  'ops.dialog.sig_reject_required': 'İmtina edən tərəfin imzası (mütləq):',
+  'ops.dialog.sig_accept_required': 'Qəbul edən tərəfin imzası (mütləq):',
   'ops.dialog.sig_clear': 'İmzanı sil',
   'ops.dialog.photo_required': 'Aktın fotosu (mütləq):',
   'ops.dialog.photo_change': 'Dəyiş',
@@ -293,6 +294,10 @@ const Map<String, String> _az = <String, String>{
   'tasks.my_tasks': 'Mənim tapşırıqlarım',
   'tasks.no_active_tasks': 'Aktiv tapşırıq yoxdur',
   'tasks.transfer_selected': 'Seçilənləri ötür ({count})',
+  'tasks.finish_route_none': 'Reysi bağlamaq üçün seçilmiş sifariş yoxdur',
+  'tasks.finish_route_self_pickup_only':
+      'Özün götürmə yalnız növbə bağlananda anbara təhvil verilir',
+  'tasks.finish_route_bulk_snack': 'Reys sifarişlər üçün bağlandı: {count}',
   'tasks.pickup_confirmed': 'Götürmə təsdiqləndi',
   'tasks.transfer.title': 'Sifarişləri ötür',
   'tasks.transfer.body':
@@ -305,9 +310,13 @@ const Map<String, String> _az = <String, String>{
   'tasks.pickup_reject.title': 'Götürülmədi',
   'tasks.pickup_reject.reason_hint': 'Səbəbi göstərin',
   'common.save': 'Yadda saxla',
+  'common.yes': 'Bəli',
+  'common.no': 'Xeyr',
   'tasks.pickup_reject_saved_for': 'Götürülmədi saxlanıldı: {barcode}',
+  'tasks.pickup_confirm_dialog.title': 'Götürülsün?',
   'tasks.pending.title': 'Loqistikdən tapşırıqlar — təsdiqlənməyən ({count})',
-  'tasks.pending.subtitle': 'Götürməni təsdiqləyin və ya səbəb göstərərək “götürülmədi” edin',
+  'tasks.pending.subtitle':
+      'Götürməni təsdiqləyin və ya səbəb göstərərək “götürülmədi” edin',
   'tasks.pending.body':
       'Skanla təsdiqləyin və ya sifarişləri seçib kütləvi təsdiqləyin.',
   'tasks.pending.scan_label': 'Avto-təsdiq üçün ştrixkod skanı',
@@ -319,7 +328,6 @@ const Map<String, String> _az = <String, String>{
   'tasks.pending.scenario': 'Ssenari: {scenario}',
   'tasks.pending.confirm_bulk': 'Götürməni təsdiqlə ({count})',
   'tasks.pending.reject_bulk': 'Götürülmədi ({count})',
-  'tasks.pending.not_found': 'Bu sifariş yoxdur',
   'tasks.pending.scan_confirm_title': 'Skanla və təsdiqlə',
   'tasks.pending.scan_confirm_snack': 'Skanla təsdiqləndi: {barcode}',
   'tasks.no_scenario': 'Ssenari yoxdur',
@@ -359,8 +367,7 @@ const Map<String, String> _az = <String, String>{
   'shift.current.active_tasks': 'Aktiv tapşırıqlar: {count}',
   'shift.summary.title': 'Növbə xülasəsi',
   'shift.metric.assigned': 'Təyin edilib',
-  'shift.metric.in_route': 'Marşrutda',
-  'shift.metric.delivered': 'Çatdırılıb/qaytarış',
+  'shift.metric.delivered': 'Çatdırıldı',
   'shift.metric.problematic': 'Problemli',
   'shift.close.title': 'Növbənin bağlanması',
   'shift.close.body1': 'Növbə bitənədək qalan sifarişləri anbara təhvil verin.',
@@ -416,4 +423,3 @@ String tr(String template, Map<String, Object?> vars) {
   }
   return out;
 }
-

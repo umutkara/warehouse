@@ -54,7 +54,11 @@ async function loadLatestScenarioByUnit(
     .select("unit_id, picking_task_id")
     .in("unit_id", unitIds);
 
-  const taskIds = [...new Set((taskUnits || []).map((row) => row.picking_task_id).filter(Boolean))];
+  const taskIds = [
+    ...new Set(
+      (taskUnits || []).map((row) => row.picking_task_id).filter(Boolean),
+    ),
+  ];
   if (taskIds.length) {
     const { data: tasks } = await supabaseAdmin
       .from("picking_tasks")
@@ -83,19 +87,18 @@ async function loadLatestScenarioByUnit(
 
   for (const task of legacyTasks || []) {
     if (!task.unit_id) continue;
-    pickScenarioCandidate(
-      picked,
-      task.unit_id,
-      task.scenario,
-      task.created_at,
-    );
+    pickScenarioCandidate(picked, task.unit_id, task.scenario, task.created_at);
   }
 
-  return new Map([...picked.entries()].map(([unitId, item]) => [unitId, item.scenario]));
+  return new Map(
+    [...picked.entries()].map(([unitId, item]) => [unitId, item.scenario]),
+  );
 }
 
 export async function GET(req: Request) {
-  const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
+  const auth = await requireCourierAuth(req, {
+    allowedRoles: [...COURIER_ALLOWED_ROLES],
+  });
   if (!auth.ok) return auth.response;
 
   const { data: shipments, error } = await supabaseAdmin
@@ -117,7 +120,7 @@ export async function GET(req: Request) {
     return !confirmedAt && !rejectedAt;
   });
 
-  const unitIds = pendingShipments.map((row) => row.unit_id).filter(Boolean);
+  const unitIds = (shipments || []).map((row) => row.unit_id).filter(Boolean);
   let unitsMap = new Map<string, any>();
   let scenarioByUnit = new Map<string, string>();
   if (unitIds.length > 0) {
@@ -126,15 +129,22 @@ export async function GET(req: Request) {
       .select("id, barcode, status, product_name, partner_name, meta")
       .in("id", unitIds);
     unitsMap = new Map((units || []).map((unit) => [unit.id, unit]));
-    scenarioByUnit = await loadLatestScenarioByUnit(auth.profile.warehouse_id, unitIds);
+    scenarioByUnit = await loadLatestScenarioByUnit(
+      auth.profile.warehouse_id,
+      unitIds,
+    );
   }
 
   return NextResponse.json({
     ok: true,
     assignments: pendingShipments.map((shipment) => {
       const unit = unitsMap.get(shipment.unit_id) || null;
-      const shipmentMeta = shipment.meta && typeof shipment.meta === "object" ? shipment.meta : null;
-      const unitMeta = unit?.meta && typeof unit.meta === "object" ? unit.meta : null;
+      const shipmentMeta =
+        shipment.meta && typeof shipment.meta === "object"
+          ? shipment.meta
+          : null;
+      const unitMeta =
+        unit?.meta && typeof unit.meta === "object" ? unit.meta : null;
       return {
         id: shipment.id,
         unit_id: shipment.unit_id,

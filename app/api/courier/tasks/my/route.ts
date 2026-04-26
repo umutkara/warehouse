@@ -54,7 +54,11 @@ async function loadLatestScenarioByUnit(
     .select("unit_id, picking_task_id")
     .in("unit_id", unitIds);
 
-  const taskIds = [...new Set((taskUnits || []).map((row) => row.picking_task_id).filter(Boolean))];
+  const taskIds = [
+    ...new Set(
+      (taskUnits || []).map((row) => row.picking_task_id).filter(Boolean),
+    ),
+  ];
   if (taskIds.length) {
     const { data: tasks } = await supabaseAdmin
       .from("picking_tasks")
@@ -83,19 +87,18 @@ async function loadLatestScenarioByUnit(
 
   for (const task of legacyTasks || []) {
     if (!task.unit_id) continue;
-    pickScenarioCandidate(
-      picked,
-      task.unit_id,
-      task.scenario,
-      task.created_at,
-    );
+    pickScenarioCandidate(picked, task.unit_id, task.scenario, task.created_at);
   }
 
-  return new Map([...picked.entries()].map(([unitId, item]) => [unitId, item.scenario]));
+  return new Map(
+    [...picked.entries()].map(([unitId, item]) => [unitId, item.scenario]),
+  );
 }
 
 export async function GET(req: Request) {
-  const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
+  const auth = await requireCourierAuth(req, {
+    allowedRoles: [...COURIER_ALLOWED_ROLES],
+  });
   if (!auth.ok) {
     return auth.response;
   }
@@ -137,16 +140,15 @@ export async function GET(req: Request) {
   }
 
   const { data: rawTasks, error: tasksError } = await query;
-  const tasks = (rawTasks || []).filter((t) => {
-    const meta = t.meta && typeof t.meta === "object" ? (t.meta as Record<string, unknown>) : {};
-    return meta.hidden_from_courier !== true;
-  });
   if (tasksError) {
     return NextResponse.json({ error: tasksError.message }, { status: 500 });
   }
 
-  const unitIds = (tasks || []).map((task) => task.unit_id).filter(Boolean);
-  const poolIds = (tasks || []).map((task) => task.pool_id).filter(Boolean);
+  const rawUnitIds = (rawTasks || [])
+    .map((task) => task.unit_id)
+    .filter(Boolean);
+  const unitIds = rawUnitIds;
+  const poolIds = (rawTasks || []).map((task) => task.pool_id).filter(Boolean);
   let unitsMap = new Map<string, any>();
   let scenarioByUnit = new Map<string, string>();
   let poolById = new Map<string, any>();
@@ -158,7 +160,10 @@ export async function GET(req: Request) {
       .select("id, barcode, status, product_name, partner_name, meta")
       .in("id", unitIds);
     unitsMap = new Map((units || []).map((unit) => [unit.id, unit]));
-    scenarioByUnit = await loadLatestScenarioByUnit(auth.profile.warehouse_id, unitIds);
+    scenarioByUnit = await loadLatestScenarioByUnit(
+      auth.profile.warehouse_id,
+      unitIds,
+    );
   }
   if (poolIds.length) {
     const { data: pools } = await supabaseAdmin
@@ -171,11 +176,14 @@ export async function GET(req: Request) {
 
   const shipmentIds = [
     ...new Set(
-      (tasks || [])
+      (rawTasks || [])
         .map((task) => {
-          const taskMeta = task.meta && typeof task.meta === "object" ? task.meta : null;
+          const taskMeta =
+            task.meta && typeof task.meta === "object" ? task.meta : null;
           const fromTaskMeta = taskMeta?.shipment_id?.toString();
-          const fromPool = task.pool_id ? poolById.get(task.pool_id)?.source_shipment_id?.toString() : null;
+          const fromPool = task.pool_id
+            ? poolById.get(task.pool_id)?.source_shipment_id?.toString()
+            : null;
           return fromTaskMeta || fromPool || null;
         })
         .filter(Boolean),
@@ -188,19 +196,52 @@ export async function GET(req: Request) {
       .select("id, unit_id, meta")
       .eq("warehouse_id", auth.profile.warehouse_id)
       .in("id", shipmentIds);
-    shipmentById = new Map((shipments || []).map((shipment) => [shipment.id, shipment]));
-    shipmentByUnitId = new Map((shipments || []).map((shipment) => [shipment.unit_id, shipment]));
+    shipmentById = new Map(
+      (shipments || []).map((shipment) => [shipment.id, shipment]),
+    );
+    shipmentByUnitId = new Map(
+      (shipments || []).map((shipment) => [shipment.unit_id, shipment]),
+    );
   }
 
-  const responseTasks = (tasks || []).map((task) => {
+  if (unitIds.length) {
+    const { data: shipmentsByUnit } = await supabaseAdmin
+      .from("outbound_shipments")
+      .select("id, unit_id, meta")
+      .eq("warehouse_id", auth.profile.warehouse_id)
+      .eq("courier_user_id", auth.user.id)
+      .eq("status", "out")
+      .in("unit_id", unitIds)
+      .order("out_at", { ascending: false });
+    for (const shipment of shipmentsByUnit || []) {
+      shipmentById.set(shipment.id, shipment);
+      if (!shipmentByUnitId.has(shipment.unit_id)) {
+        shipmentByUnitId.set(shipment.unit_id, shipment);
+      }
+    }
+  }
+
+  const responseTasks = (rawTasks || [])
+    .map((task) => {
       const unit = unitsMap.get(task.unit_id) || null;
-      const taskMeta = task.meta && typeof task.meta === "object" ? task.meta : null;
-      const unitMeta = unit?.meta && typeof unit.meta === "object" ? unit.meta : null;
+      const taskMeta =
+        task.meta && typeof task.meta === "object" ? task.meta : null;
+      const unitMeta =
+        unit?.meta && typeof unit.meta === "object" ? unit.meta : null;
       const pool = task.pool_id ? poolById.get(task.pool_id) : null;
-      const poolMeta = pool?.meta && typeof pool.meta === "object" ? pool.meta : null;
-      const shipmentId = taskMeta?.shipment_id?.toString() || pool?.source_shipment_id?.toString() || null;
-      const shipment = shipmentId ? shipmentById.get(shipmentId) : shipmentByUnitId.get(task.unit_id);
-      const shipmentMeta = shipment?.meta && typeof shipment.meta === "object" ? shipment.meta : null;
+      const poolMeta =
+        pool?.meta && typeof pool.meta === "object" ? pool.meta : null;
+      const shipmentId =
+        taskMeta?.shipment_id?.toString() ||
+        pool?.source_shipment_id?.toString() ||
+        null;
+      const shipment = shipmentId
+        ? shipmentById.get(shipmentId)
+        : shipmentByUnitId.get(task.unit_id);
+      const shipmentMeta =
+        shipment?.meta && typeof shipment.meta === "object"
+          ? shipment.meta
+          : null;
       const pickupStatus =
         typeof shipmentMeta?.courier_pickup_status === "string"
           ? shipmentMeta.courier_pickup_status
@@ -212,8 +253,15 @@ export async function GET(req: Request) {
       const selfPickup =
         taskMeta?.source === "api.courier.tasks.scan_claim" ||
         Boolean(shipmentMeta?.external_pickup);
+      const assignedByLogistics =
+        taskMeta?.assigned_via === "logistics" ||
+        taskMeta?.source === "api.logistics.ship_out";
+      const hiddenFromCourier = taskMeta?.hidden_from_courier === true;
+      const visibleToCourier =
+        pickupConfirmed || (!hiddenFromCourier && !assignedByLogistics);
       return {
         ...task,
+        visible_to_courier: visibleToCourier,
         shipment_id: shipment?.id || shipmentId,
         pickup_status: pickupStatus,
         pickup_confirmed: pickupConfirmed,
@@ -227,7 +275,8 @@ export async function GET(req: Request) {
         ),
         unit,
       };
-    });
+    })
+    .filter((task) => task.visible_to_courier);
 
   return NextResponse.json({
     ok: true,

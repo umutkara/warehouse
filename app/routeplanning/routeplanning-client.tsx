@@ -9,7 +9,14 @@ type CourierOption = {
   full_name: string;
 };
 
-type DropColor = "red" | "yellow" | "purple" | "gray" | "black" | "green" | "blue";
+type DropColor =
+  | "red"
+  | "yellow"
+  | "purple"
+  | "gray"
+  | "black"
+  | "green"
+  | "blue";
 
 type PickingUnit = {
   id: string;
@@ -73,6 +80,8 @@ type LiveCourier = {
     lng: number | null;
     recorded_at: string;
     accuracy_m: number | null;
+    speed_m_s: number | null;
+    heading_deg: number | null;
   } | null;
 };
 
@@ -203,6 +212,8 @@ type CourierCardSummary = {
     lng: number | null;
     recorded_at: string;
     accuracy_m: number | null;
+    speed_m_s: number | null;
+    heading_deg: number | null;
   } | null;
   stats: {
     total: number;
@@ -358,7 +369,9 @@ function toFiniteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parsePolygon(rawPolygon: unknown): Array<{ lat: number; lng: number }> {
+function parsePolygon(
+  rawPolygon: unknown,
+): Array<{ lat: number; lng: number }> {
   if (!Array.isArray(rawPolygon)) return [];
   return rawPolygon
     .map((point) => {
@@ -420,7 +433,9 @@ function getRoleLabel(role: string): string {
   return map[role] || role || "unknown";
 }
 
-function normalizeZoneStyle(input: Partial<ZoneStyle> | null | undefined): ZoneStyle {
+function normalizeZoneStyle(
+  input: Partial<ZoneStyle> | null | undefined,
+): ZoneStyle {
   return {
     strokeColor: input?.strokeColor || DEFAULT_ZONE_STYLE.strokeColor,
     fillColor: input?.fillColor || DEFAULT_ZONE_STYLE.fillColor,
@@ -499,7 +514,12 @@ type DropRenderPoint = {
   }>;
 };
 
-function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
+function distanceMeters(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number,
+): number {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const earthRadiusMeters = 6371000;
   const dLat = toRad(bLat - aLat);
@@ -513,7 +533,10 @@ function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number):
 }
 
 function buildColorSegments(drops: DropPoint[]) {
-  const counts = new Map<DropColor, { color_key: DropColor; color_hex: string; count: number }>();
+  const counts = new Map<
+    DropColor,
+    { color_key: DropColor; color_hex: string; count: number }
+  >();
   for (const drop of drops) {
     const existing = counts.get(drop.color_key);
     if (existing) {
@@ -532,8 +555,10 @@ function buildColorSegments(drops: DropPoint[]) {
 function buildRenderPointFromDrops(drops: DropPoint[]): DropRenderPoint {
   const colorSegments = buildColorSegments(drops);
   const primary = colorSegments[0];
-  const lat = drops.reduce((sum, drop) => sum + (drop.lat as number), 0) / drops.length;
-  const lng = drops.reduce((sum, drop) => sum + (drop.lng as number), 0) / drops.length;
+  const lat =
+    drops.reduce((sum, drop) => sum + (drop.lat as number), 0) / drops.length;
+  const lng =
+    drops.reduce((sum, drop) => sum + (drop.lng as number), 0) / drops.length;
   return {
     lat,
     lng,
@@ -547,19 +572,25 @@ function buildRenderPointFromDrops(drops: DropPoint[]): DropRenderPoint {
   };
 }
 
-function clusterDropsByDistance(dropPoints: DropPoint[], maxDistanceMeters: number): DropRenderPoint[] {
-  const validDrops = dropPoints.filter((drop) => drop.lat !== null && drop.lng !== null);
+function clusterDropsByDistance(
+  dropPoints: DropPoint[],
+  maxDistanceMeters: number,
+): DropRenderPoint[] {
+  const validDrops = dropPoints.filter(
+    (drop) => drop.lat !== null && drop.lng !== null,
+  );
   const clusters: DropPoint[][] = [];
 
   for (const drop of validDrops) {
     const cluster = clusters.find((items) =>
-      items.some((existing) =>
-        distanceMeters(
-          existing.lat as number,
-          existing.lng as number,
-          drop.lat as number,
-          drop.lng as number,
-        ) <= maxDistanceMeters,
+      items.some(
+        (existing) =>
+          distanceMeters(
+            existing.lat as number,
+            existing.lng as number,
+            drop.lat as number,
+            drop.lng as number,
+          ) <= maxDistanceMeters,
       ),
     );
     if (cluster) {
@@ -572,7 +603,10 @@ function clusterDropsByDistance(dropPoints: DropPoint[], maxDistanceMeters: numb
   return clusters.map(buildRenderPointFromDrops);
 }
 
-function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRenderPoint[] {
+function buildDropRenderPoints(
+  dropPoints: DropPoint[],
+  zoom: number,
+): DropRenderPoint[] {
   if (zoom >= DROP_CLUSTER_ZOOM_THRESHOLD) {
     return clusterDropsByDistance(dropPoints, 4);
   }
@@ -604,11 +638,21 @@ function buildDropRenderPoints(dropPoints: DropPoint[], zoom: number): DropRende
     }
   }
 
-  return Array.from(buckets.values()).map((bucket) => buildRenderPointFromDrops(bucket.drops));
+  return Array.from(buckets.values()).map((bucket) =>
+    buildRenderPointFromDrops(bucket.drops),
+  );
 }
 
 function buildCourierAvatarSvg(seed: string): string {
-  const palette = ["#22c55e", "#3b82f6", "#f59e0b", "#f97316", "#a855f7", "#ef4444", "#06b6d4"];
+  const palette = [
+    "#22c55e",
+    "#3b82f6",
+    "#f59e0b",
+    "#f97316",
+    "#a855f7",
+    "#ef4444",
+    "#06b6d4",
+  ];
   const color = palette[hashString(seed) % palette.length];
   const faceVariant = hashString(`${seed}-face`) % 3;
   const smilePath =
@@ -617,7 +661,10 @@ function buildCourierAvatarSvg(seed: string): string {
       : faceVariant === 1
         ? "M 13 19 C 15 22 21 22 23 19"
         : "M 13 21 C 15 24 21 24 23 21";
-  const wink = faceVariant === 2 ? "<line x1='21' y1='15' x2='24' y2='15' stroke='#0f172a' stroke-width='2' stroke-linecap='round'/>" : "<circle cx='22.5' cy='15' r='1.8' fill='#0f172a'/>";
+  const wink =
+    faceVariant === 2
+      ? "<line x1='21' y1='15' x2='24' y2='15' stroke='#0f172a' stroke-width='2' stroke-linecap='round'/>"
+      : "<circle cx='22.5' cy='15' r='1.8' fill='#0f172a'/>";
   return `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36'>
   <circle cx='18' cy='18' r='16' fill='${color}' stroke='white' stroke-width='2'/>
   <circle cx='13.5' cy='15' r='1.8' fill='#0f172a'/>
@@ -626,20 +673,100 @@ function buildCourierAvatarSvg(seed: string): string {
 </svg>`;
 }
 
+type CourierMarkerState = "moving" | "online" | "sleeping" | "offline";
+
+const COURIER_OFFLINE_AFTER_MS = 5 * 60 * 1000;
+const COURIER_SLEEPING_AFTER_MS = 2 * 60 * 1000;
+const COURIER_MOVING_SPEED_M_S = 0.8;
+
+function getCourierMarkerState(
+  location: LiveCourier["last_location"],
+  nowMs = Date.now(),
+): CourierMarkerState {
+  const recordedMs = location?.recorded_at
+    ? Date.parse(location.recorded_at)
+    : NaN;
+  if (
+    !Number.isFinite(recordedMs) ||
+    nowMs - recordedMs >= COURIER_OFFLINE_AFTER_MS
+  ) {
+    return "offline";
+  }
+  const speed =
+    typeof location?.speed_m_s === "number" ? location.speed_m_s : 0;
+  if (speed >= COURIER_MOVING_SPEED_M_S) return "moving";
+  if (nowMs - recordedMs >= COURIER_SLEEPING_AFTER_MS) return "sleeping";
+  return "online";
+}
+
+function buildCourierStateSvg(
+  seed: string,
+  state: CourierMarkerState,
+  headingDeg: number | null | undefined,
+): string {
+  const palette = [
+    "#22c55e",
+    "#3b82f6",
+    "#f59e0b",
+    "#f97316",
+    "#a855f7",
+    "#ef4444",
+    "#06b6d4",
+  ];
+  const color = palette[hashString(seed) % palette.length];
+  if (state === "moving") {
+    const rotation = Number.isFinite(headingDeg) ? Number(headingDeg) : 0;
+    return `<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'>
+      <circle cx='22' cy='22' r='20' fill='white' opacity='0.96'/>
+      <g transform='rotate(${rotation} 22 22)'>
+        <path d='M22 5 L34 31 L22 26 L10 31 Z' fill='${color}' stroke='#0f172a' stroke-width='1.5' stroke-linejoin='round'/>
+        <path d='M22 9 L28 25 L22 22 L16 25 Z' fill='white' opacity='0.85'/>
+      </g>
+    </svg>`;
+  }
+  if (state === "offline") {
+    return `<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'>
+      <circle cx='22' cy='22' r='20' fill='#ef4444' stroke='white' stroke-width='2'/>
+      <path d='M11 17 C17 12 27 12 33 17' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/>
+      <path d='M15 22 C19 19 25 19 29 22' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/>
+      <path d='M20 27 C21.3 26.2 22.7 26.2 24 27' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/>
+      <line x1='12' y1='32' x2='32' y2='12' stroke='#0f172a' stroke-width='3' stroke-linecap='round'/>
+    </svg>`;
+  }
+  if (state === "online") {
+    return buildCourierAvatarSvg(seed);
+  }
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'>
+    <circle cx='22' cy='22' r='20' fill='#64748b' stroke='white' stroke-width='2'/>
+    <circle cx='16' cy='22' r='2' fill='white'/>
+    <path d='M21 24 C24 27 29 27 32 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'/>
+    <text x='25' y='16' fill='white' font-size='9' font-family='Arial' font-weight='700'>Z</text>
+    <text x='30' y='11' fill='white' font-size='7' font-family='Arial' font-weight='700'>Z</text>
+  </svg>`;
+}
+
 function buildCourierIcon(
   maps: any,
   seed: string,
+  state: CourierMarkerState = "sleeping",
+  headingDeg?: number | null,
 ): { url: string; scaledSize: any; anchor: any } {
-  const svg = buildCourierAvatarSvg(seed);
+  const svg = buildCourierStateSvg(seed, state, headingDeg);
   const dataUri = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  const size = state === "online" ? 36 : 44;
+  const anchor = size / 2;
   return {
     url: dataUri,
-    scaledSize: new maps.Size(36, 36),
-    anchor: new maps.Point(18, 18),
+    scaledSize: new maps.Size(size, size),
+    anchor: new maps.Point(anchor, anchor),
   };
 }
 
-function buildWarehouseZoneIcon(maps: any): { url: string; scaledSize: any; anchor: any } {
+function buildWarehouseZoneIcon(maps: any): {
+  url: string;
+  scaledSize: any;
+  anchor: any;
+} {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'>
   <circle cx='17' cy='17' r='15' fill='#ef4444' stroke='white' stroke-width='2'/>
   <path d='M9 16 L17 11 L25 16 V24 H9 Z' fill='white' opacity='0.95'/>
@@ -707,7 +834,9 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
 
   if (!apiKey.trim()) {
     return Promise.reject(
-      new Error("NEXT_PUBLIC_GOOGLE_MAPS_JS_API_KEY не задан, карта недоступна"),
+      new Error(
+        "NEXT_PUBLIC_GOOGLE_MAPS_JS_API_KEY не задан, карта недоступна",
+      ),
     );
   }
 
@@ -718,13 +847,17 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
   if (googleMapsPromise) return googleMapsPromise;
 
   googleMapsPromise = new Promise<any>((resolve, reject) => {
-    const existingScript = document.getElementById(MAP_SCRIPT_ID) as HTMLScriptElement | null;
+    const existingScript = document.getElementById(
+      MAP_SCRIPT_ID,
+    ) as HTMLScriptElement | null;
     if (existingScript) {
       const onLoad = () => {
         if (window.google?.maps) {
           resolve(window.google.maps);
         } else {
-          reject(new Error("Google Maps script загружен, но API не инициализирован"));
+          reject(
+            new Error("Google Maps script загружен, но API не инициализирован"),
+          );
         }
       };
       existingScript.addEventListener("load", onLoad, { once: true });
@@ -814,7 +947,10 @@ function RoutePlanningMap({
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Не удалось инициализировать карту";
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Не удалось инициализировать карту";
         setMapError(message);
       });
 
@@ -881,7 +1017,10 @@ function RoutePlanningMap({
 
       if (isTargetWarehouseZone) {
         const centroid = path.reduce(
-          (acc, point) => ({ lat: acc.lat + point.lat, lng: acc.lng + point.lng }),
+          (acc, point) => ({
+            lat: acc.lat + point.lat,
+            lng: acc.lng + point.lng,
+          }),
           { lat: 0, lng: 0 },
         );
         const position = {
@@ -900,7 +1039,8 @@ function RoutePlanningMap({
       }
     }
 
-    const effectiveZoom = typeof mapZoom === "number" ? mapZoom : map.getZoom() || 11;
+    const effectiveZoom =
+      typeof mapZoom === "number" ? mapZoom : map.getZoom() || 11;
     const renderedDropPoints = buildDropRenderPoints(dropPoints, effectiveZoom);
     for (const drop of renderedDropPoints) {
       const isCombinedMarker = drop.count > 1 || drop.color_segments.length > 1;
@@ -959,13 +1099,33 @@ function RoutePlanningMap({
     for (const courier of couriersToShow) {
       const lat = courier.last_location?.lat;
       const lng = courier.last_location?.lng;
-      if (lat === null || lng === null || lat === undefined || lng === undefined) continue;
+      if (
+        lat === null ||
+        lng === null ||
+        lat === undefined ||
+        lng === undefined
+      )
+        continue;
+      const markerState = getCourierMarkerState(courier.last_location);
+      const markerStateLabel =
+        markerState === "moving"
+          ? "Едет"
+          : markerState === "offline"
+            ? "Нет связи"
+            : markerState === "sleeping"
+              ? "Долго стоит"
+              : "На связи";
 
       const marker = new maps.Marker({
         map,
         position: { lat, lng },
         title: `${courier.courier_name} (${courier.active_tasks})`,
-        icon: buildCourierIcon(maps, courier.courier_user_id),
+        icon: buildCourierIcon(
+          maps,
+          courier.courier_user_id,
+          markerState,
+          courier.last_location?.heading_deg,
+        ),
       });
       mapObjectsRef.current.markers.push(marker);
       const recordedAt = courier.last_location?.recorded_at
@@ -976,7 +1136,9 @@ function RoutePlanningMap({
           <div style="font-weight:700; margin-bottom:3px;">${escapeHtml(courier.courier_name)}</div>
           <div>Задач в работе: <b>${courier.active_tasks}</b></div>
           <div>Смена: ${escapeHtml(courier.status)}</div>
+          <div>Состояние: <b>${escapeHtml(markerStateLabel)}</b></div>
           <div>Обновлено: ${escapeHtml(recordedAt)}</div>
+          <div>Скорость: ${courier.last_location?.speed_m_s?.toFixed(1) ?? "—"} м/с</div>
         </div>
       `;
       marker.addListener("mouseover", () => {
@@ -994,7 +1156,15 @@ function RoutePlanningMap({
       map.fitBounds(bounds, 60);
       hasAutoFittedRef.current = true;
     }
-  }, [mapsReady, mapZoom, zones, dropPoints, liveCouriers, showCouriers, clearMapObjects]);
+  }, [
+    mapsReady,
+    mapZoom,
+    zones,
+    dropPoints,
+    liveCouriers,
+    showCouriers,
+    clearMapObjects,
+  ]);
 
   return (
     <div className={styles.mapCard}>
@@ -1032,7 +1202,10 @@ function RoutePlanningMap({
                 checked={showCouriers}
                 onChange={(e) => onShowCouriersChange(e.target.checked)}
               />
-              <span className={styles.mapFilterChipDot} style={{ background: "#3b82f6" }} />
+              <span
+                className={styles.mapFilterChipDot}
+                style={{ background: "#3b82f6" }}
+              />
               Курьеры
             </label>
           </div>
@@ -1067,10 +1240,14 @@ function ZoneEditorModal({
   const [zoneName, setZoneName] = useState("");
   const [zoneCode, setZoneCode] = useState("");
   const [zonePriority, setZonePriority] = useState("100");
-  const [strokeColor, setStrokeColor] = useState(DEFAULT_ZONE_STYLE.strokeColor);
+  const [strokeColor, setStrokeColor] = useState(
+    DEFAULT_ZONE_STYLE.strokeColor,
+  );
   const [fillColor, setFillColor] = useState(DEFAULT_ZONE_STYLE.fillColor);
   const [fillOpacity, setFillOpacity] = useState("0.20");
-  const [draftPoints, setDraftPoints] = useState<Array<{ lat: number; lng: number }>>([]);
+  const [draftPoints, setDraftPoints] = useState<
+    Array<{ lat: number; lng: number }>
+  >([]);
 
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -1104,37 +1281,46 @@ function ZoneEditorModal({
     }
   }, []);
 
-  const fetchZones = useCallback(async (propagateToParent: boolean = false) => {
-    if (!open) return;
-    setLoadingZones(true);
-    setModalError(null);
-    try {
-      const res = await fetch("/api/routeplanning/zones", { cache: "no-store" });
-      if (res.status === 401) {
-        onUnauthorized();
-        return;
+  const fetchZones = useCallback(
+    async (propagateToParent: boolean = false) => {
+      if (!open) return;
+      setLoadingZones(true);
+      setModalError(null);
+      try {
+        const res = await fetch("/api/routeplanning/zones", {
+          cache: "no-store",
+        });
+        if (res.status === 401) {
+          onUnauthorized();
+          return;
+        }
+        const payload = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          zones?: Zone[];
+          error?: string;
+        } | null;
+        if (!res.ok || !payload?.ok) {
+          setModalError(payload?.error || "Не удалось загрузить список геозон");
+          return;
+        }
+        const normalized = (payload.zones || []).map((zone) => ({
+          ...zone,
+          style: normalizeZoneStyle(zone.style),
+        }));
+        setZones(normalized);
+        if (propagateToParent) {
+          onZonesUpdated(normalized);
+        }
+      } catch (error: unknown) {
+        setModalError(
+          error instanceof Error ? error.message : "Ошибка загрузки геозон",
+        );
+      } finally {
+        setLoadingZones(false);
       }
-      const payload = (await res.json().catch(() => null)) as
-        | { ok?: boolean; zones?: Zone[]; error?: string }
-        | null;
-      if (!res.ok || !payload?.ok) {
-        setModalError(payload?.error || "Не удалось загрузить список геозон");
-        return;
-      }
-      const normalized = (payload.zones || []).map((zone) => ({
-        ...zone,
-        style: normalizeZoneStyle(zone.style),
-      }));
-      setZones(normalized);
-      if (propagateToParent) {
-        onZonesUpdated(normalized);
-      }
-    } catch (error: unknown) {
-      setModalError(error instanceof Error ? error.message : "Ошибка загрузки геозон");
-    } finally {
-      setLoadingZones(false);
-    }
-  }, [onUnauthorized, onZonesUpdated, open]);
+    },
+    [onUnauthorized, onZonesUpdated, open],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -1164,17 +1350,24 @@ function ZoneEditorModal({
         if (clickListenerRef.current) {
           maps.event.removeListener(clickListenerRef.current);
         }
-        clickListenerRef.current = mapRef.current.addListener("click", (event: any) => {
-          const lat = event?.latLng?.lat?.();
-          const lng = event?.latLng?.lng?.();
-          if (typeof lat !== "number" || typeof lng !== "number") return;
-          setDraftPoints((prev) => [...prev, { lat, lng }]);
-        });
+        clickListenerRef.current = mapRef.current.addListener(
+          "click",
+          (event: any) => {
+            const lat = event?.latLng?.lat?.();
+            const lng = event?.latLng?.lng?.();
+            if (typeof lat !== "number" || typeof lng !== "number") return;
+            setDraftPoints((prev) => [...prev, { lat, lng }]);
+          },
+        );
         setMapReady(true);
       })
       .catch((error: unknown) => {
         setMapReady(false);
-        setModalError(error instanceof Error ? error.message : "Не удалось открыть карту геозон");
+        setModalError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось открыть карту геозон",
+        );
       });
 
     return () => {
@@ -1230,7 +1423,8 @@ function ZoneEditorModal({
   }, [clearZoneObjects, mapReady, open, zones]);
 
   useEffect(() => {
-    if (!open || !canEdit || !mapReady || !mapRef.current || !mapsRef.current) return;
+    if (!open || !canEdit || !mapReady || !mapRef.current || !mapsRef.current)
+      return;
     clearDraftObjects();
     const maps = mapsRef.current;
     const map = mapRef.current;
@@ -1272,7 +1466,9 @@ function ZoneEditorModal({
         );
       });
       marker.addListener("rightclick", () => {
-        setDraftPoints((prev) => prev.filter((_, existingIndex) => existingIndex !== index));
+        setDraftPoints((prev) =>
+          prev.filter((_, existingIndex) => existingIndex !== index),
+        );
       });
       draftMarkersRef.current.push(marker);
     });
@@ -1297,7 +1493,15 @@ function ZoneEditorModal({
         fillOpacity: style.fillOpacity,
       });
     }
-  }, [canEdit, clearDraftObjects, draftPoints, fillColor, fillOpacity, open, strokeColor]);
+  }, [
+    canEdit,
+    clearDraftObjects,
+    draftPoints,
+    fillColor,
+    fillOpacity,
+    open,
+    strokeColor,
+  ]);
 
   const handleCreateZone = useCallback(async () => {
     if (!canEdit) return;
@@ -1336,7 +1540,10 @@ function ZoneEditorModal({
         onUnauthorized();
         return;
       }
-      const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      const payload = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
       if (!res.ok || !payload?.ok) {
         setModalError(payload?.error || "Не удалось создать геозону");
         return;
@@ -1349,7 +1556,9 @@ function ZoneEditorModal({
       setDraftPoints([]);
       await fetchZones(true);
     } catch (error: unknown) {
-      setModalError(error instanceof Error ? error.message : "Ошибка создания зоны");
+      setModalError(
+        error instanceof Error ? error.message : "Ошибка создания зоны",
+      );
     } finally {
       setSaving(false);
     }
@@ -1375,14 +1584,20 @@ function ZoneEditorModal({
       setModalError(null);
       setModalMessage(null);
       try {
-        const res = await fetch(`/api/routeplanning/zones?id=${encodeURIComponent(id)}`, {
-          method: "DELETE",
-        });
+        const res = await fetch(
+          `/api/routeplanning/zones?id=${encodeURIComponent(id)}`,
+          {
+            method: "DELETE",
+          },
+        );
         if (res.status === 401) {
           onUnauthorized();
           return;
         }
-        const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        const payload = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+        } | null;
         if (!res.ok || !payload?.ok) {
           setModalError(payload?.error || "Не удалось удалить геозону");
           return;
@@ -1390,7 +1605,9 @@ function ZoneEditorModal({
         setModalMessage("Геозона удалена");
         await fetchZones(true);
       } catch (error: unknown) {
-        setModalError(error instanceof Error ? error.message : "Ошибка удаления зоны");
+        setModalError(
+          error instanceof Error ? error.message : "Ошибка удаления зоны",
+        );
       } finally {
         setDeletingId(null);
       }
@@ -1402,13 +1619,22 @@ function ZoneEditorModal({
 
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+      <div
+        className={styles.modal}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className={styles.modalHeader}>
           <div>
             <h3 className={styles.modalTitle}>Редактирование геозон</h3>
-            <p className={styles.modalSubtitle}>Сейчас активных зон: {zones.length}</p>
+            <p className={styles.modalSubtitle}>
+              Сейчас активных зон: {zones.length}
+            </p>
           </div>
-          <button type="button" className={styles.secondaryButton} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onClose}
+          >
             Закрыть
           </button>
         </div>
@@ -1443,15 +1669,22 @@ function ZoneEditorModal({
                       <div className={styles.zoneStyleRow}>
                         <span
                           className={styles.zoneColorDot}
-                          style={{ background: normalizeZoneStyle(zone.style).fillColor }}
+                          style={{
+                            background: normalizeZoneStyle(zone.style)
+                              .fillColor,
+                          }}
                         />
-                        <span className={styles.unitMeta}>priority: {zone.priority}</span>
+                        <span className={styles.unitMeta}>
+                          priority: {zone.priority}
+                        </span>
                       </div>
                       {canEdit && (
                         <button
                           type="button"
                           className={styles.zoneDeleteButton}
-                          onClick={() => void handleDeleteZone(zone.id, zone.name)}
+                          onClick={() =>
+                            void handleDeleteZone(zone.id, zone.name)
+                          }
                           disabled={deletingId === zone.id}
                         >
                           {deletingId === zone.id ? "Удаление..." : "Удалить"}
@@ -1564,12 +1797,14 @@ function ZoneEditorModal({
                   onClick={() => void handleCreateZone()}
                   disabled={!canEdit || saving}
                 >
-                  {saving ? "Сохранение..." : `Сохранить зону (${draftPoints.length} точек)`}
+                  {saving
+                    ? "Сохранение..."
+                    : `Сохранить зону (${draftPoints.length} точек)`}
                 </button>
               </div>
               <span className={styles.hint}>
-                Клик по карте добавляет точку. Перетащите точку для коррекции, ПКМ по точке удаляет
-                ее. Минимум 3 точки.
+                Клик по карте добавляет точку. Перетащите точку для коррекции,
+                ПКМ по точке удаляет ее. Минимум 3 точки.
               </span>
             </div>
 
@@ -1675,7 +1910,11 @@ function CourierHistoryMap({
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setMapError(error instanceof Error ? error.message : "Не удалось загрузить карту трека");
+        setMapError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить карту трека",
+        );
       });
 
     return () => {
@@ -1691,19 +1930,32 @@ function CourierHistoryMap({
     const map = mapRef.current;
     if (timelinePoints.length === 0) return;
 
-    const safeStart = Math.max(0, Math.min(rangeStartIndex, timelinePoints.length - 1));
-    const safeEnd = Math.max(safeStart, Math.min(rangeEndIndex, timelinePoints.length - 1));
+    const safeStart = Math.max(
+      0,
+      Math.min(rangeStartIndex, timelinePoints.length - 1),
+    );
+    const safeEnd = Math.max(
+      safeStart,
+      Math.min(rangeEndIndex, timelinePoints.length - 1),
+    );
     const displayed = timelinePoints.slice(safeStart, safeEnd + 1);
     if (displayed.length === 0) return;
     const displayedStartMs = Date.parse(displayed[0].recorded_at);
-    const displayedEndMs = Date.parse(displayed[displayed.length - 1].recorded_at);
+    const displayedEndMs = Date.parse(
+      displayed[displayed.length - 1].recorded_at,
+    );
     const eventsInDisplayedRange = events.filter((event) => {
       if (event.lat === null || event.lng === null) return false;
       const ts = Date.parse(event.happened_at);
-      return Number.isFinite(ts) && ts >= displayedStartMs && ts <= displayedEndMs;
+      return (
+        Number.isFinite(ts) && ts >= displayedStartMs && ts <= displayedEndMs
+      );
     });
 
-    const path = displayed.map((point) => ({ lat: point.lat as number, lng: point.lng as number }));
+    const path = displayed.map((point) => ({
+      lat: point.lat as number,
+      lng: point.lng as number,
+    }));
     const bounds = new maps.LatLngBounds();
     for (const point of path) bounds.extend(point);
     map.fitBounds(bounds, 40);
@@ -1809,10 +2061,22 @@ function CourierHistoryMap({
       });
     }, stepMs);
     return () => window.clearInterval(timer);
-  }, [isPlaying, playbackSpeed, rangeEndIndex, rangeStartIndex, timelinePoints.length]);
+  }, [
+    isPlaying,
+    playbackSpeed,
+    rangeEndIndex,
+    rangeStartIndex,
+    timelinePoints.length,
+  ]);
 
-  const safeStart = Math.max(0, Math.min(rangeStartIndex, Math.max(timelinePoints.length - 1, 0)));
-  const safeEnd = Math.max(safeStart, Math.min(rangeEndIndex, Math.max(timelinePoints.length - 1, 0)));
+  const safeStart = Math.max(
+    0,
+    Math.min(rangeStartIndex, Math.max(timelinePoints.length - 1, 0)),
+  );
+  const safeEnd = Math.max(
+    safeStart,
+    Math.min(rangeEndIndex, Math.max(timelinePoints.length - 1, 0)),
+  );
   const startPoint = timelinePoints[safeStart] || null;
   const endPoint = timelinePoints[safeEnd] || null;
 
@@ -1859,7 +2123,9 @@ function CourierHistoryMap({
             <select
               className={styles.select}
               value={String(playbackSpeed)}
-              onChange={(event) => setPlaybackSpeed(Number(event.target.value) as 1 | 2 | 4)}
+              onChange={(event) =>
+                setPlaybackSpeed(Number(event.target.value) as 1 | 2 | 4)
+              }
             >
               <option value="1">1x</option>
               <option value="2">2x</option>
@@ -1868,7 +2134,9 @@ function CourierHistoryMap({
           </label>
         </div>
         <div className={styles.historyMapRange}>
-          <span className={styles.unitMeta}>Начало: {formatDateTime(startPoint?.recorded_at)}</span>
+          <span className={styles.unitMeta}>
+            Начало: {formatDateTime(startPoint?.recorded_at)}
+          </span>
           <input
             type="range"
             min={0}
@@ -1884,7 +2152,9 @@ function CourierHistoryMap({
           />
         </div>
         <div className={styles.historyMapRange}>
-          <span className={styles.unitMeta}>Конец: {formatDateTime(endPoint?.recorded_at)}</span>
+          <span className={styles.unitMeta}>
+            Конец: {formatDateTime(endPoint?.recorded_at)}
+          </span>
           <input
             type="range"
             min={0}
@@ -1902,7 +2172,9 @@ function CourierHistoryMap({
         <div className={styles.historyLegendRow}>
           <span className={styles.legend}>Синий: трек</span>
           <span className={styles.legend}>Зеленый: текущая точка</span>
-          <span className={styles.legend}>Дроп: красный/желтый/фиолетовый/серый/черный/зеленый/синий</span>
+          <span className={styles.legend}>
+            Дроп: красный/желтый/фиолетовый/серый/черный/зеленый/синий
+          </span>
           <span className={styles.legend}>Желтый: failed</span>
           <span className={styles.legend}>Фиолетовый: returned</span>
         </div>
@@ -1911,19 +2183,30 @@ function CourierHistoryMap({
   );
 }
 
-function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: CourierInsightsModalProps) {
+function CourierInsightsModal({
+  open,
+  onClose,
+  onUnauthorized,
+  apiKey,
+}: CourierInsightsModalProps) {
   const [cards, setCards] = useState<CourierCardSummary[]>([]);
   const [cardsLoading, setCardsLoading] = useState(false);
   const [cardsError, setCardsError] = useState<string | null>(null);
   const [selectedCourierId, setSelectedCourierId] = useState<string>("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CourierInsightsDetailResponse | null>(null);
+  const [detail, setDetail] = useState<CourierInsightsDetailResponse | null>(
+    null,
+  );
   const [searchCourier, setSearchCourier] = useState("");
   const [fromLocal, setFromLocal] = useState(
-    toDateTimeLocalValue(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    toDateTimeLocalValue(
+      new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    ),
   );
-  const [toLocal, setToLocal] = useState(toDateTimeLocalValue(new Date().toISOString()));
+  const [toLocal, setToLocal] = useState(
+    toDateTimeLocalValue(new Date().toISOString()),
+  );
   const [eventType, setEventType] = useState("");
   const [taskStatus, setTaskStatus] = useState("");
   const [shiftStatus, setShiftStatus] = useState("");
@@ -1940,14 +2223,19 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
       if (fromIso) params.set("from", fromIso);
       if (toIso) params.set("to", toIso);
 
-      const res = await fetch(`/api/routeplanning/couriers?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/routeplanning/couriers?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
       if (res.status === 401) {
         onUnauthorized();
         return;
       }
-      const payload = (await res.json().catch(() => null)) as CourierInsightsListResponse | null;
+      const payload = (await res
+        .json()
+        .catch(() => null)) as CourierInsightsListResponse | null;
       if (!res.ok || !payload?.ok) {
         setCardsError(payload?.error || "Не удалось загрузить список курьеров");
         return;
@@ -1963,7 +2251,9 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
         setSelectedCourierId("");
       }
     } catch (error: unknown) {
-      setCardsError(error instanceof Error ? error.message : "Ошибка загрузки курьеров");
+      setCardsError(
+        error instanceof Error ? error.message : "Ошибка загрузки курьеров",
+      );
     } finally {
       setCardsLoading(false);
     }
@@ -1983,23 +2273,31 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
       if (eventType.trim()) params.set("eventType", eventType.trim());
       if (taskStatus.trim()) params.set("taskStatus", taskStatus.trim());
       if (shiftStatus.trim()) params.set("shiftStatus", shiftStatus.trim());
-      if (handoverStatus.trim()) params.set("handoverStatus", handoverStatus.trim());
+      if (handoverStatus.trim())
+        params.set("handoverStatus", handoverStatus.trim());
 
-      const res = await fetch(`/api/routeplanning/couriers?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/routeplanning/couriers?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
       if (res.status === 401) {
         onUnauthorized();
         return;
       }
-      const payload = (await res.json().catch(() => null)) as CourierInsightsDetailResponse | null;
+      const payload = (await res
+        .json()
+        .catch(() => null)) as CourierInsightsDetailResponse | null;
       if (!res.ok || !payload?.ok) {
         setDetailError(payload?.error || "Не удалось загрузить детали курьера");
         return;
       }
       setDetail(payload);
     } catch (error: unknown) {
-      setDetailError(error instanceof Error ? error.message : "Ошибка загрузки деталей");
+      setDetailError(
+        error instanceof Error ? error.message : "Ошибка загрузки деталей",
+      );
     } finally {
       setDetailLoading(false);
     }
@@ -2028,14 +2326,19 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
   const filteredCards = useMemo(() => {
     const query = searchCourier.trim().toLowerCase();
     if (!query) return cards;
-    return cards.filter((item) => item.courier_name.toLowerCase().includes(query));
+    return cards.filter((item) =>
+      item.courier_name.toLowerCase().includes(query),
+    );
   }, [cards, searchCourier]);
 
   if (!open) return null;
 
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
-      <div className={`${styles.modal} ${styles.courierInsightsModal}`} onClick={(event) => event.stopPropagation()}>
+      <div
+        className={`${styles.modal} ${styles.courierInsightsModal}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className={styles.modalHeader}>
           <div>
             <h3 className={styles.modalTitle}>Архив и аналитика курьеров</h3>
@@ -2043,7 +2346,11 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
               Карточки всех курьеров + фильтры для полного просмотра истории
             </p>
           </div>
-          <button type="button" className={styles.secondaryButton} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onClose}
+          >
             Закрыть
           </button>
         </div>
@@ -2069,7 +2376,11 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
           </div>
           <div className={styles.field}>
             <label className={styles.label}>Событие</label>
-            <select className={styles.select} value={eventType} onChange={(event) => setEventType(event.target.value)}>
+            <select
+              className={styles.select}
+              value={eventType}
+              onChange={(event) => setEventType(event.target.value)}
+            >
               <option value="">Все события</option>
               <option value="claimed">claimed</option>
               <option value="accepted">accepted</option>
@@ -2082,7 +2393,11 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
           </div>
           <div className={styles.field}>
             <label className={styles.label}>Статус задачи</label>
-            <select className={styles.select} value={taskStatus} onChange={(event) => setTaskStatus(event.target.value)}>
+            <select
+              className={styles.select}
+              value={taskStatus}
+              onChange={(event) => setTaskStatus(event.target.value)}
+            >
               <option value="">Все статусы задач</option>
               <option value="claimed">claimed</option>
               <option value="in_route">in_route</option>
@@ -2096,7 +2411,11 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
           </div>
           <div className={styles.field}>
             <label className={styles.label}>Статус смены</label>
-            <select className={styles.select} value={shiftStatus} onChange={(event) => setShiftStatus(event.target.value)}>
+            <select
+              className={styles.select}
+              value={shiftStatus}
+              onChange={(event) => setShiftStatus(event.target.value)}
+            >
               <option value="">Все статусы смен</option>
               <option value="open">open</option>
               <option value="closing">closing</option>
@@ -2115,10 +2434,19 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
               <option value="confirmed">confirmed</option>
             </select>
           </div>
-          <button type="button" className={styles.secondaryButton} onClick={() => void fetchCards()}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => void fetchCards()}
+          >
             Обновить список
           </button>
-          <button type="button" className={styles.primaryButton} onClick={() => void fetchDetails()} disabled={!selectedCourierId}>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={() => void fetchDetails()}
+            disabled={!selectedCourierId}
+          >
             Применить фильтры
           </button>
         </div>
@@ -2154,19 +2482,24 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                       onClick={() => setSelectedCourierId(card.courier_user_id)}
                     >
                       <div className={styles.courierIosCardTop}>
-                        <span className={styles.courierIosName}>{card.courier_name}</span>
-                        <span className={styles.courierIosRole}>{card.role}</span>
+                        <span className={styles.courierIosName}>
+                          {card.courier_name}
+                        </span>
+                        <span className={styles.courierIosRole}>
+                          {card.role}
+                        </span>
                       </div>
                       <div className={styles.courierIosMeta}>
-                        Активных задач: {card.active_tasks} • Дропов: {card.stats.dropped}
+                        Активных задач: {card.active_tasks} • Дропов:{" "}
+                        {card.stats.dropped}
                       </div>
                       <div className={styles.courierIosMeta}>
-                        Смена: {card.open_shift?.status || "не активна"} •
-                        {" "}
-                        Last event: {formatDateTime(card.stats.lastEventAt)}
+                        Смена: {card.open_shift?.status || "не активна"} • Last
+                        event: {formatDateTime(card.stats.lastEventAt)}
                       </div>
                       <div className={styles.courierIosMeta}>
-                        Last GPS: {formatDateTime(card.last_location?.recorded_at)}
+                        Last GPS:{" "}
+                        {formatDateTime(card.last_location?.recorded_at)}
                       </div>
                     </button>
                   );
@@ -2177,49 +2510,73 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
 
           <div className={styles.courierInsightsContent}>
             {!selectedCourierId ? (
-              <div className={styles.empty}>Выберите курьера в левой колонке</div>
+              <div className={styles.empty}>
+                Выберите курьера в левой колонке
+              </div>
             ) : detailLoading ? (
               <div className={styles.empty}>Загрузка деталей курьера...</div>
             ) : !detail ? (
-              <div className={styles.empty}>Нет данных по выбранному курьеру</div>
+              <div className={styles.empty}>
+                Нет данных по выбранному курьеру
+              </div>
             ) : (
               <>
                 <div className={styles.courierSummaryGrid}>
                   <div className={styles.courierSummaryCard}>
                     <div className={styles.courierSummaryLabel}>Курьер</div>
-                    <div className={styles.courierSummaryValue}>{detail.courier.courier_name}</div>
-                    <div className={styles.courierMeta}>ID: {detail.courier.courier_user_id}</div>
+                    <div className={styles.courierSummaryValue}>
+                      {detail.courier.courier_name}
+                    </div>
+                    <div className={styles.courierMeta}>
+                      ID: {detail.courier.courier_user_id}
+                    </div>
                   </div>
                   <div className={styles.courierSummaryCard}>
                     <div className={styles.courierSummaryLabel}>Маршрут</div>
-                    <div className={styles.courierSummaryValue}>{detail.summary.distance_km} км</div>
+                    <div className={styles.courierSummaryValue}>
+                      {detail.summary.distance_km} км
+                    </div>
                     <div className={styles.courierMeta}>
                       Точек GPS: {detail.summary.location_points_count}
                     </div>
                   </div>
                   <div className={styles.courierSummaryCard}>
                     <div className={styles.courierSummaryLabel}>События</div>
-                    <div className={styles.courierSummaryValue}>{detail.summary.events_count}</div>
-                    <div className={styles.courierMeta}>Задач: {detail.summary.tasks_count}</div>
-                  </div>
-                  <div className={styles.courierSummaryCard}>
-                    <div className={styles.courierSummaryLabel}>Смены / handover</div>
                     <div className={styles.courierSummaryValue}>
-                      {detail.summary.shifts_count} / {detail.summary.handovers_count}
+                      {detail.summary.events_count}
                     </div>
                     <div className={styles.courierMeta}>
-                      Период: {formatDateTime(detail.from)} - {formatDateTime(detail.to)}
+                      Задач: {detail.summary.tasks_count}
+                    </div>
+                  </div>
+                  <div className={styles.courierSummaryCard}>
+                    <div className={styles.courierSummaryLabel}>
+                      Смены / handover
+                    </div>
+                    <div className={styles.courierSummaryValue}>
+                      {detail.summary.shifts_count} /{" "}
+                      {detail.summary.handovers_count}
+                    </div>
+                    <div className={styles.courierMeta}>
+                      Период: {formatDateTime(detail.from)} -{" "}
+                      {formatDateTime(detail.to)}
                     </div>
                   </div>
                 </div>
 
-                <CourierHistoryMap apiKey={apiKey} locations={detail.locations} events={detail.events} />
+                <CourierHistoryMap
+                  apiKey={apiKey}
+                  locations={detail.locations}
+                  events={detail.events}
+                />
 
                 <div className={styles.courierBreakdownRow}>
                   <div className={styles.courierBreakdownCard}>
                     <strong>Статусы смен</strong>
                     <div className={styles.courierBreakdownItems}>
-                      {Object.entries(detail.summary.shift_status_breakdown).map(([key, value]) => (
+                      {Object.entries(
+                        detail.summary.shift_status_breakdown,
+                      ).map(([key, value]) => (
                         <span key={key} className={styles.chip}>
                           {key}: {value}
                         </span>
@@ -2229,21 +2586,25 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                   <div className={styles.courierBreakdownCard}>
                     <strong>Статусы задач</strong>
                     <div className={styles.courierBreakdownItems}>
-                      {Object.entries(detail.summary.task_status_breakdown).map(([key, value]) => (
-                        <span key={key} className={styles.chip}>
-                          {key}: {value}
-                        </span>
-                      ))}
+                      {Object.entries(detail.summary.task_status_breakdown).map(
+                        ([key, value]) => (
+                          <span key={key} className={styles.chip}>
+                            {key}: {value}
+                          </span>
+                        ),
+                      )}
                     </div>
                   </div>
                   <div className={styles.courierBreakdownCard}>
                     <strong>Типы событий</strong>
                     <div className={styles.courierBreakdownItems}>
-                      {Object.entries(detail.summary.event_breakdown).map(([key, value]) => (
-                        <span key={key} className={styles.chip}>
-                          {key}: {value}
-                        </span>
-                      ))}
+                      {Object.entries(detail.summary.event_breakdown).map(
+                        ([key, value]) => (
+                          <span key={key} className={styles.chip}>
+                            {key}: {value}
+                          </span>
+                        ),
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2255,16 +2616,34 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                     </div>
                     <div className={styles.listBody}>
                       {detail.shifts.length === 0 ? (
-                        <div className={styles.empty}>Нет смен по выбранным фильтрам</div>
+                        <div className={styles.empty}>
+                          Нет смен по выбранным фильтрам
+                        </div>
                       ) : (
                         detail.shifts.map((shift) => (
                           <div key={shift.id} className={styles.unitRow}>
-                            <div className={styles.unitMeta}>ID: {shift.id}</div>
-                            <div className={styles.unitMeta}>Статус: {shift.status}</div>
-                            <div className={styles.unitMeta}>Старт: {formatDateTime(shift.started_at)}</div>
-                            <div className={styles.unitMeta}>Закрытие: {formatDateTime(shift.closed_at)}</div>
-                            {shift.start_note ? <span className={styles.chip}>start: {shift.start_note}</span> : null}
-                            {shift.close_note ? <span className={styles.chip}>close: {shift.close_note}</span> : null}
+                            <div className={styles.unitMeta}>
+                              ID: {shift.id}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              Статус: {shift.status}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              Старт: {formatDateTime(shift.started_at)}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              Закрытие: {formatDateTime(shift.closed_at)}
+                            </div>
+                            {shift.start_note ? (
+                              <span className={styles.chip}>
+                                start: {shift.start_note}
+                              </span>
+                            ) : null}
+                            {shift.close_note ? (
+                              <span className={styles.chip}>
+                                close: {shift.close_note}
+                              </span>
+                            ) : null}
                           </div>
                         ))
                       )}
@@ -2277,19 +2656,33 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                     </div>
                     <div className={styles.listBody}>
                       {detail.tasks.length === 0 ? (
-                        <div className={styles.empty}>Нет задач по фильтрам</div>
+                        <div className={styles.empty}>
+                          Нет задач по фильтрам
+                        </div>
                       ) : (
                         detail.tasks.map((task) => (
                           <div key={task.id} className={styles.unitRow}>
-                            <div className={styles.unitBarcode}>#{task.unit.barcode || task.unit.id}</div>
-                            <div className={styles.unitMeta}>task_id: {task.id}</div>
-                            <div className={styles.unitMeta}>status: {task.status}</div>
-                            <div className={styles.unitMeta}>last_event: {formatDateTime(task.last_event_at)}</div>
+                            <div className={styles.unitBarcode}>
+                              #{task.unit.barcode || task.unit.id}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              task_id: {task.id}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              status: {task.status}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              last_event: {formatDateTime(task.last_event_at)}
+                            </div>
                             {task.fail_reason ? (
-                              <span className={styles.chip}>fail: {task.fail_reason}</span>
+                              <span className={styles.chip}>
+                                fail: {task.fail_reason}
+                              </span>
                             ) : null}
                             {task.fail_comment ? (
-                              <span className={styles.chip}>comment: {task.fail_comment}</span>
+                              <span className={styles.chip}>
+                                comment: {task.fail_comment}
+                              </span>
                             ) : null}
                           </div>
                         ))
@@ -2303,17 +2696,27 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                     </div>
                     <div className={styles.listBody}>
                       {detail.events.length === 0 ? (
-                        <div className={styles.empty}>Нет событий по фильтрам</div>
+                        <div className={styles.empty}>
+                          Нет событий по фильтрам
+                        </div>
                       ) : (
                         detail.events.map((event) => (
                           <div key={event.id} className={styles.unitRow}>
-                            <div className={styles.unitMeta}>{event.event_type}</div>
-                            <div className={styles.unitMeta}>#{event.unit.barcode || event.unit.id}</div>
-                            <div className={styles.unitMeta}>{formatDateTime(event.happened_at)}</div>
+                            <div className={styles.unitMeta}>
+                              {event.event_type}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              #{event.unit.barcode || event.unit.id}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              {formatDateTime(event.happened_at)}
+                            </div>
                             <div className={styles.unitMeta}>
                               lat/lng: {event.lat ?? "—"} / {event.lng ?? "—"}
                             </div>
-                            {event.note ? <span className={styles.chip}>{event.note}</span> : null}
+                            {event.note ? (
+                              <span className={styles.chip}>{event.note}</span>
+                            ) : null}
                           </div>
                         ))
                       )}
@@ -2326,19 +2729,26 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                     </div>
                     <div className={styles.listBody}>
                       {detail.locations.length === 0 ? (
-                        <div className={styles.empty}>Нет GPS данных в периоде</div>
+                        <div className={styles.empty}>
+                          Нет GPS данных в периоде
+                        </div>
                       ) : (
                         detail.locations.map((location) => (
                           <div key={location.id} className={styles.unitRow}>
-                            <div className={styles.unitMeta}>{formatDateTime(location.recorded_at)}</div>
                             <div className={styles.unitMeta}>
-                              lat/lng: {location.lat ?? "—"} / {location.lng ?? "—"}
+                              {formatDateTime(location.recorded_at)}
                             </div>
                             <div className={styles.unitMeta}>
-                              accuracy: {location.accuracy_m ?? "—"}m • speed: {location.speed_m_s ?? "—"}
+                              lat/lng: {location.lat ?? "—"} /{" "}
+                              {location.lng ?? "—"}
                             </div>
                             <div className={styles.unitMeta}>
-                              heading: {location.heading_deg ?? "—"} • battery: {location.battery_level ?? "—"}
+                              accuracy: {location.accuracy_m ?? "—"}m • speed:{" "}
+                              {location.speed_m_s ?? "—"}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              heading: {location.heading_deg ?? "—"} • battery:{" "}
+                              {location.battery_level ?? "—"}
                             </div>
                           </div>
                         ))
@@ -2352,17 +2762,29 @@ function CourierInsightsModal({ open, onClose, onUnauthorized, apiKey }: Courier
                     </div>
                     <div className={styles.listBody}>
                       {detail.handovers.length === 0 ? (
-                        <div className={styles.empty}>Нет handover по фильтрам</div>
+                        <div className={styles.empty}>
+                          Нет handover по фильтрам
+                        </div>
                       ) : (
                         detail.handovers.map((handover) => (
                           <div key={handover.id} className={styles.unitRow}>
-                            <div className={styles.unitMeta}>ID: {handover.id}</div>
-                            <div className={styles.unitMeta}>status: {handover.status}</div>
-                            <div className={styles.unitMeta}>start: {formatDateTime(handover.started_at)}</div>
+                            <div className={styles.unitMeta}>
+                              ID: {handover.id}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              status: {handover.status}
+                            </div>
+                            <div className={styles.unitMeta}>
+                              start: {formatDateTime(handover.started_at)}
+                            </div>
                             <div className={styles.unitMeta}>
                               confirm: {formatDateTime(handover.confirmed_at)}
                             </div>
-                            {handover.note ? <span className={styles.chip}>{handover.note}</span> : null}
+                            {handover.note ? (
+                              <span className={styles.chip}>
+                                {handover.note}
+                              </span>
+                            ) : null}
                           </div>
                         ))
                       )}
@@ -2393,12 +2815,20 @@ function AllOrdersModal({
     meta?: { ops_status?: string; ops_status_comment?: string };
     photos?: Array<{ url: string; filename: string }>;
   } | null>(null);
-  const [history, setHistory] = useState<Array<{ event_type: string; created_at: string; details: Record<string, unknown> }>>([]);
+  const [history, setHistory] = useState<
+    Array<{
+      event_type: string;
+      created_at: string;
+      details: Record<string, unknown>;
+    }>
+  >([]);
   const [loadingUnit, setLoadingUnit] = useState(false);
   const [opsStatus, setOpsStatus] = useState("");
   const [opsStatusComment, setOpsStatusComment] = useState("");
   const [savingOps, setSavingOps] = useState(false);
-  const [activeTab, setActiveTab] = useState<"ops" | "history" | "photos">("ops");
+  const [activeTab, setActiveTab] = useState<"ops" | "history" | "photos">(
+    "ops",
+  );
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -2464,7 +2894,9 @@ function AllOrdersModal({
               }
             : prev,
         );
-        const histRes = await fetch(`/api/units/${selectedUnitId}/history`, { cache: "no-store" });
+        const histRes = await fetch(`/api/units/${selectedUnitId}/history`, {
+          cache: "no-store",
+        });
         const histJson = await histRes.json();
         if (histRes.ok && histJson.history) setHistory(histJson.history);
         onRefresh();
@@ -2478,7 +2910,14 @@ function AllOrdersModal({
     }
   }, [selectedUnitId, opsStatus, opsStatusComment, onRefresh]);
 
-  const renderHistoryEvent = (event: { event_type: string; created_at: string; details: Record<string, unknown> }, idx: number) => {
+  const renderHistoryEvent = (
+    event: {
+      event_type: string;
+      created_at: string;
+      details: Record<string, unknown>;
+    },
+    idx: number,
+  ) => {
     const date = new Date(event.created_at).toLocaleString("ru-RU");
     const key = `hist-${idx}-${event.event_type}-${event.created_at}`;
     if (event.event_type === "move") {
@@ -2490,7 +2929,9 @@ function AllOrdersModal({
           <span>📦</span>
           <div>
             <div className={styles.allOrdersHistoryTitle}>Перемещение</div>
-            <div className={styles.allOrdersHistoryText}>{fromCellText} → {toCellText}</div>
+            <div className={styles.allOrdersHistoryText}>
+              {fromCellText} → {toCellText}
+            </div>
             <div className={styles.allOrdersHistoryMeta}>{date}</div>
           </div>
         </div>
@@ -2500,16 +2941,23 @@ function AllOrdersModal({
       const { action, summary, meta } = event.details;
       const isOps = String(action || "").includes("ops");
       if (isOps && meta) {
-        const { old_status_text, new_status_text, comment } = meta as Record<string, string>;
+        const { old_status_text, new_status_text, comment } = meta as Record<
+          string,
+          string
+        >;
         return (
           <div key={key} className={styles.allOrdersHistoryItem}>
             <span>📋</span>
             <div>
-              <div className={styles.allOrdersHistoryTitle}>OPS статус изменён</div>
+              <div className={styles.allOrdersHistoryTitle}>
+                OPS статус изменён
+              </div>
               <div className={styles.allOrdersHistoryText}>
                 {old_status_text || "—"} → {new_status_text || "—"}
               </div>
-              {comment && <div style={{ fontSize: 12, marginTop: 4 }}>{comment}</div>}
+              {comment && (
+                <div style={{ fontSize: 12, marginTop: 4 }}>{comment}</div>
+              )}
               <div className={styles.allOrdersHistoryMeta}>{date}</div>
             </div>
           </div>
@@ -2520,7 +2968,9 @@ function AllOrdersModal({
       <div key={key} className={styles.allOrdersHistoryItem}>
         <span>📝</span>
         <div>
-          <div className={styles.allOrdersHistoryTitle}>{String((event.details as any)?.summary || event.event_type)}</div>
+          <div className={styles.allOrdersHistoryTitle}>
+            {String((event.details as any)?.summary || event.event_type)}
+          </div>
           <div className={styles.allOrdersHistoryMeta}>{date}</div>
         </div>
       </div>
@@ -2533,12 +2983,22 @@ function AllOrdersModal({
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div
         className={styles.modal}
-        style={{ maxWidth: 900, width: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        style={{
+          maxWidth: 900,
+          width: "95vw",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.modalHeader}>
           <h2 className={styles.modalTitle}>Все заказы</h2>
-          <button type="button" className={styles.secondaryButton} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onClose}
+          >
             Закрыть
           </button>
         </div>
@@ -2562,7 +3022,9 @@ function AllOrdersModal({
                     style={{ cursor: "pointer" }}
                     onClick={() => loadUnit(o.unit_id)}
                   >
-                    <div className={styles.unitBarcode}>#{o.barcode || o.unit_id}</div>
+                    <div className={styles.unitBarcode}>
+                      #{o.barcode || o.unit_id}
+                    </div>
                   </div>
                 ))
               )}
@@ -2582,19 +3044,40 @@ function AllOrdersModal({
                       <button
                         key={tab}
                         type="button"
-                        className={activeTab === tab ? styles.refreshButton : styles.secondaryButton}
+                        className={
+                          activeTab === tab
+                            ? styles.refreshButton
+                            : styles.secondaryButton
+                        }
                         style={{ padding: "6px 12px", fontSize: 13 }}
                         onClick={() => setActiveTab(tab)}
                       >
-                        {tab === "ops" ? "OPS статус" : tab === "history" ? "История" : "Фото"}
+                        {tab === "ops"
+                          ? "OPS статус"
+                          : tab === "history"
+                            ? "История"
+                            : "Фото"}
                       </button>
                     ))}
                   </div>
                 </div>
                 {activeTab === "ops" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
                     <div>
-                      <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                      <label
+                        style={{
+                          fontSize: 12,
+                          color: "#64748b",
+                          display: "block",
+                          marginBottom: 4,
+                        }}
+                      >
                         OPS статус
                       </label>
                       <select
@@ -2613,7 +3096,14 @@ function AllOrdersModal({
                       </select>
                     </div>
                     <div>
-                      <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                      <label
+                        style={{
+                          fontSize: 12,
+                          color: "#64748b",
+                          display: "block",
+                          marginBottom: 4,
+                        }}
+                      >
                         Комментарий
                       </label>
                       <textarea
@@ -2667,7 +3157,11 @@ function AllOrdersModal({
                           <img
                             src={photo.url}
                             alt={`Фото ${idx + 1}`}
-                            style={{ width: 120, height: 120, objectFit: "cover" }}
+                            style={{
+                              width: 120,
+                              height: 120,
+                              objectFit: "cover",
+                            }}
                           />
                         </a>
                       ))
@@ -2696,14 +3190,22 @@ export default function RoutePlanningClient({
   const [message, setMessage] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [selectedCourierUserId, setSelectedCourierUserId] = useState("");
-  const [selectedPickingUnitIds, setSelectedPickingUnitIds] = useState<Set<string>>(new Set());
-  const [selectedDroppedUnitIds, setSelectedDroppedUnitIds] = useState<Set<string>>(new Set());
+  const [selectedPickingUnitIds, setSelectedPickingUnitIds] = useState<
+    Set<string>
+  >(new Set());
+  const [selectedDroppedUnitIds, setSelectedDroppedUnitIds] = useState<
+    Set<string>
+  >(new Set());
   const [droppedColorFilter, setDroppedColorFilter] = useState<Set<DropColor>>(
     new Set(DROP_COLOR_ORDER),
   );
-  const [droppedZoneFilter, setDroppedZoneFilter] = useState<Set<string>>(new Set());
+  const [droppedZoneFilter, setDroppedZoneFilter] = useState<Set<string>>(
+    new Set(),
+  );
   const [searchPicking, setSearchPicking] = useState("");
-  const [pickingCellFilter, setPickingCellFilter] = useState<Set<string>>(new Set());
+  const [pickingCellFilter, setPickingCellFilter] = useState<Set<string>>(
+    new Set(),
+  );
   const [searchDropped, setSearchDropped] = useState("");
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false);
   const [courierInsightsOpen, setCourierInsightsOpen] = useState(false);
@@ -2716,7 +3218,10 @@ export default function RoutePlanningClient({
   const [listsPickingHeightPct, setListsPickingHeightPct] = useState(40);
   const [isListsResizing, setIsListsResizing] = useState(false);
   const listsWrapRef = useRef<HTMLDivElement | null>(null);
-  const [mainHeights, setMainHeights] = useState({ mainAreaPx: 450, couriersStripPx: 220 });
+  const [mainHeights, setMainHeights] = useState({
+    mainAreaPx: 450,
+    couriersStripPx: 220,
+  });
   const [isMainCouriersResizing, setIsMainCouriersResizing] = useState(false);
   const mainCouriersWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -2733,7 +3238,9 @@ export default function RoutePlanningClient({
       }
       setError(null);
       try {
-        const res = await fetch("/api/routeplanning/dashboard", { cache: "no-store" });
+        const res = await fetch("/api/routeplanning/dashboard", {
+          cache: "no-store",
+        });
         if (res.status === 401) {
           router.push("/login");
           return;
@@ -2743,7 +3250,9 @@ export default function RoutePlanningClient({
           return;
         }
 
-        const json = (await res.json()) as DashboardResponse & { error?: string };
+        const json = (await res.json()) as DashboardResponse & {
+          error?: string;
+        };
         if (!res.ok || !json.ok) {
           setError(json.error || "Ошибка загрузки Route Planning");
           return;
@@ -2752,7 +3261,9 @@ export default function RoutePlanningClient({
         setDashboard(json);
       } catch (loadError: unknown) {
         const messageText =
-          loadError instanceof Error ? loadError.message : "Ошибка загрузки данных";
+          loadError instanceof Error
+            ? loadError.message
+            : "Ошибка загрузки данных";
         setError(messageText);
       } finally {
         if (!silent) {
@@ -2768,14 +3279,26 @@ export default function RoutePlanningClient({
       const saved = localStorage.getItem("routeplanning-left-pane-width");
       const n = Number(saved);
       if (Number.isFinite(n) && n >= 15 && n <= 90) setLeftPaneWidthPct(n);
-      const savedLists = localStorage.getItem("routeplanning-lists-picking-height");
+      const savedLists = localStorage.getItem(
+        "routeplanning-lists-picking-height",
+      );
       const nLists = Number(savedLists);
-      if (Number.isFinite(nLists) && nLists >= 10 && nLists <= 90) setListsPickingHeightPct(nLists);
-      const savedMain = localStorage.getItem("routeplanning-main-area-height-px");
+      if (Number.isFinite(nLists) && nLists >= 10 && nLists <= 90)
+        setListsPickingHeightPct(nLists);
+      const savedMain = localStorage.getItem(
+        "routeplanning-main-area-height-px",
+      );
       const nMain = Number(savedMain);
-      const savedCouriers = localStorage.getItem("routeplanning-couriers-strip-height-px");
+      const savedCouriers = localStorage.getItem(
+        "routeplanning-couriers-strip-height-px",
+      );
       const nCouriers = Number(savedCouriers);
-      if (Number.isFinite(nMain) && nMain >= 200 && Number.isFinite(nCouriers) && nCouriers >= 100) {
+      if (
+        Number.isFinite(nMain) &&
+        nMain >= 200 &&
+        Number.isFinite(nCouriers) &&
+        nCouriers >= 100
+      ) {
         setMainHeights({ mainAreaPx: nMain, couriersStripPx: nCouriers });
       }
     } catch {
@@ -2793,23 +3316,34 @@ export default function RoutePlanningClient({
 
   useEffect(() => {
     if (!dashboard) return;
-    const validPickingUnitIds = new Set(dashboard.picking_units.map((unit) => unit.id));
-    const validDroppedUnitIds = new Set(dashboard.dropped_units.map((unit) => unit.unit_id));
+    const validPickingUnitIds = new Set(
+      dashboard.picking_units.map((unit) => unit.id),
+    );
+    const validDroppedUnitIds = new Set(
+      dashboard.dropped_units.map((unit) => unit.unit_id),
+    );
     const onShiftCourierIds = new Set(
       (dashboard.live_couriers || []).map((courier) => courier.courier_user_id),
     );
 
     setSelectedPickingUnitIds((prev) => {
-      const next = new Set([...prev].filter((unitId) => validPickingUnitIds.has(unitId)));
+      const next = new Set(
+        [...prev].filter((unitId) => validPickingUnitIds.has(unitId)),
+      );
       if (next.size === prev.size) return prev;
       return next;
     });
     setSelectedDroppedUnitIds((prev) => {
-      const next = new Set([...prev].filter((unitId) => validDroppedUnitIds.has(unitId)));
+      const next = new Set(
+        [...prev].filter((unitId) => validDroppedUnitIds.has(unitId)),
+      );
       if (next.size === prev.size) return prev;
       return next;
     });
-    if (selectedCourierUserId && !onShiftCourierIds.has(selectedCourierUserId)) {
+    if (
+      selectedCourierUserId &&
+      !onShiftCourierIds.has(selectedCourierUserId)
+    ) {
       setSelectedCourierUserId("");
     }
   }, [dashboard, selectedCourierUserId]);
@@ -2821,11 +3355,17 @@ export default function RoutePlanningClient({
         map.set(courier.courier_user_id, courier.courier_name);
       }
     }
-    return Array.from(map.entries()).map(([id, full_name]) => ({ id, full_name }));
+    return Array.from(map.entries()).map(([id, full_name]) => ({
+      id,
+      full_name,
+    }));
   }, [dashboard?.live_couriers]);
 
   const selectedCourier = useMemo(
-    () => assignableCouriers.find((courier) => courier.id === selectedCourierUserId) || null,
+    () =>
+      assignableCouriers.find(
+        (courier) => courier.id === selectedCourierUserId,
+      ) || null,
     [assignableCouriers, selectedCourierUserId],
   );
 
@@ -2841,7 +3381,9 @@ export default function RoutePlanningClient({
       const barcode = unit.barcode.toLowerCase();
       const cellCode = unit.cell?.code?.toLowerCase() || "";
       const scenario = unit.scenario?.toLowerCase() || "";
-      return barcode.includes(q) || cellCode.includes(q) || scenario.includes(q);
+      return (
+        barcode.includes(q) || cellCode.includes(q) || scenario.includes(q)
+      );
     });
   }, [dashboard?.picking_units, searchPicking, pickingCellFilter]);
 
@@ -2888,9 +3430,16 @@ export default function RoutePlanningClient({
       const barcode = unit.unit_barcode.toLowerCase();
       const courierName = unit.courier_name.toLowerCase();
       const opsStatus = (unit.ops_status || "").toLowerCase();
-      return barcode.includes(q) || courierName.includes(q) || opsStatus.includes(q);
+      return (
+        barcode.includes(q) || courierName.includes(q) || opsStatus.includes(q)
+      );
     });
-  }, [dashboard?.dropped_units, droppedColorFilter, droppedZoneFilter, searchDropped]);
+  }, [
+    dashboard?.dropped_units,
+    droppedColorFilter,
+    droppedZoneFilter,
+    searchDropped,
+  ]);
 
   const unitZoneMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -2910,11 +3459,18 @@ export default function RoutePlanningClient({
       }
       return true;
     });
-  }, [dashboard?.drop_points, droppedColorFilter, droppedZoneFilter, unitZoneMap]);
+  }, [
+    dashboard?.drop_points,
+    droppedColorFilter,
+    droppedZoneFilter,
+    unitZoneMap,
+  ]);
   const availableDroppedColors = useMemo(
     () =>
       DROP_COLOR_ORDER.filter((color) =>
-        (dashboard?.dropped_units || []).some((unit) => unit.color_key === color),
+        (dashboard?.dropped_units || []).some(
+          (unit) => unit.color_key === color,
+        ),
       ),
     [dashboard?.dropped_units],
   );
@@ -2931,7 +3487,10 @@ export default function RoutePlanningClient({
     for (const u of dashboard?.dropped_units || []) {
       if (!seen.has(u.unit_id)) {
         seen.add(u.unit_id);
-        result.push({ unit_id: u.unit_id, barcode: u.unit_barcode || u.unit_id });
+        result.push({
+          unit_id: u.unit_id,
+          barcode: u.unit_barcode || u.unit_id,
+        });
       }
     }
     result.sort((a, b) => (a.barcode || "").localeCompare(b.barcode || ""));
@@ -3020,101 +3579,113 @@ export default function RoutePlanningClient({
     [availableDroppedZones],
   );
 
-  const assignSelectedUnits = useCallback(async (source: "picking" | "dropped") => {
-    if (!canEdit) return;
-    const selectedSourceUnitIds =
-      source === "picking" ? selectedPickingUnitIds : selectedDroppedUnitIds;
-    if (selectedSourceUnitIds.size === 0) {
-      setError(
-        source === "picking"
-          ? "Выберите хотя бы один заказ из picking"
-          : "Выберите хотя бы один заказ из списка dropped",
-      );
-      return;
-    }
-    if (!selectedCourierUserId) {
-      setError("Выберите курьера на смене");
-      return;
-    }
-
-    setAssigning(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const unitIds = Array.from(selectedSourceUnitIds);
-      const response = await fetch("/api/routeplanning/assign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          unitIds,
-          courierUserId: selectedCourierUserId,
-          source,
-        }),
-      });
-
-      if (response.status === 401) {
-        router.push("/login");
+  const assignSelectedUnits = useCallback(
+    async (source: "picking" | "dropped") => {
+      if (!canEdit) return;
+      const selectedSourceUnitIds =
+        source === "picking" ? selectedPickingUnitIds : selectedDroppedUnitIds;
+      if (selectedSourceUnitIds.size === 0) {
+        setError(
+          source === "picking"
+            ? "Выберите хотя бы один заказ из picking"
+            : "Выберите хотя бы один заказ из списка dropped",
+        );
+        return;
+      }
+      if (!selectedCourierUserId) {
+        setError("Выберите курьера на смене");
         return;
       }
 
-      const payload = (await response.json().catch(() => null)) as AssignResponse | null;
-      const successCount = payload?.success_count || 0;
-      const failedCount = payload?.failed_count || 0;
+      setAssigning(true);
+      setError(null);
+      setMessage(null);
 
-      if (!response.ok && successCount === 0) {
-        setError(payload?.error || "Не удалось отправить заказы");
-        return;
-      }
+      try {
+        const unitIds = Array.from(selectedSourceUnitIds);
+        const response = await fetch("/api/routeplanning/assign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            unitIds,
+            courierUserId: selectedCourierUserId,
+            source,
+          }),
+        });
 
-      if (successCount > 0) {
-        const courierLabel = selectedCourier?.full_name || "курьер";
-        const sourceLabel = source === "picking" ? "из picking" : "из точек";
-        setMessage(`Отправлено ${successCount} заказ(ов) ${sourceLabel} курьеру ${courierLabel}`);
-        if (failedCount === 0) {
-          if (source === "picking") {
-            setSelectedPickingUnitIds(new Set());
-          } else {
-            setSelectedDroppedUnitIds(new Set());
-          }
-        } else {
-          const failedIds = new Set((payload?.failed || []).map((item) => item.unit_id));
-          if (source === "picking") {
-            setSelectedPickingUnitIds(failedIds);
-          } else {
-            setSelectedDroppedUnitIds(failedIds);
-          }
+        if (response.status === 401) {
+          router.push("/login");
+          return;
         }
-        await loadDashboard(true);
-      }
-      if (failedCount > 0) {
-        const sampleError = payload?.failed?.find((item) => item.error)?.error;
-        const sampleText = sampleError ? ` (${sampleError})` : "";
-        setError(`Не удалось отправить ${failedCount} заказ(ов)${sampleText}`);
-      }
-    } catch (assignError: unknown) {
-      const messageText =
-        assignError instanceof Error ? assignError.message : "Ошибка отправки заказов";
-      setError(messageText);
-    } finally {
-      setAssigning(false);
-    }
-  }, [
-    canEdit,
-    loadDashboard,
-    router,
-    selectedCourier,
-    selectedCourierUserId,
-    selectedDroppedUnitIds,
-    selectedPickingUnitIds,
-  ]);
 
-  const handleZonesUpdated = useCallback(
-    (zones: Zone[]) => {
-      setDashboard((prev) => (prev ? { ...prev, zones } : prev));
+        const payload = (await response
+          .json()
+          .catch(() => null)) as AssignResponse | null;
+        const successCount = payload?.success_count || 0;
+        const failedCount = payload?.failed_count || 0;
+
+        if (!response.ok && successCount === 0) {
+          setError(payload?.error || "Не удалось отправить заказы");
+          return;
+        }
+
+        if (successCount > 0) {
+          const courierLabel = selectedCourier?.full_name || "курьер";
+          const sourceLabel = source === "picking" ? "из picking" : "из точек";
+          setMessage(
+            `Отправлено ${successCount} заказ(ов) ${sourceLabel} курьеру ${courierLabel}`,
+          );
+          if (failedCount === 0) {
+            if (source === "picking") {
+              setSelectedPickingUnitIds(new Set());
+            } else {
+              setSelectedDroppedUnitIds(new Set());
+            }
+          } else {
+            const failedIds = new Set(
+              (payload?.failed || []).map((item) => item.unit_id),
+            );
+            if (source === "picking") {
+              setSelectedPickingUnitIds(failedIds);
+            } else {
+              setSelectedDroppedUnitIds(failedIds);
+            }
+          }
+          await loadDashboard(true);
+        }
+        if (failedCount > 0) {
+          const sampleError = payload?.failed?.find(
+            (item) => item.error,
+          )?.error;
+          const sampleText = sampleError ? ` (${sampleError})` : "";
+          setError(
+            `Не удалось отправить ${failedCount} заказ(ов)${sampleText}`,
+          );
+        }
+      } catch (assignError: unknown) {
+        const messageText =
+          assignError instanceof Error
+            ? assignError.message
+            : "Ошибка отправки заказов";
+        setError(messageText);
+      } finally {
+        setAssigning(false);
+      }
     },
-    [],
+    [
+      canEdit,
+      loadDashboard,
+      router,
+      selectedCourier,
+      selectedCourierUserId,
+      selectedDroppedUnitIds,
+      selectedPickingUnitIds,
+    ],
   );
+
+  const handleZonesUpdated = useCallback((zones: Zone[]) => {
+    setDashboard((prev) => (prev ? { ...prev, zones } : prev));
+  }, []);
 
   const handleResizeStart = useCallback(() => setIsResizing(true), []);
   const handleResizeMove = useCallback(
@@ -3134,7 +3705,10 @@ export default function RoutePlanningClient({
   );
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
-  const handleListsResizeStart = useCallback(() => setIsListsResizing(true), []);
+  const handleListsResizeStart = useCallback(
+    () => setIsListsResizing(true),
+    [],
+  );
   const handleListsResizeMove = useCallback(
     (e: MouseEvent) => {
       if (!isListsResizing || !listsWrapRef.current) return;
@@ -3143,7 +3717,10 @@ export default function RoutePlanningClient({
       const clamped = Math.max(10, Math.min(90, pct));
       setListsPickingHeightPct(clamped);
       try {
-        localStorage.setItem("routeplanning-lists-picking-height", String(clamped));
+        localStorage.setItem(
+          "routeplanning-lists-picking-height",
+          String(clamped),
+        );
       } catch {
         /* ignore */
       }
@@ -3152,7 +3729,10 @@ export default function RoutePlanningClient({
   );
   const handleListsResizeEnd = useCallback(() => setIsListsResizing(false), []);
 
-  const handleMainCouriersResizeStart = useCallback(() => setIsMainCouriersResizing(true), []);
+  const handleMainCouriersResizeStart = useCallback(
+    () => setIsMainCouriersResizing(true),
+    [],
+  );
   const handleMainCouriersResizeMove = useCallback(
     (e: MouseEvent) => {
       if (!isMainCouriersResizing || !mainCouriersWrapRef.current) return;
@@ -3164,8 +3744,14 @@ export default function RoutePlanningClient({
         const newMain = Math.max(200, Math.round(yInContent));
         const newCouriers = Math.max(100, total - newMain - 8);
         try {
-          localStorage.setItem("routeplanning-main-area-height-px", String(newMain));
-          localStorage.setItem("routeplanning-couriers-strip-height-px", String(newCouriers));
+          localStorage.setItem(
+            "routeplanning-main-area-height-px",
+            String(newMain),
+          );
+          localStorage.setItem(
+            "routeplanning-couriers-strip-height-px",
+            String(newCouriers),
+          );
         } catch {
           /* ignore */
         }
@@ -3174,7 +3760,10 @@ export default function RoutePlanningClient({
     },
     [isMainCouriersResizing],
   );
-  const handleMainCouriersResizeEnd = useCallback(() => setIsMainCouriersResizing(false), []);
+  const handleMainCouriersResizeEnd = useCallback(
+    () => setIsMainCouriersResizing(false),
+    [],
+  );
 
   useEffect(() => {
     if (!isResizing) return;
@@ -3240,13 +3829,21 @@ export default function RoutePlanningClient({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [isMainCouriersResizing, handleMainCouriersResizeMove, handleMainCouriersResizeEnd]);
+  }, [
+    isMainCouriersResizing,
+    handleMainCouriersResizeMove,
+    handleMainCouriersResizeEnd,
+  ]);
 
   if (variant === "fullscreen") {
     return (
       <div className={styles.pageFullscreen}>
         <div className={styles.fullscreenHeader}>
-          <a href="/routeplanning" className={styles.backButton} style={{ textDecoration: "none", color: "inherit" }}>
+          <a
+            href="/routeplanning"
+            className={styles.backButton}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
             ← Route Planning
           </a>
           <span className={styles.fullscreenTitle}>Dropped — карта</span>
@@ -3277,14 +3874,19 @@ export default function RoutePlanningClient({
             style={{ width: `${leftPaneWidthPct}%` }}
           >
             <div className={styles.paneInner}>
-              <h2 className={styles.sectionTitle}>Dropped ({filteredDroppedUnits.length})</h2>
+              <h2 className={styles.sectionTitle}>
+                Dropped ({filteredDroppedUnits.length})
+              </h2>
               <input
                 className={styles.input}
                 value={searchDropped}
                 onChange={(e) => setSearchDropped(e.target.value)}
                 placeholder="Поиск по barcode/courier/ops"
               />
-              <div className={styles.actions} style={{ padding: "8px 0", flexWrap: "wrap" }}>
+              <div
+                className={styles.actions}
+                style={{ padding: "8px 0", flexWrap: "wrap" }}
+              >
                 {availableDroppedColors.map((color) => (
                   <label key={color} className={styles.legend}>
                     <input
@@ -3298,14 +3900,21 @@ export default function RoutePlanningClient({
                 ))}
               </div>
               {availableDroppedZones.length > 0 ? (
-                <div className={styles.actions} style={{ padding: "8px 0", flexWrap: "wrap" }}>
-                  <span className={styles.hint} style={{ marginRight: 8 }}>Зоны:</span>
+                <div
+                  className={styles.actions}
+                  style={{ padding: "8px 0", flexWrap: "wrap" }}
+                >
+                  <span className={styles.hint} style={{ marginRight: 8 }}>
+                    Зоны:
+                  </span>
                   {availableDroppedZones.map(({ key, label }) => (
                     <label key={key} className={styles.legend}>
                       <input
                         type="checkbox"
                         checked={
-                          droppedZoneFilter.size === 0 ? true : droppedZoneFilter.has(key)
+                          droppedZoneFilter.size === 0
+                            ? true
+                            : droppedZoneFilter.has(key)
                         }
                         onChange={() => toggleDroppedZoneFilter(key)}
                         style={{ marginRight: 6 }}
@@ -3315,15 +3924,23 @@ export default function RoutePlanningClient({
                   ))}
                 </div>
               ) : null}
-              <div className={styles.listBody} style={{ flex: 1, overflow: "auto" }}>
+              <div
+                className={styles.listBody}
+                style={{ flex: 1, overflow: "auto" }}
+              >
                 {loading && !dashboard ? (
                   <div className={styles.empty}>Загрузка...</div>
                 ) : filteredDroppedUnits.length === 0 ? (
                   <div className={styles.empty}>Нет данных о дропах</div>
                 ) : (
                   filteredDroppedUnits.map((unit) => (
-                    <div key={`${unit.unit_id}-${unit.dropped_at}`} className={styles.unitRow}>
-                      <div className={styles.unitBarcode}>#{unit.unit_barcode || unit.unit_id}</div>
+                    <div
+                      key={`${unit.unit_id}-${unit.dropped_at}`}
+                      className={styles.unitRow}
+                    >
+                      <div className={styles.unitBarcode}>
+                        #{unit.unit_barcode || unit.unit_id}
+                      </div>
                       <div className={styles.unitMeta}>
                         {unit.courier_name} • {formatDate(unit.dropped_at)}
                       </div>
@@ -3425,7 +4042,9 @@ export default function RoutePlanningClient({
           >
             Все заказы ({allOrdersList.length})
           </button>
-          <span className={styles.badge}>Роль: {getRoleLabel(effectiveRole)}</span>
+          <span className={styles.badge}>
+            Роль: {getRoleLabel(effectiveRole)}
+          </span>
           {canEdit ? (
             <button
               type="button"
@@ -3435,7 +4054,9 @@ export default function RoutePlanningClient({
               Редактирование геозон ({dashboard?.zones.length || 0})
             </button>
           ) : (
-            <span className={`${styles.badge} ${styles.badgeReadonly}`}>Только просмотр</span>
+            <span className={`${styles.badge} ${styles.badgeReadonly}`}>
+              Только просмотр
+            </span>
           )}
           <button
             type="button"
@@ -3458,406 +4079,522 @@ export default function RoutePlanningClient({
       >
         <div
           className={styles.mainCouriersInner}
-          style={{ height: mainHeights.mainAreaPx + 8 + mainHeights.couriersStripPx }}
-        >
-        <div
-          className={styles.mainArea}
-          style={{ height: mainHeights.mainAreaPx }}
+          style={{
+            height: mainHeights.mainAreaPx + 8 + mainHeights.couriersStripPx,
+          }}
         >
           <div
-            ref={splitContainerRef}
-            className={styles.split}
-            style={{ cursor: isResizing ? "col-resize" : undefined }}
+            className={styles.mainArea}
+            style={{ height: mainHeights.mainAreaPx }}
           >
-        <div
-          className={`${styles.pane} ${styles.paneLeft}`}
-          style={{ width: `${leftPaneWidthPct}%` }}
-        >
-          <div className={styles.paneInner}>
-            <h2 className={styles.sectionTitle}>Заказы и назначения</h2>
-
-            <div className={styles.assignPanel}>
-              <div className={styles.row}>
-                <div className={styles.field}>
-                  <label className={styles.label} htmlFor="routeplanning-courier">
-                    Курьер на смене
-                  </label>
-                  <select
-                    id="routeplanning-courier"
-                    className={styles.select}
-                    value={selectedCourierUserId}
-                    onChange={(event) => setSelectedCourierUserId(event.target.value)}
-                    disabled={!canEdit || assigning || loading}
-                  >
-                    <option value="">Выберите курьера</option>
-                    {assignableCouriers.map((courier) => (
-                      <option key={courier.id} value={courier.id}>
-                        {courier.full_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.label}>Выбранный курьер</label>
-                  <div className={styles.input}>
-                    {selectedCourier?.full_name || "Курьер не выбран"}
-                  </div>
-                </div>
-              </div>
-
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  onClick={() => void assignSelectedUnits("picking")}
-                  disabled={
-                    !canEdit ||
-                    assigning ||
-                    selectedPickingUnitIds.size === 0 ||
-                    !selectedCourierUserId
-                  }
-                >
-                  {assigning
-                    ? "Отправка..."
-                    : `Передать из picking (${selectedPickingUnitIds.size})`}
-                </button>
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  onClick={() => void assignSelectedUnits("dropped")}
-                  disabled={
-                    !canEdit ||
-                    assigning ||
-                    selectedDroppedUnitIds.size === 0 ||
-                    !selectedCourierUserId
-                  }
-                >
-                  {assigning
-                    ? "Отправка..."
-                    : `Передать из точек (${selectedDroppedUnitIds.size})`}
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryButton}
-                  onClick={clearSelection}
-                  disabled={!canEdit || assigning}
-                >
-                  Сбросить выбор
-                </button>
-                <span className={styles.hint}>
-                  {canEdit
-                    ? "Назначение доступно только logistics/admin и только курьерам с открытой сменой."
-                    : "Режим чтения: без изменения назначений."}
-                </span>
-              </div>
-            </div>
-
             <div
-              ref={listsWrapRef}
-              className={styles.listsWrap}
-              style={{ cursor: isListsResizing ? "row-resize" : undefined }}
+              ref={splitContainerRef}
+              className={styles.split}
+              style={{ cursor: isResizing ? "col-resize" : undefined }}
             >
               <div
-                className={styles.listsWrapPicking}
-                style={{ height: `${listsPickingHeightPct}%` }}
+                className={`${styles.pane} ${styles.paneLeft}`}
+                style={{ width: `${leftPaneWidthPct}%` }}
               >
-                <div className={styles.listCard}>
-                  <div className={styles.listHeader}>
-                    <strong>Picking ({filteredPickingUnits.length})</strong>
-                  <input
-                    className={styles.input}
-                    style={{ maxWidth: 220 }}
-                    value={searchPicking}
-                    onChange={(event) => setSearchPicking(event.target.value)}
-                    placeholder="Поиск по barcode/cell/scenario"
-                  />
-                </div>
-                {availablePickingCells.length > 0 ? (
-                  <div className={styles.actions} style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
-                    <span className={styles.hint} style={{ marginRight: 8 }}>Ячейки:</span>
-                    {availablePickingCells.map(({ key, label }) => (
-                      <label key={key} className={styles.legend} style={{ marginRight: 12 }}>
-                        <input
-                          type="checkbox"
-                          checked={
-                            pickingCellFilter.size === 0 ? true : pickingCellFilter.has(key)
-                          }
-                          onChange={() => togglePickingCellFilter(key)}
-                          style={{ marginRight: 6 }}
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-                <div className={styles.listBody}>
-                  {loading && !dashboard ? (
-                    <div className={styles.empty}>Загрузка picking...</div>
-                  ) : filteredPickingUnits.length === 0 ? (
-                    <div className={styles.empty}>Нет заказов в picking</div>
-                  ) : (
-                    filteredPickingUnits.map((unit) => {
-                      const isSelected = selectedPickingUnitIds.has(unit.id);
-                      const cellDescription = unit.cell?.meta?.description
-                        ? ` (${unit.cell.meta.description})`
-                        : "";
-                      return (
-                        <div
-                          key={unit.id}
-                          className={`${styles.unitRow} ${
-                            isSelected ? styles.unitRowSelected : ""
-                          }`}
+                <div className={styles.paneInner}>
+                  <h2 className={styles.sectionTitle}>Заказы и назначения</h2>
+
+                  <div className={styles.assignPanel}>
+                    <div className={styles.row}>
+                      <div className={styles.field}>
+                        <label
+                          className={styles.label}
+                          htmlFor="routeplanning-courier"
                         >
-                          <div className={styles.unitTop}>
-                            {canEdit ? (
-                              <input
-                                className={styles.checkbox}
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => togglePickingUnit(unit.id)}
-                              />
-                            ) : null}
-                            <div className={styles.unitMain}>
-                              <div className={styles.unitBarcode}>#{unit.barcode || unit.id}</div>
-                              <div className={styles.unitMeta}>
-                                Ячейка: {unit.cell?.code || "—"}
-                                {cellDescription} • {formatDate(unit.created_at)}
-                              </div>
-                              {unit.scenario ? (
-                                <span className={`${styles.chip} ${styles.chipScenario}`}>
-                                  {unit.scenario}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
+                          Курьер на смене
+                        </label>
+                        <select
+                          id="routeplanning-courier"
+                          className={styles.select}
+                          value={selectedCourierUserId}
+                          onChange={(event) =>
+                            setSelectedCourierUserId(event.target.value)
+                          }
+                          disabled={!canEdit || assigning || loading}
+                        >
+                          <option value="">Выберите курьера</option>
+                          {assignableCouriers.map((courier) => (
+                            <option key={courier.id} value={courier.id}>
+                              {courier.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className={styles.field}>
+                        <label className={styles.label}>Выбранный курьер</label>
+                        <div className={styles.input}>
+                          {selectedCourier?.full_name || "Курьер не выбран"}
                         </div>
-                      );
-                    })
-                  )}
-                </div>
+                      </div>
+                    </div>
+
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.primaryButton}
+                        onClick={() => void assignSelectedUnits("picking")}
+                        disabled={
+                          !canEdit ||
+                          assigning ||
+                          selectedPickingUnitIds.size === 0 ||
+                          !selectedCourierUserId
+                        }
+                      >
+                        {assigning
+                          ? "Отправка..."
+                          : `Передать из picking (${selectedPickingUnitIds.size})`}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.primaryButton}
+                        onClick={() => void assignSelectedUnits("dropped")}
+                        disabled={
+                          !canEdit ||
+                          assigning ||
+                          selectedDroppedUnitIds.size === 0 ||
+                          !selectedCourierUserId
+                        }
+                      >
+                        {assigning
+                          ? "Отправка..."
+                          : `Передать из точек (${selectedDroppedUnitIds.size})`}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={clearSelection}
+                        disabled={!canEdit || assigning}
+                      >
+                        Сбросить выбор
+                      </button>
+                      <span className={styles.hint}>
+                        {canEdit
+                          ? "Назначение доступно только logistics/admin и только курьерам с открытой сменой."
+                          : "Режим чтения: без изменения назначений."}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    ref={listsWrapRef}
+                    className={styles.listsWrap}
+                    style={{
+                      cursor: isListsResizing ? "row-resize" : undefined,
+                    }}
+                  >
+                    <div
+                      className={styles.listsWrapPicking}
+                      style={{ height: `${listsPickingHeightPct}%` }}
+                    >
+                      <div className={styles.listCard}>
+                        <div className={styles.listHeader}>
+                          <strong>
+                            Picking ({filteredPickingUnits.length})
+                          </strong>
+                          <input
+                            className={styles.input}
+                            style={{ maxWidth: 220 }}
+                            value={searchPicking}
+                            onChange={(event) =>
+                              setSearchPicking(event.target.value)
+                            }
+                            placeholder="Поиск по barcode/cell/scenario"
+                          />
+                        </div>
+                        {availablePickingCells.length > 0 ? (
+                          <div
+                            className={styles.actions}
+                            style={{
+                              padding: "8px 10px",
+                              borderBottom: "1px solid #e5e7eb",
+                            }}
+                          >
+                            <span
+                              className={styles.hint}
+                              style={{ marginRight: 8 }}
+                            >
+                              Ячейки:
+                            </span>
+                            {availablePickingCells.map(({ key, label }) => (
+                              <label
+                                key={key}
+                                className={styles.legend}
+                                style={{ marginRight: 12 }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    pickingCellFilter.size === 0
+                                      ? true
+                                      : pickingCellFilter.has(key)
+                                  }
+                                  onChange={() => togglePickingCellFilter(key)}
+                                  style={{ marginRight: 6 }}
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className={styles.listBody}>
+                          {loading && !dashboard ? (
+                            <div className={styles.empty}>
+                              Загрузка picking...
+                            </div>
+                          ) : filteredPickingUnits.length === 0 ? (
+                            <div className={styles.empty}>
+                              Нет заказов в picking
+                            </div>
+                          ) : (
+                            filteredPickingUnits.map((unit) => {
+                              const isSelected = selectedPickingUnitIds.has(
+                                unit.id,
+                              );
+                              const cellDescription = unit.cell?.meta
+                                ?.description
+                                ? ` (${unit.cell.meta.description})`
+                                : "";
+                              return (
+                                <div
+                                  key={unit.id}
+                                  className={`${styles.unitRow} ${
+                                    isSelected ? styles.unitRowSelected : ""
+                                  }`}
+                                >
+                                  <div className={styles.unitTop}>
+                                    {canEdit ? (
+                                      <input
+                                        className={styles.checkbox}
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() =>
+                                          togglePickingUnit(unit.id)
+                                        }
+                                      />
+                                    ) : null}
+                                    <div className={styles.unitMain}>
+                                      <div className={styles.unitBarcode}>
+                                        #{unit.barcode || unit.id}
+                                      </div>
+                                      <div className={styles.unitMeta}>
+                                        Ячейка: {unit.cell?.code || "—"}
+                                        {cellDescription} •{" "}
+                                        {formatDate(unit.created_at)}
+                                      </div>
+                                      {unit.scenario ? (
+                                        <span
+                                          className={`${styles.chip} ${styles.chipScenario}`}
+                                        >
+                                          {unit.scenario}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`${styles.listsWrapResizer} ${isListsResizing ? styles.listsWrapResizerDragging : ""}`}
+                      onMouseDown={handleListsResizeStart}
+                      role="separator"
+                      aria-label="Изменить высоту карточек"
+                    />
+
+                    <div className={styles.listsWrapDropped}>
+                      <div className={styles.listCard}>
+                        <div className={styles.listHeader}>
+                          <strong>
+                            Dropped ({filteredDroppedUnits.length})
+                          </strong>
+                          <input
+                            className={styles.input}
+                            style={{ maxWidth: 220 }}
+                            value={searchDropped}
+                            onChange={(event) =>
+                              setSearchDropped(event.target.value)
+                            }
+                            placeholder="Поиск по barcode/courier/ops"
+                          />
+                        </div>
+                        <div
+                          className={styles.actions}
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          <div style={{ marginBottom: 6 }}>
+                            {availableDroppedColors.length === 0 ? (
+                              <span className={styles.hint}>
+                                Нет цветных точек для фильтра
+                              </span>
+                            ) : (
+                              availableDroppedColors.map((color) => (
+                                <label
+                                  key={color}
+                                  className={styles.legend}
+                                  style={{ marginRight: 12 }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={droppedColorFilter.has(color)}
+                                    onChange={() =>
+                                      toggleDroppedColorFilter(color)
+                                    }
+                                    style={{ marginRight: 6 }}
+                                  />
+                                  {DROP_COLOR_LABEL[color]}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                          {availableDroppedZones.length > 0 ? (
+                            <div>
+                              <span
+                                className={styles.hint}
+                                style={{ marginRight: 8 }}
+                              >
+                                Зоны:
+                              </span>
+                              {availableDroppedZones.map(({ key, label }) => (
+                                <label
+                                  key={key}
+                                  className={styles.legend}
+                                  style={{ marginRight: 12 }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      droppedZoneFilter.size === 0
+                                        ? true
+                                        : droppedZoneFilter.has(key)
+                                    }
+                                    onChange={() =>
+                                      toggleDroppedZoneFilter(key)
+                                    }
+                                    style={{ marginRight: 6 }}
+                                  />
+                                  {label}
+                                </label>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className={styles.listBody}>
+                          {loading && !dashboard ? (
+                            <div className={styles.empty}>
+                              Загрузка dropped...
+                            </div>
+                          ) : filteredDroppedUnits.length === 0 ? (
+                            <div className={styles.empty}>
+                              Нет данных о дропах
+                            </div>
+                          ) : (
+                            filteredDroppedUnits.map((unit) => {
+                              const isSelected = selectedDroppedUnitIds.has(
+                                unit.unit_id,
+                              );
+                              return (
+                                <div
+                                  key={`${unit.unit_id}-${unit.dropped_at}`}
+                                  className={`${styles.unitRow} ${isSelected ? styles.unitRowSelected : ""}`}
+                                >
+                                  <div className={styles.unitTop}>
+                                    {canEdit ? (
+                                      <input
+                                        className={styles.checkbox}
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() =>
+                                          toggleDroppedUnit(unit.unit_id)
+                                        }
+                                      />
+                                    ) : null}
+                                    <div className={styles.unitMain}>
+                                      <div className={styles.unitBarcode}>
+                                        #{unit.unit_barcode || unit.unit_id}
+                                      </div>
+                                      <div className={styles.unitMeta}>
+                                        Курьер: {unit.courier_name} •{" "}
+                                        {formatDate(unit.dropped_at)}
+                                      </div>
+                                      <div className={styles.unitMeta}>
+                                        OPS: {unit.ops_status || "—"} • Статус:{" "}
+                                        {unit.current_status || "—"}
+                                      </div>
+                                      <span
+                                        className={styles.chip}
+                                        style={{
+                                          background: unit.color_hex,
+                                          color: "#ffffff",
+                                          width: "fit-content",
+                                        }}
+                                      >
+                                        Цвет: {DROP_COLOR_LABEL[unit.color_key]}
+                                      </span>
+                                      {unit.note ? (
+                                        <span className={styles.chip}>
+                                          {unit.note}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div
-                className={`${styles.listsWrapResizer} ${isListsResizing ? styles.listsWrapResizerDragging : ""}`}
-                onMouseDown={handleListsResizeStart}
+                className={`${styles.splitResizer} ${isResizing ? styles.splitResizerDragging : ""}`}
+                onMouseDown={handleResizeStart}
                 role="separator"
-                aria-label="Изменить высоту карточек"
+                aria-label="Изменить размер панелей"
               />
 
-              <div className={styles.listsWrapDropped}>
-                <div className={styles.listCard}>
-                  <div className={styles.listHeader}>
-                    <strong>Dropped ({filteredDroppedUnits.length})</strong>
-                  <input
-                    className={styles.input}
-                    style={{ maxWidth: 220 }}
-                    value={searchDropped}
-                    onChange={(event) => setSearchDropped(event.target.value)}
-                    placeholder="Поиск по barcode/courier/ops"
-                  />
-                </div>
-                <div className={styles.actions} style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
-                  <div style={{ marginBottom: 6 }}>
-                    {availableDroppedColors.length === 0 ? (
-                      <span className={styles.hint}>Нет цветных точек для фильтра</span>
-                    ) : (
-                      availableDroppedColors.map((color) => (
-                        <label key={color} className={styles.legend} style={{ marginRight: 12 }}>
-                          <input
-                            type="checkbox"
-                            checked={droppedColorFilter.has(color)}
-                            onChange={() => toggleDroppedColorFilter(color)}
-                            style={{ marginRight: 6 }}
-                          />
-                          {DROP_COLOR_LABEL[color]}
-                        </label>
-                      ))
-                    )}
+              <div className={`${styles.pane} ${styles.paneRight}`}>
+                <div className={styles.paneInner}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
+                  >
+                    <h2 className={styles.sectionTitle}>
+                      Карта маршрутов и дропов
+                    </h2>
+                    <a
+                      href="/routeplanning/fullscreen"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Открыть во весь экран"
+                      aria-label="Открыть во весь экран"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 8,
+                        border: "1px solid #94a3b8",
+                        background: "#f8fafc",
+                        color: "#64748b",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        textDecoration: "none",
+                      }}
+                    >
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                      </svg>
+                    </a>
                   </div>
-                  {availableDroppedZones.length > 0 ? (
-                    <div>
-                      <span className={styles.hint} style={{ marginRight: 8 }}>Зоны:</span>
-                      {availableDroppedZones.map(({ key, label }) => (
-                        <label key={key} className={styles.legend} style={{ marginRight: 12 }}>
-                          <input
-                            type="checkbox"
-                            checked={
-                              droppedZoneFilter.size === 0 ? true : droppedZoneFilter.has(key)
-                            }
-                            onChange={() => toggleDroppedZoneFilter(key)}
-                            style={{ marginRight: 6 }}
-                          />
-                          {label}
-                        </label>
-                      ))}
+                  <RoutePlanningMap
+                    apiKey={mapsApiKey}
+                    zones={dashboard?.zones || []}
+                    dropPoints={filteredDropPoints}
+                    liveCouriers={dashboard?.live_couriers || []}
+                    showCouriers={showCouriersOnMap}
+                    colorFilter={droppedColorFilter}
+                    onColorFilterChange={toggleDroppedColorFilter}
+                    onShowCouriersChange={setShowCouriersOnMap}
+                    availableColors={DROP_COLOR_ORDER}
+                  />
+                  <div className={styles.hint}>
+                    Обновление данных: каждые 15 секунд. Показаны точки дропа и
+                    последние live-координаты открытых смен.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className={`${styles.mainCouriersResizer} ${isMainCouriersResizing ? styles.mainCouriersResizerDragging : ""}`}
+            onMouseDown={handleMainCouriersResizeStart}
+            role="separator"
+            aria-label="Изменить высоту верхней и нижней области"
+          />
+
+          <div
+            className={styles.couriersStripArea}
+            style={{ height: mainHeights.couriersStripPx }}
+          >
+            <div className={styles.couriersStrip}>
+              <div className={styles.couriersStripHeader}>
+                <h3 className={styles.couriersStripTitle}>
+                  Курьеры сейчас в доставке (
+                  {dashboard?.live_couriers.length || 0})
+                </h3>
+                <div className={styles.couriersStripActions}>
+                  <span className={styles.couriersStripHint}>
+                    Цельная плашка: сводка по активным сменам и последнему
+                    live-пингу
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => setCourierInsightsOpen(true)}
+                  >
+                    Все курьеры и архив
+                  </button>
+                </div>
+              </div>
+              <div className={styles.couriersGrid}>
+                {(dashboard?.live_couriers || []).length === 0 ? (
+                  <div className={styles.empty}>
+                    Сейчас нет активных курьеров в доставке.
+                  </div>
+                ) : (
+                  (dashboard?.live_couriers || []).map((courier) => (
+                    <div key={courier.shift_id} className={styles.courierCard}>
+                      <div className={styles.courierName}>
+                        {courier.courier_name}
+                      </div>
+                      <div className={styles.courierMeta}>
+                        Статус смены: {courier.status} • Задач:{" "}
+                        {courier.active_tasks}
+                      </div>
+                      <div className={styles.courierMeta}>
+                        Старт: {formatDate(courier.started_at)}
+                      </div>
+                      <div className={styles.courierMeta}>
+                        Последний live:{" "}
+                        {courier.last_location?.recorded_at
+                          ? formatDate(courier.last_location.recorded_at)
+                          : "нет координат"}
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-                <div className={styles.listBody}>
-                  {loading && !dashboard ? (
-                    <div className={styles.empty}>Загрузка dropped...</div>
-                  ) : filteredDroppedUnits.length === 0 ? (
-                    <div className={styles.empty}>Нет данных о дропах</div>
-                  ) : (
-                    filteredDroppedUnits.map((unit) => {
-                      const isSelected = selectedDroppedUnitIds.has(unit.unit_id);
-                      return (
-                        <div
-                          key={`${unit.unit_id}-${unit.dropped_at}`}
-                          className={`${styles.unitRow} ${isSelected ? styles.unitRowSelected : ""}`}
-                        >
-                          <div className={styles.unitTop}>
-                            {canEdit ? (
-                              <input
-                                className={styles.checkbox}
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => toggleDroppedUnit(unit.unit_id)}
-                              />
-                            ) : null}
-                            <div className={styles.unitMain}>
-                              <div className={styles.unitBarcode}>#{unit.unit_barcode || unit.unit_id}</div>
-                              <div className={styles.unitMeta}>
-                                Курьер: {unit.courier_name} • {formatDate(unit.dropped_at)}
-                              </div>
-                              <div className={styles.unitMeta}>
-                                OPS: {unit.ops_status || "—"} • Статус: {unit.current_status || "—"}
-                              </div>
-                              <span
-                                className={styles.chip}
-                                style={{
-                                  background: unit.color_hex,
-                                  color: "#ffffff",
-                                  width: "fit-content",
-                                }}
-                              >
-                                Цвет: {DROP_COLOR_LABEL[unit.color_key]}
-                              </span>
-                              {unit.note ? <span className={styles.chip}>{unit.note}</span> : null}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-                </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
-        </div>
-
-        <div
-          className={`${styles.splitResizer} ${isResizing ? styles.splitResizerDragging : ""}`}
-          onMouseDown={handleResizeStart}
-          role="separator"
-          aria-label="Изменить размер панелей"
-        />
-
-        <div className={`${styles.pane} ${styles.paneRight}`}>
-          <div className={styles.paneInner}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <h2 className={styles.sectionTitle}>Карта маршрутов и дропов</h2>
-              <a
-                href="/routeplanning/fullscreen"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Открыть во весь экран"
-                aria-label="Открыть во весь экран"
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 8,
-                  border: "1px solid #94a3b8",
-                  background: "#f8fafc",
-                  color: "#64748b",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  textDecoration: "none",
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-                </svg>
-              </a>
-            </div>
-            <RoutePlanningMap
-              apiKey={mapsApiKey}
-              zones={dashboard?.zones || []}
-              dropPoints={filteredDropPoints}
-              liveCouriers={dashboard?.live_couriers || []}
-              showCouriers={showCouriersOnMap}
-              colorFilter={droppedColorFilter}
-              onColorFilterChange={toggleDroppedColorFilter}
-              onShowCouriersChange={setShowCouriersOnMap}
-              availableColors={DROP_COLOR_ORDER}
-            />
-            <div className={styles.hint}>
-              Обновление данных: каждые 15 секунд. Показаны точки дропа и последние live-координаты
-              открытых смен.
-            </div>
-          </div>
-        </div>
-      </div>
-        </div>
-
-        <div
-          className={`${styles.mainCouriersResizer} ${isMainCouriersResizing ? styles.mainCouriersResizerDragging : ""}`}
-          onMouseDown={handleMainCouriersResizeStart}
-          role="separator"
-          aria-label="Изменить высоту верхней и нижней области"
-        />
-
-        <div
-          className={styles.couriersStripArea}
-          style={{ height: mainHeights.couriersStripPx }}
-        >
-      <div className={styles.couriersStrip}>
-        <div className={styles.couriersStripHeader}>
-          <h3 className={styles.couriersStripTitle}>
-            Курьеры сейчас в доставке ({dashboard?.live_couriers.length || 0})
-          </h3>
-          <div className={styles.couriersStripActions}>
-            <span className={styles.couriersStripHint}>
-              Цельная плашка: сводка по активным сменам и последнему live-пингу
-            </span>
-            <button
-              type="button"
-              className={styles.secondaryButton}
-              onClick={() => setCourierInsightsOpen(true)}
-            >
-              Все курьеры и архив
-            </button>
-          </div>
-        </div>
-        <div className={styles.couriersGrid}>
-          {(dashboard?.live_couriers || []).length === 0 ? (
-            <div className={styles.empty}>Сейчас нет активных курьеров в доставке.</div>
-          ) : (
-            (dashboard?.live_couriers || []).map((courier) => (
-              <div key={courier.shift_id} className={styles.courierCard}>
-                <div className={styles.courierName}>{courier.courier_name}</div>
-                <div className={styles.courierMeta}>
-                  Статус смены: {courier.status} • Задач: {courier.active_tasks}
-                </div>
-                <div className={styles.courierMeta}>
-                  Старт: {formatDate(courier.started_at)}
-                </div>
-                <div className={styles.courierMeta}>
-                  Последний live:{" "}
-                  {courier.last_location?.recorded_at
-                    ? formatDate(courier.last_location.recorded_at)
-                    : "нет координат"}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-        </div>
         </div>
       </div>
 
@@ -3919,14 +4656,23 @@ export default function RoutePlanningClient({
               </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                Важно: не все OPS-статусы создают точку дропа. Для статусов
-                {" "}<strong>«Партнер не принял на возврат»</strong>,
-                {" "}<strong>«Клиент не принял»</strong>,
-                {" "}<strong>«Перенос»</strong> и <strong>«В работе»</strong>
-                {" "}точка не создается, заказ остается у курьера.
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 13,
+                  color: "#475569",
+                  lineHeight: 1.5,
+                }}
+              >
+                Важно: не все OPS-статусы создают точку дропа. Для статусов{" "}
+                <strong>«Партнер не принял на возврат»</strong>,{" "}
+                <strong>«Клиент не принял»</strong>, <strong>«Перенос»</strong>{" "}
+                и <strong>«В работе»</strong> точка не создается, заказ остается
+                у курьера.
               </p>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -3939,12 +4685,22 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Фиолетовый</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Партнер принял на возврат. Заказ передан партнеру и уходит из рук курьера.
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Партнер принял на возврат. Заказ передан партнеру и уходит
+                    из рук курьера.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -3957,12 +4713,21 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Жёлтый</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
                     Передан в СЦ. Заказ дропнут и передан в сервисный центр.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -3975,12 +4740,21 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Серый</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
                     Клиент принял. Финальная успешная выдача клиенту.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -3993,12 +4767,21 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Чёрный</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
                     Товар доставлен на ПУДО. Заказ дропнут в точке выдачи.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -4011,12 +4794,22 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Красный</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Проблемные/исключительные дропы и старые данные, требующие внимания OPS.
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Проблемные/исключительные дропы и старые данные, требующие
+                    внимания OPS.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -4029,13 +4822,22 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Зелёный</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Брак не выявлен. Заказ нужно забрать с сервисного центра и отвезти на склад.
-                    Добавляется OPS после жёлтого.
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Брак не выявлен. Заказ нужно забрать с сервисного центра и
+                    отвезти на склад. Добавляется OPS после жёлтого.
                   </p>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div
+                style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+              >
                 <span
                   style={{
                     width: 14,
@@ -4048,9 +4850,16 @@ export default function RoutePlanningClient({
                 />
                 <div>
                   <strong>Синий</strong>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "#475569", lineHeight: 1.5 }}>
-                    Если брак выявлен. Добавляется OPS вручную после жёлтого (функционал добавления
-                    — позже).
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 13,
+                      color: "#475569",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Если брак выявлен. Добавляется OPS вручную после жёлтого
+                    (функционал добавления — позже).
                   </p>
                 </div>
               </div>

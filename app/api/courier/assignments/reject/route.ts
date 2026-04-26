@@ -4,7 +4,9 @@ import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
 import { COURIER_ALLOWED_ROLES } from "@/app/api/courier/_shared/state";
 
 export async function POST(req: Request) {
-  const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
+  const auth = await requireCourierAuth(req, {
+    allowedRoles: [...COURIER_ALLOWED_ROLES],
+  });
   if (!auth.ok) return auth.response;
 
   const body = await req.json().catch(() => ({}));
@@ -13,10 +15,16 @@ export async function POST(req: Request) {
     : [];
   const note = body?.note?.toString().trim();
   if (shipmentIds.length === 0) {
-    return NextResponse.json({ error: "shipmentIds are required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "shipmentIds are required" },
+      { status: 400 },
+    );
   }
   if (!note) {
-    return NextResponse.json({ error: "note is required for reject" }, { status: 400 });
+    return NextResponse.json(
+      { error: "note is required for reject" },
+      { status: 400 },
+    );
   }
 
   const { data: shipments, error: shipmentsError } = await supabaseAdmin
@@ -26,14 +34,21 @@ export async function POST(req: Request) {
     .in("id", shipmentIds);
 
   if (shipmentsError) {
-    return NextResponse.json({ error: shipmentsError.message }, { status: 500 });
+    return NextResponse.json(
+      { error: shipmentsError.message },
+      { status: 500 },
+    );
   }
 
   const eligible = (shipments || []).filter(
-    (shipment) => shipment.status === "out" && shipment.courier_user_id === auth.user.id,
+    (shipment) =>
+      shipment.status === "out" && shipment.courier_user_id === auth.user.id,
   );
   if (eligible.length === 0) {
-    return NextResponse.json({ error: "No eligible shipments found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "No eligible shipments found" },
+      { status: 404 },
+    );
   }
 
   const now = new Date().toISOString();
@@ -75,11 +90,16 @@ export async function POST(req: Request) {
       .eq("unit_id", shipment.unit_id)
       .not("status", "in", "(delivered,failed,returned,canceled)");
     if (taskFetchError) {
-      return NextResponse.json({ error: taskFetchError.message }, { status: 500 });
+      return NextResponse.json(
+        { error: taskFetchError.message },
+        { status: 500 },
+      );
     }
     for (const task of courierTasks || []) {
       const taskMeta =
-        task.meta && typeof task.meta === "object" ? (task.meta as Record<string, unknown>) : {};
+        task.meta && typeof task.meta === "object"
+          ? (task.meta as Record<string, unknown>)
+          : {};
       const { error: taskUpdateError } = await supabaseAdmin
         .from("courier_tasks")
         .update({
@@ -96,7 +116,10 @@ export async function POST(req: Request) {
         .eq("id", task.id)
         .eq("warehouse_id", auth.profile.warehouse_id);
       if (taskUpdateError) {
-        return NextResponse.json({ error: taskUpdateError.message }, { status: 500 });
+        return NextResponse.json(
+          { error: taskUpdateError.message },
+          { status: 500 },
+        );
       }
     }
 
@@ -109,7 +132,7 @@ export async function POST(req: Request) {
       .eq("warehouse_id", auth.profile.warehouse_id)
       .single();
 
-    await supabaseAdmin.rpc("audit_log_event", {
+    const { error: auditError } = await supabaseAdmin.rpc("audit_log_event", {
       p_action: "courier.pickup_rejected",
       p_entity_type: "unit",
       p_entity_id: shipment.unit_id,
@@ -123,6 +146,7 @@ export async function POST(req: Request) {
         reject_note: note,
       },
     });
+    if (auditError) console.error(auditError.message);
   }
 
   return NextResponse.json({ ok: true, rejected: rejectedIds });

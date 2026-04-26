@@ -25,10 +25,31 @@ class ShiftPage extends StatelessWidget {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(tr(context.t('shift.current.id'), {'id': controller.currentShift!.id})),
-                    Text(tr(context.t('shift.current.status'), {'status': _shiftStatusLabel(context, controller.currentShift!.status)})),
-                    Text(tr(context.t('shift.current.started'), {'dt': formatter.format(controller.currentShift!.startedAt.toLocal())})),
-                    Text(tr(context.t('shift.current.active_tasks'), {'count': controller.currentShift!.activeTasks})),
+                    Text(
+                      tr(context.t('shift.current.id'), {
+                        'id': controller.currentShift!.id,
+                      }),
+                    ),
+                    Text(
+                      tr(context.t('shift.current.status'), {
+                        'status': _shiftStatusLabel(
+                          context,
+                          controller.currentShift!.status,
+                        ),
+                      }),
+                    ),
+                    Text(
+                      tr(context.t('shift.current.started'), {
+                        'dt': formatter.format(
+                          controller.currentShift!.startedAt.toLocal(),
+                        ),
+                      }),
+                    ),
+                    Text(
+                      tr(context.t('shift.current.active_tasks'), {
+                        'count': controller.tasks.length,
+                      }),
+                    ),
                   ],
                 ),
         ),
@@ -36,10 +57,18 @@ class ShiftPage extends StatelessWidget {
           title: context.t('shift.summary.title'),
           child: Column(
             children: [
-              _MetricTile(label: context.t('shift.metric.assigned'), value: summary.totalAssigned),
-              _MetricTile(label: context.t('shift.metric.in_route'), value: summary.inRoute),
-              _MetricTile(label: context.t('shift.metric.delivered'), value: summary.delivered),
-              _MetricTile(label: context.t('shift.metric.problematic'), value: summary.problematic),
+              _MetricTile(
+                label: context.t('shift.metric.assigned'),
+                value: summary.totalAssigned,
+              ),
+              _MetricTile(
+                label: context.t('shift.metric.delivered'),
+                value: summary.delivered,
+              ),
+              _MetricTile(
+                label: context.t('shift.metric.problematic'),
+                value: summary.problematic,
+              ),
             ],
           ),
         ),
@@ -59,56 +88,89 @@ class ShiftPage extends StatelessWidget {
                 builder: (context) {
                   final isClosed = controller.currentShift?.status == 'closed';
                   return FilledButton.icon(
-                    onPressed: isClosed ? null : () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: Text(context.t('shift.close.confirm_title')),
-                          content: Text(context.t('shift.close.confirm_body')),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(false),
-                              child: Text(context.t('common.cancel')),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.of(ctx).pop(true),
-                              child: Text(context.t('shift.close.confirm_yes')),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirm != true || !context.mounted) return;
-                      debugPrint('[ShiftPage] closeShift: sending request');
-                      try {
-                        await controller.closeShift(force: false, note: 'Обычное закрытие из мобильного');
-                        debugPrint('[ShiftPage] closeShift: success');
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(context.t('shift.closed_snack'))),
-                        );
-                      } on ApiException catch (e) {
-                        debugPrint('[ShiftPage] closeShift error: ${e.statusCode} ${e.message}');
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(e.message),
-                            backgroundColor: Theme.of(context).colorScheme.error,
-                          ),
-                        );
-                      } catch (e, st) {
-                        debugPrint('[ShiftPage] closeShift unexpected error: $e');
-                        debugPrint(st.toString());
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Ошибка: ${e.toString()}'),
-                            backgroundColor: Theme.of(context).colorScheme.error,
-                          ),
-                        );
-                      }
-                    },
-                    icon: Icon(isClosed ? Icons.check_circle : Icons.lock_clock),
-                    label: Text(isClosed ? context.t('shift.already_closed') : context.t('shift.close.action')),
+                    onPressed: isClosed
+                        ? null
+                        : () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: Text(
+                                  context.t('shift.close.confirm_title'),
+                                ),
+                                content: Text(
+                                  context.t('shift.close.confirm_body'),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(ctx).pop(false),
+                                    child: Text(context.t('common.cancel')),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () =>
+                                        Navigator.of(ctx).pop(true),
+                                    child: Text(
+                                      context.t('shift.close.confirm_yes'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm != true || !context.mounted) return;
+                            debugPrint(
+                              '[ShiftPage] closeShift: sending request',
+                            );
+                            try {
+                              await controller.closeShift(
+                                force: false,
+                                note: 'Обычное закрытие из мобильного',
+                              );
+                              debugPrint('[ShiftPage] closeShift: success');
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    context.t('shift.closed_snack'),
+                                  ),
+                                ),
+                              );
+                            } on ApiException catch (e) {
+                              debugPrint(
+                                '[ShiftPage] closeShift error: ${e.statusCode} ${e.message}',
+                              );
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(e.message),
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).colorScheme.error,
+                                ),
+                              );
+                            } catch (e, st) {
+                              debugPrint(
+                                '[ShiftPage] closeShift unexpected error: $e',
+                              );
+                              debugPrint(st.toString());
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Ошибка: ${e.toString()}'),
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).colorScheme.error,
+                                ),
+                              );
+                            }
+                          },
+                    icon: Icon(
+                      isClosed ? Icons.check_circle : Icons.lock_clock,
+                    ),
+                    label: Text(
+                      isClosed
+                          ? context.t('shift.already_closed')
+                          : context.t('shift.close.action'),
+                    ),
                   );
                 },
               ),

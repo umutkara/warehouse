@@ -11,9 +11,12 @@ function resolveExistingScenario(
   scenarioFromPicking: string | null,
 ): string | null {
   const fromShipment =
-    (typeof shipmentMeta?.scenario === "string" && shipmentMeta.scenario.trim()) ||
-    (typeof shipmentMeta?.ops_scenario === "string" && shipmentMeta.ops_scenario.trim()) ||
-    (typeof shipmentMeta?.picking_scenario === "string" && shipmentMeta.picking_scenario.trim());
+    (typeof shipmentMeta?.scenario === "string" &&
+      shipmentMeta.scenario.trim()) ||
+    (typeof shipmentMeta?.ops_scenario === "string" &&
+      shipmentMeta.ops_scenario.trim()) ||
+    (typeof shipmentMeta?.picking_scenario === "string" &&
+      shipmentMeta.picking_scenario.trim());
   if (fromShipment) return fromShipment.trim();
   const fromUnit =
     typeof unitMeta?.ops_scenario === "string" && unitMeta.ops_scenario.trim()
@@ -25,22 +28,20 @@ function resolveExistingScenario(
 }
 
 export async function POST(req: Request) {
-  const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
+  const auth = await requireCourierAuth(req, {
+    allowedRoles: [...COURIER_ALLOWED_ROLES],
+  });
   if (!auth.ok) return auth.response;
 
   const body = await req.json().catch(() => ({}));
   const barcode = body?.barcode?.toString().trim();
   const note = body?.note?.toString() || null;
   const giverSignature =
-    typeof body?.giver_signature === "string" ? body.giver_signature.trim() || null : null;
+    typeof body?.giver_signature === "string"
+      ? body.giver_signature.trim() || null
+      : null;
   if (!barcode) {
     return NextResponse.json({ error: "barcode is required" }, { status: 400 });
-  }
-  if (!giverSignature) {
-    return NextResponse.json(
-      { error: "giver_signature is required for pickup confirmation" },
-      { status: 400 },
-    );
   }
 
   const { data: unit, error: unitError } = await supabaseAdmin
@@ -49,9 +50,13 @@ export async function POST(req: Request) {
     .eq("warehouse_id", auth.profile.warehouse_id)
     .eq("barcode", barcode)
     .maybeSingle();
-  if (unitError) return NextResponse.json({ error: unitError.message }, { status: 500 });
+  if (unitError)
+    return NextResponse.json({ error: unitError.message }, { status: 500 });
   if (!unit) {
-    return NextResponse.json({ error: "Unit not found by barcode" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Unit not found by barcode" },
+      { status: 404 },
+    );
   }
 
   const { data: shipment, error: shipmentError } = await supabaseAdmin
@@ -64,9 +69,13 @@ export async function POST(req: Request) {
     .order("out_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (shipmentError) return NextResponse.json({ error: shipmentError.message }, { status: 500 });
+  if (shipmentError)
+    return NextResponse.json({ error: shipmentError.message }, { status: 500 });
   if (!shipment) {
-    return NextResponse.json({ error: "No pending assignment found for this barcode" }, { status: 404 });
+    return NextResponse.json(
+      { error: "No pending assignment found for this barcode" },
+      { status: 404 },
+    );
   }
 
   let scenarioFromPicking: string | null = null;
@@ -74,7 +83,9 @@ export async function POST(req: Request) {
     .from("picking_task_units")
     .select("unit_id, picking_task_id")
     .eq("unit_id", shipment.unit_id);
-  const taskIds = [...new Set((taskUnits || []).map((r) => r.picking_task_id).filter(Boolean))];
+  const taskIds = [
+    ...new Set((taskUnits || []).map((r) => r.picking_task_id).filter(Boolean)),
+  ];
   if (taskIds.length > 0) {
     const { data: tasks } = await supabaseAdmin
       .from("picking_tasks")
@@ -99,7 +110,8 @@ export async function POST(req: Request) {
       .not("scenario", "is", null)
       .limit(1)
       .maybeSingle();
-    if (legacyTask?.scenario?.trim()) scenarioFromPicking = legacyTask.scenario.trim();
+    if (legacyTask?.scenario?.trim())
+      scenarioFromPicking = legacyTask.scenario.trim();
   }
 
   const now = new Date().toISOString();
@@ -107,14 +119,23 @@ export async function POST(req: Request) {
     shipment.meta && typeof shipment.meta === "object"
       ? (shipment.meta as Record<string, any>)
       : {};
-  const unitMeta = (unit as any)?.meta && typeof (unit as any).meta === "object" ? (unit as any).meta : {};
-  const existingScenario = resolveExistingScenario(existingMeta, unitMeta, scenarioFromPicking);
+  const unitMeta =
+    (unit as any)?.meta && typeof (unit as any).meta === "object"
+      ? (unit as any).meta
+      : {};
+  const existingScenario = resolveExistingScenario(
+    existingMeta,
+    unitMeta,
+    scenarioFromPicking,
+  );
   const mergedMeta: Record<string, unknown> = {
     ...existingMeta,
     courier_pickup_confirmed_at: now,
     courier_pickup_confirmed_by: auth.user.id,
     courier_pickup_note: note,
-    courier_pickup_giver_signature: giverSignature,
+    ...(giverSignature
+      ? { courier_pickup_giver_signature: giverSignature }
+      : {}),
     courier_pickup_status: "confirmed",
     courier_pickup_rejected_at: null,
     courier_pickup_rejected_by: null,
@@ -132,7 +153,8 @@ export async function POST(req: Request) {
     })
     .eq("id", shipment.id)
     .eq("warehouse_id", auth.profile.warehouse_id);
-  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+  if (updateError)
+    return NextResponse.json({ error: updateError.message }, { status: 500 });
 
   const { data: shift } = await supabaseAdmin
     .from("courier_shifts")
@@ -173,7 +195,7 @@ export async function POST(req: Request) {
           scanned_barcode: barcode,
           pickup_confirmed: true,
           note,
-          giver_signature: giverSignature,
+          ...(giverSignature ? { giver_signature: giverSignature } : {}),
           scenario: taskScenario,
         },
       })
@@ -216,10 +238,11 @@ export async function POST(req: Request) {
       event_type: "claimed",
       happened_at: now,
       note: note || `Pickup confirmed by scan: ${barcode}`,
-        meta: {
-          source: "api.courier.assignments.scan_confirm",
-          giver_signature: giverSignature,
-        },
+      meta: {
+        source: "api.courier.assignments.scan_confirm",
+        confirmed_by_scan: true,
+        ...(giverSignature ? { giver_signature: giverSignature } : {}),
+      },
     });
   }
 
@@ -235,9 +258,15 @@ export async function POST(req: Request) {
       shipment_id: shipment.id,
       unit_barcode: barcode,
       scanned_barcode: barcode,
-      giver_signature_logged: true,
+      giver_signature_logged: Boolean(giverSignature),
+      confirmed_by_scan: true,
     },
   });
 
-  return NextResponse.json({ ok: true, shipment_id: shipment.id, task_id: taskId, barcode });
+  return NextResponse.json({
+    ok: true,
+    shipment_id: shipment.id,
+    task_id: taskId,
+    barcode,
+  });
 }

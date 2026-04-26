@@ -9,7 +9,12 @@ import {
 import { resolveDropColor } from "@/lib/courier/drop-color";
 import { getOperationalPickingUnitsForWarehouse } from "@/lib/logistics/operational-picking-units";
 
-const ACTIVE_COURIER_TASK_STATUSES = ["claimed", "in_route", "arrived", "dropped"] as const;
+const ACTIVE_COURIER_TASK_STATUSES = [
+  "claimed",
+  "in_route",
+  "arrived",
+  "dropped",
+] as const;
 const OPEN_SHIFT_STATUSES = ["open", "closing"] as const;
 const MAX_DROP_EVENTS = 700;
 const TARGET_WAREHOUSE_ZONE_CODE = "geri-qaytarmalar-anbar";
@@ -56,7 +61,12 @@ function dbErrorResponse(message: string) {
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+function clampNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const parsed = toFiniteNumber(value);
   if (parsed === null) return fallback;
   return Math.max(min, Math.min(max, parsed));
@@ -72,14 +82,29 @@ function pointInPolygon(
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const pi = polygon[i];
     const pj = polygon[j];
-    const xi = Array.isArray(pi) ? pi[0] : (pi as { lat?: number; lng?: number }).lng ?? (pi as [number, number])[0];
-    const yi = Array.isArray(pi) ? pi[1] : (pi as { lat?: number; lng?: number }).lat ?? (pi as [number, number])[1];
-    const xj = Array.isArray(pj) ? pj[0] : (pj as { lat?: number; lng?: number }).lng ?? (pj as [number, number])[0];
-    const yj = Array.isArray(pj) ? pj[1] : (pj as { lat?: number; lng?: number }).lat ?? (pj as [number, number])[1];
+    const xi = Array.isArray(pi)
+      ? pi[0]
+      : ((pi as { lat?: number; lng?: number }).lng ??
+        (pi as [number, number])[0]);
+    const yi = Array.isArray(pi)
+      ? pi[1]
+      : ((pi as { lat?: number; lng?: number }).lat ??
+        (pi as [number, number])[1]);
+    const xj = Array.isArray(pj)
+      ? pj[0]
+      : ((pj as { lat?: number; lng?: number }).lng ??
+        (pj as [number, number])[0]);
+    const yj = Array.isArray(pj)
+      ? pj[1]
+      : ((pj as { lat?: number; lng?: number }).lat ??
+        (pj as [number, number])[1]);
     if (xi == null || yi == null || xj == null || yj == null) continue;
     const intersects =
-      (yi > lat) !== (yj > lat) &&
-      lng < ((xj - xi) * (lat - yi)) / (Math.abs(yj - yi) < 1e-12 ? 1e-12 : yj - yi) + xi;
+      yi > lat !== yj > lat &&
+      lng <
+        ((xj - xi) * (lat - yi)) /
+          (Math.abs(yj - yi) < 1e-12 ? 1e-12 : yj - yi) +
+          xi;
     if (intersects) inside = !inside;
   }
   return inside;
@@ -88,13 +113,21 @@ function pointInPolygon(
 function extractZoneStyle(meta: unknown) {
   if (!meta || typeof meta !== "object") return DEFAULT_ZONE_STYLE;
   const record = meta as JsonRecord;
-  const display = record.display && typeof record.display === "object"
-    ? (record.display as JsonRecord)
-    : (record as JsonRecord);
+  const display =
+    record.display && typeof record.display === "object"
+      ? (record.display as JsonRecord)
+      : (record as JsonRecord);
 
-  const strokeColor = asTrimmedString(display.strokeColor) || DEFAULT_ZONE_STYLE.strokeColor;
-  const fillColor = asTrimmedString(display.fillColor) || DEFAULT_ZONE_STYLE.fillColor;
-  const fillOpacity = clampNumber(display.fillOpacity, DEFAULT_ZONE_STYLE.fillOpacity, 0, 1);
+  const strokeColor =
+    asTrimmedString(display.strokeColor) || DEFAULT_ZONE_STYLE.strokeColor;
+  const fillColor =
+    asTrimmedString(display.fillColor) || DEFAULT_ZONE_STYLE.fillColor;
+  const fillOpacity = clampNumber(
+    display.fillOpacity,
+    DEFAULT_ZONE_STYLE.fillOpacity,
+    0,
+    1,
+  );
   const strokeOpacity = clampNumber(
     display.strokeOpacity,
     DEFAULT_ZONE_STYLE.strokeOpacity,
@@ -173,11 +206,15 @@ export async function GET() {
       .in("status", [...ACTIVE_COURIER_TASK_STATUSES]),
   ]);
 
-  if (couriersResult.error) return dbErrorResponse(couriersResult.error.message);
+  if (couriersResult.error)
+    return dbErrorResponse(couriersResult.error.message);
   if (zonesResult.error) return dbErrorResponse(zonesResult.error.message);
-  if (openShiftsResult.error) return dbErrorResponse(openShiftsResult.error.message);
-  if (dropEventsResult.error) return dbErrorResponse(dropEventsResult.error.message);
-  if (activeTaskRowsResult.error) return dbErrorResponse(activeTaskRowsResult.error.message);
+  if (openShiftsResult.error)
+    return dbErrorResponse(openShiftsResult.error.message);
+  if (dropEventsResult.error)
+    return dbErrorResponse(dropEventsResult.error.message);
+  if (activeTaskRowsResult.error)
+    return dbErrorResponse(activeTaskRowsResult.error.message);
 
   const activeTaskCountByCourier = new Map<string, number>();
   for (const row of activeTaskRowsResult.data || []) {
@@ -203,19 +240,27 @@ export async function GET() {
       ? {
           id: unit.cell.id,
           code: unit.cell.code,
-          meta: (unit.cell.meta as { description?: string } | null | undefined) ?? null,
+          meta:
+            (unit.cell.meta as { description?: string } | null | undefined) ??
+            null,
         }
       : null,
   }));
 
   const dropEvents = dropEventsResult.data || [];
-  const dropUnitIds = [...new Set(dropEvents.map((event) => event.unit_id).filter(Boolean))];
+  const dropUnitIds = [
+    ...new Set(dropEvents.map((event) => event.unit_id).filter(Boolean)),
+  ];
   const dropCourierIds = [
-    ...new Set(dropEvents.map((event) => event.courier_user_id).filter(Boolean)),
+    ...new Set(
+      dropEvents.map((event) => event.courier_user_id).filter(Boolean),
+    ),
   ];
   const shiftCourierIds = [
     ...new Set(
-      (openShiftsResult.data || []).map((shift) => shift.courier_user_id).filter(Boolean),
+      (openShiftsResult.data || [])
+        .map((shift) => shift.courier_user_id)
+        .filter(Boolean),
     ),
   ];
   const shiftCourierRoleById = new Map<string, string>();
@@ -238,13 +283,20 @@ export async function GET() {
   const filteredShiftCourierIds = [
     ...new Set(filteredOpenShifts.map((shift) => shift.courier_user_id)),
   ];
-  const allCourierIdsForNames = [...new Set([...dropCourierIds, ...filteredShiftCourierIds])];
+  const allCourierIdsForNames = [
+    ...new Set([...dropCourierIds, ...filteredShiftCourierIds]),
+  ];
 
   const courierMap = new Map(
-    (couriersResult.data || []).map((courier) => [courier.id, courier.full_name || "Без имени"]),
+    (couriersResult.data || []).map((courier) => [
+      courier.id,
+      courier.full_name || "Без имени",
+    ]),
   );
 
-  const missingCourierIds = allCourierIdsForNames.filter((courierId) => !courierMap.has(courierId));
+  const missingCourierIds = allCourierIdsForNames.filter(
+    (courierId) => !courierMap.has(courierId),
+  );
   if (missingCourierIds.length > 0) {
     const missingCouriersResult = await supabaseAdmin
       .from("profiles")
@@ -267,7 +319,8 @@ export async function GET() {
       .from("units")
       .select("id, barcode, status, cell_id, meta")
       .in("id", dropUnitIds);
-    if (unitsForDropsResult.error) return dbErrorResponse(unitsForDropsResult.error.message);
+    if (unitsForDropsResult.error)
+      return dbErrorResponse(unitsForDropsResult.error.message);
     for (const unit of unitsForDropsResult.data || []) {
       unitsForDropsMap.set(unit.id, {
         barcode: unit.barcode || "",
@@ -285,8 +338,11 @@ export async function GET() {
       .select("id")
       .eq("warehouse_id", warehouseId)
       .eq("cell_type", "bin");
-    if (binCellsResult.error) return dbErrorResponse(binCellsResult.error.message);
-    const binCellIds = (binCellsResult.data || []).map((cell) => cell.id).filter(Boolean);
+    if (binCellsResult.error)
+      return dbErrorResponse(binCellsResult.error.message);
+    const binCellIds = (binCellsResult.data || [])
+      .map((cell) => cell.id)
+      .filter(Boolean);
 
     if (binCellIds.length > 0) {
       const unitMovesResult = await supabaseAdmin
@@ -296,7 +352,8 @@ export async function GET() {
         .in("unit_id", dropUnitIds)
         .in("to_cell_id", binCellIds)
         .order("created_at", { ascending: false });
-      if (unitMovesResult.error) return dbErrorResponse(unitMovesResult.error.message);
+      if (unitMovesResult.error)
+        return dbErrorResponse(unitMovesResult.error.message);
       for (const move of unitMovesResult.data || []) {
         if (!latestBinMoveByUnitId.has(move.unit_id)) {
           latestBinMoveByUnitId.set(move.unit_id, move.created_at);
@@ -335,7 +392,8 @@ export async function GET() {
         unit_id: event.unit_id,
         unit_barcode: unitInfo?.barcode || "",
         courier_user_id: event.courier_user_id,
-        courier_name: courierMap.get(event.courier_user_id) || "Неизвестный курьер",
+        courier_name:
+          courierMap.get(event.courier_user_id) || "Неизвестный курьер",
         happened_at: event.happened_at,
         note: event.note || null,
         ops_status: opsStatus,
@@ -347,12 +405,12 @@ export async function GET() {
       };
     })
     .filter(
-    (point) =>
-      point.lat !== null &&
-      point.lng !== null &&
-      !point.is_returned_to_bin &&
-      !(point.lat === 0 && point.lng === 0),
-  );
+      (point) =>
+        point.lat !== null &&
+        point.lng !== null &&
+        !point.is_returned_to_bin &&
+        !(point.lat === 0 && point.lng === 0),
+    );
 
   const latestDropByUnitId = new Map<string, (typeof dropPoints)[number]>();
   for (const point of dropPoints) {
@@ -374,7 +432,10 @@ export async function GET() {
     let zone_code: string | null = null;
     if (point.lat != null && point.lng != null) {
       for (const zone of zoneList) {
-        if (zone.polygon.length >= 3 && pointInPolygon(point.lat, point.lng, zone.polygon)) {
+        if (
+          zone.polygon.length >= 3 &&
+          pointInPolygon(point.lat, point.lng, zone.polygon)
+        ) {
           zone_id = zone.id;
           zone_code = zone.code;
           break;
@@ -402,16 +463,26 @@ export async function GET() {
 
   const latestLocationByCourierId = new Map<
     string,
-    { lat: number | null; lng: number | null; recorded_at: string; accuracy_m: number | null }
+    {
+      lat: number | null;
+      lng: number | null;
+      recorded_at: string;
+      accuracy_m: number | null;
+      speed_m_s: number | null;
+      heading_deg: number | null;
+    }
   >();
   if (filteredShiftCourierIds.length > 0) {
     const latestLocationsResult = await supabaseAdmin
       .from("courier_locations")
-      .select("courier_user_id, lat, lng, recorded_at, accuracy_m")
+      .select(
+        "courier_user_id, lat, lng, recorded_at, accuracy_m, speed_m_s, heading_deg",
+      )
       .eq("warehouse_id", warehouseId)
       .in("courier_user_id", filteredShiftCourierIds)
       .order("recorded_at", { ascending: false });
-    if (latestLocationsResult.error) return dbErrorResponse(latestLocationsResult.error.message);
+    if (latestLocationsResult.error)
+      return dbErrorResponse(latestLocationsResult.error.message);
 
     for (const location of latestLocationsResult.data || []) {
       if (!latestLocationByCourierId.has(location.courier_user_id)) {
@@ -420,6 +491,8 @@ export async function GET() {
           lng: toFiniteNumber(location.lng),
           recorded_at: location.recorded_at,
           accuracy_m: toFiniteNumber(location.accuracy_m),
+          speed_m_s: toFiniteNumber(location.speed_m_s),
+          heading_deg: toFiniteNumber(location.heading_deg),
         });
       }
     }
@@ -448,7 +521,8 @@ export async function GET() {
   }));
 
   const targetZone = zones.find(
-    (zone) => (zone.code || "").trim().toLowerCase() === TARGET_WAREHOUSE_ZONE_CODE,
+    (zone) =>
+      (zone.code || "").trim().toLowerCase() === TARGET_WAREHOUSE_ZONE_CODE,
   );
 
   return NextResponse.json({

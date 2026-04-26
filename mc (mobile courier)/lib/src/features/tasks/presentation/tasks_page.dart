@@ -40,7 +40,9 @@ class _TasksPageState extends State<TasksPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            tr(context.t('tasks.load_error'), {'error': widget.controller.error}),
+            tr(context.t('tasks.load_error'), {
+              'error': widget.controller.error,
+            }),
             textAlign: TextAlign.center,
           ),
         ),
@@ -65,7 +67,6 @@ class _TasksPageState extends State<TasksPage> {
             },
             onConfirmSelected: () async => _confirmSelected(context),
             onRejectSelected: () async => _rejectSelected(context),
-            onRejectWithNote: (note) async => _rejectWithNote(context, note),
           ),
           const SizedBox(height: 20),
           SectionCard(
@@ -75,34 +76,33 @@ class _TasksPageState extends State<TasksPage> {
         ],
       );
     }
-    return ListView(
-      padding: const EdgeInsets.all(10),
+    final showFinishBar = _selectedTaskIds.isNotEmpty;
+    return Stack(
       children: [
-        _PendingAssignmentsSection(
-          controller: widget.controller,
-          scanController: _confirmScanController,
-          selectedIds: _selectedPendingIds,
-          onToggleSelected: (shipmentId, selected) {
-            setState(() {
-              if (selected) {
-                _selectedPendingIds.add(shipmentId);
-              } else {
-                _selectedPendingIds.remove(shipmentId);
-              }
-            });
-          },
-          onConfirmSelected: () async => _confirmSelected(context),
-          onRejectSelected: () async => _rejectSelected(context),
-          onRejectWithNote: (note) async => _rejectWithNote(context, note),
-        ),
-        const SizedBox(height: 12),
-        SectionCard(
-          title: context.t('tasks.my_tasks'),
-          dense: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _TasksGroupedByScenario(
+        ListView(
+          padding: EdgeInsets.fromLTRB(10, 10, 10, showFinishBar ? 96 : 10),
+          children: [
+            _PendingAssignmentsSection(
+              controller: widget.controller,
+              scanController: _confirmScanController,
+              selectedIds: _selectedPendingIds,
+              onToggleSelected: (shipmentId, selected) {
+                setState(() {
+                  if (selected) {
+                    _selectedPendingIds.add(shipmentId);
+                  } else {
+                    _selectedPendingIds.remove(shipmentId);
+                  }
+                });
+              },
+              onConfirmSelected: () async => _confirmSelected(context),
+              onRejectSelected: () async => _rejectSelected(context),
+            ),
+            const SizedBox(height: 12),
+            SectionCard(
+              title: context.t('tasks.my_tasks'),
+              dense: true,
+              child: _TasksGroupedByScenario(
                 tasks: widget.controller.tasks,
                 selectedIds: _selectedTaskIds,
                 onToggleSelected: (taskId, selected) {
@@ -119,21 +119,24 @@ class _TasksPageState extends State<TasksPage> {
                     MaterialPageRoute<void>(
                       builder: (_) => TaskDetailsPage(
                         task: task,
-                        onMarkDropped: (data) => widget.controller.markTaskDropped(
-                          task,
-                          opsStatus: data.status,
-                          note: data.note,
-                          signaturePngBase64: data.signaturePngBase64,
-                          photoBytes: data.photoBytes,
-                          photoFileName: data.photoFileName,
-                        ),
+                        onMarkDropped: (data) =>
+                            widget.controller.markTaskDropped(
+                              task,
+                              opsStatus: data.status,
+                              note: data.note,
+                              signaturePngBase64: data.signaturePngBase64,
+                              photoBytes: data.photoBytes,
+                              photoFileName: data.photoFileName,
+                            ),
                         onUndoDrop: task.status == 'dropped'
                             ? () => widget.controller.undoTaskDrop(task)
                             : null,
-                        onConfirmPickup: task.assignedByLogistics && !task.pickupConfirmed
+                        onConfirmPickup:
+                            task.assignedByLogistics && !task.pickupConfirmed
                             ? () => _confirmPickupForTask(context, task)
                             : null,
-                        onRejectPickup: task.assignedByLogistics && !task.pickupConfirmed
+                        onRejectPickup:
+                            task.assignedByLogistics && !task.pickupConfirmed
                             ? () => _rejectPickupForTask(context, task)
                             : null,
                       ),
@@ -141,28 +144,51 @@ class _TasksPageState extends State<TasksPage> {
                   );
                 },
               ),
-              if (_selectedTaskIds.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () => _transferSelected(context),
-                  icon: const Icon(Icons.handshake),
-                  label: Text(tr(context.t('tasks.transfer_selected'), {'count': _selectedTaskIds.length})),
-                ),
-              ],
-            ],
-          ),
+            ),
+          ],
         ),
+        if (showFinishBar)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 12,
+                      offset: Offset(0, -2),
+                      color: Color(0x22000000),
+                    ),
+                  ],
+                ),
+                child: FilledButton.icon(
+                  onPressed: () => _finishSelectedRoutes(context),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                  label: Text(context.t('task.finish_route')),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
 
   Future<void> _confirmSelected(BuildContext context) async {
     if (_selectedPendingIds.isEmpty) return;
-    final signature = await showGiverSignatureDialog(context);
-    if (!mounted || signature == null || signature.isEmpty) return;
+    final confirmed = await _showPickupConfirmDialog(context);
+    if (!mounted || confirmed != true) return;
     await widget.controller.confirmPendingAssignments(
       shipmentIds: _selectedPendingIds.toList(),
-      giverSignature: signature,
     );
     if (!mounted) return;
     if (widget.controller.error == null) {
@@ -173,108 +199,120 @@ class _TasksPageState extends State<TasksPage> {
     }
   }
 
-  Future<void> _transferSelected(BuildContext context) async {
+  bool _canFinishRoute(CourierTask task) {
+    return canShowFinishRouteAction(task);
+  }
+
+  Future<void> _finishSelectedRoutes(BuildContext context) async {
     if (_selectedTaskIds.isEmpty) return;
-    final noteController = TextEditingController();
-    final note = await showDialog<String>(
+    final selectedTasks = widget.controller.tasks
+        .where((task) => _selectedTaskIds.contains(task.id))
+        .toList();
+    final tasksToFinish = selectedTasks.where(_canFinishRoute).toList();
+    if (tasksToFinish.isEmpty) {
+      final messageKey = selectedTasks.any((task) => task.selfPickup)
+          ? 'tasks.finish_route_self_pickup_only'
+          : 'tasks.finish_route_none';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.t(messageKey))));
+      return;
+    }
+
+    final selected = await showDropOpsStatusDialog(context);
+    if (!mounted || selected == null) return;
+
+    var completed = 0;
+    for (final task in tasksToFinish) {
+      await widget.controller.markTaskDropped(
+        task,
+        opsStatus: selected.status,
+        note: selected.note,
+        signaturePngBase64: selected.signaturePngBase64,
+        photoBytes: selected.photoBytes,
+        photoFileName: selected.photoFileName,
+      );
+      if (!mounted) return;
+      if (widget.controller.error != null) break;
+      completed += 1;
+    }
+
+    if (widget.controller.error == null) {
+      setState(() => _selectedTaskIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr(context.t('tasks.finish_route_bulk_snack'), {
+              'count': completed,
+            }),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmPickupForTask(
+    BuildContext context,
+    CourierTask task,
+  ) async {
+    final shipmentId = task.shipmentId;
+    if (shipmentId == null || shipmentId.isEmpty) return;
+    final confirmed = await _showPickupConfirmDialog(context);
+    if (!mounted || confirmed != true) return;
+
+    await widget.controller.confirmPendingAssignments(
+      shipmentIds: [shipmentId],
+    );
+    if (!mounted) return;
+    if (widget.controller.error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tr(context.t('tasks.pickup_confirmed_for'), {
+              'barcode': task.barcode,
+            }),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<bool?> _showPickupConfirmDialog(BuildContext context) {
+    return showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text(context.t('tasks.transfer.title')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                context.t('tasks.transfer.body'),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: noteController,
-                maxLines: 2,
-                decoration: InputDecoration(
-                  hintText: context.t('tasks.transfer.comment_optional_hint'),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
+          title: Text(context.t('tasks.pickup_confirm_dialog.title')),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(context.t('common.cancel')),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(context.t('common.no')),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
-              child: Text(context.t('tasks.transfer.action')),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(context.t('common.yes')),
             ),
           ],
         );
       },
     );
-    noteController.dispose();
-    if (!mounted) return;
-
-    final toTransfer = _selectedTaskIds.toList();
-    final count = await widget.controller.removeTasksFromHandsBulk(
-      taskIds: toTransfer,
-      reason: note?.isNotEmpty == true ? note : null,
-    );
-    if (!mounted) return;
-    if (widget.controller.error == null) {
-      setState(() => _selectedTaskIds.clear());
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context.t('tasks.transferred_snack'), {'count': count}))),
-      );
-    }
   }
 
-  Future<void> _confirmPickupForTask(BuildContext context, CourierTask task) async {
+  Future<void> _rejectPickupForTask(
+    BuildContext context,
+    CourierTask task,
+  ) async {
     final shipmentId = task.shipmentId;
     if (shipmentId == null || shipmentId.isEmpty) return;
-    final signature = await showGiverSignatureDialog(context);
-    if (!mounted || signature == null || signature.isEmpty) return;
-
-    await widget.controller.confirmPendingAssignments(
-      shipmentIds: [shipmentId],
-      giverSignature: signature,
-    );
-    if (!mounted) return;
-    if (widget.controller.error == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context.t('tasks.pickup_confirmed_for'), {'barcode': task.barcode}))),
-      );
-    }
-  }
-
-  Future<void> _rejectWithNote(BuildContext context, String note) async {
-    if (_selectedPendingIds.isEmpty || note.isEmpty) return;
-    await widget.controller.rejectPendingAssignments(
-      shipmentIds: _selectedPendingIds.toList(),
-      note: note,
-    );
-    if (!mounted) return;
-    if (widget.controller.error == null) {
-      setState(() => _selectedPendingIds.clear());
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.t('tasks.pickup_reject_saved'))),
-      );
-    }
-  }
-
-  Future<void> _rejectPickupForTask(BuildContext context, CourierTask task) async {
-    final shipmentId = task.shipmentId;
-    if (shipmentId == null || shipmentId.isEmpty) return;
-    final noteController = TextEditingController();
+    var noteText = '';
     final note = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(context.t('tasks.pickup_reject.title')),
           content: TextField(
-            controller: noteController,
             maxLines: 3,
+            onChanged: (value) => noteText = value,
             decoration: InputDecoration(
               hintText: context.t('tasks.pickup_reject.reason_hint'),
               border: const OutlineInputBorder(),
@@ -286,14 +324,13 @@ class _TasksPageState extends State<TasksPage> {
               child: Text(context.t('common.cancel')),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
+              onPressed: () => Navigator.of(dialogContext).pop(noteText.trim()),
               child: Text(context.t('common.save')),
             ),
           ],
         );
       },
     );
-    noteController.dispose();
     if (!mounted || note == null || note.isEmpty) return;
 
     await widget.controller.rejectPendingAssignments(
@@ -303,22 +340,28 @@ class _TasksPageState extends State<TasksPage> {
     if (!mounted) return;
     if (widget.controller.error == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context.t('tasks.pickup_reject_saved_for'), {'barcode': task.barcode}))),
+        SnackBar(
+          content: Text(
+            tr(context.t('tasks.pickup_reject_saved_for'), {
+              'barcode': task.barcode,
+            }),
+          ),
+        ),
       );
     }
   }
 
   Future<void> _rejectSelected(BuildContext context) async {
     if (_selectedPendingIds.isEmpty) return;
-    final noteController = TextEditingController();
+    var noteText = '';
     final note = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(context.t('tasks.pickup_reject.title')),
           content: TextField(
-            controller: noteController,
             maxLines: 3,
+            onChanged: (value) => noteText = value,
             decoration: InputDecoration(
               hintText: context.t('tasks.pickup_reject.reason_hint'),
               border: const OutlineInputBorder(),
@@ -330,14 +373,13 @@ class _TasksPageState extends State<TasksPage> {
               child: Text(context.t('common.cancel')),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(noteController.text.trim()),
+              onPressed: () => Navigator.of(dialogContext).pop(noteText.trim()),
               child: Text(context.t('common.save')),
             ),
           ],
         );
       },
     );
-    noteController.dispose();
     if (!mounted || note == null || note.isEmpty) return;
 
     await widget.controller.rejectPendingAssignments(
@@ -362,7 +404,6 @@ class _PendingAssignmentsSection extends StatelessWidget {
     required this.onToggleSelected,
     required this.onConfirmSelected,
     required this.onRejectSelected,
-    required this.onRejectWithNote,
   });
 
   final CourierAppController controller;
@@ -371,7 +412,8 @@ class _PendingAssignmentsSection extends StatelessWidget {
   final void Function(String shipmentId, bool selected) onToggleSelected;
   final Future<void> Function() onConfirmSelected;
   final Future<void> Function() onRejectSelected;
-  final Future<void> Function(String note) onRejectWithNote;
+
+  String _normalizedBarcode(String value) => value.trim().toLowerCase();
 
   @override
   Widget build(BuildContext context) {
@@ -381,12 +423,17 @@ class _PendingAssignmentsSection extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final highlighted = count > 0;
     return Card(
-      color: highlighted ? colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
+      color: highlighted
+          ? colorScheme.primaryContainer.withValues(alpha: 0.3)
+          : null,
       elevation: highlighted ? 2 : 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: highlighted
-            ? BorderSide(color: colorScheme.primary.withValues(alpha: 0.6), width: 2)
+            ? BorderSide(
+                color: colorScheme.primary.withValues(alpha: 0.6),
+                width: 2,
+              )
             : BorderSide.none,
       ),
       child: ExpansionTile(
@@ -395,17 +442,21 @@ class _PendingAssignmentsSection extends StatelessWidget {
         title: Text(
           'Задания от логистов — неподтвержденные ($count)',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: highlighted ? FontWeight.bold : null,
-              ),
+            fontWeight: highlighted ? FontWeight.bold : null,
+          ),
         ),
-        subtitle: const Text('Подтвердите забор или укажите незабор с причиной'),
+        subtitle: const Text(
+          'Подтвердите забор или укажите незабор с причиной',
+        ),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Подтвердите забор сканом или выберите заказы и подтвердите массово.'),
+                const Text(
+                  'Подтвердите забор сканом или выберите заказы и подтвердите массово.',
+                ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: scanController,
@@ -434,10 +485,8 @@ class _PendingAssignmentsSection extends StatelessWidget {
                         children: [
                           Checkbox(
                             value: selected,
-                            onChanged: (value) => onToggleSelected(
-                              assignment.id,
-                              value ?? false,
-                            ),
+                            onChanged: (value) =>
+                                onToggleSelected(assignment.id, value ?? false),
                           ),
                           Expanded(
                             child: Column(
@@ -447,10 +496,15 @@ class _PendingAssignmentsSection extends StatelessWidget {
                                   assignment.barcode,
                                   style: Theme.of(context).textTheme.titleSmall,
                                 ),
-                                Text('Отгружен: ${formatter.format(assignment.outAt.toLocal())}'),
-                                if (assignment.productName != null) Text('Товар: ${assignment.productName}'),
-                                if (assignment.partnerName != null) Text('Партнер: ${assignment.partnerName}'),
-                                if (assignment.scenario != null && assignment.scenario!.isNotEmpty)
+                                Text(
+                                  'Отгружен: ${formatter.format(assignment.outAt.toLocal())}',
+                                ),
+                                if (assignment.productName != null)
+                                  Text('Товар: ${assignment.productName}'),
+                                if (assignment.partnerName != null)
+                                  Text('Партнер: ${assignment.partnerName}'),
+                                if (assignment.scenario != null &&
+                                    assignment.scenario!.isNotEmpty)
                                   Text('Сценарий: ${assignment.scenario}'),
                               ],
                             ),
@@ -464,30 +518,25 @@ class _PendingAssignmentsSection extends StatelessWidget {
                   children: [
                     Expanded(
                       child: FilledButton(
-                        onPressed: selectedIds.isEmpty ? null : () async => onConfirmSelected(),
-                        child: Text('Подтвердить забор (${selectedIds.length})'),
+                        onPressed: selectedIds.isEmpty
+                            ? null
+                            : () async => onConfirmSelected(),
+                        child: Text(
+                          'Подтвердить забор (${selectedIds.length})',
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: selectedIds.isEmpty ? null : () async => onRejectSelected(),
+                        onPressed: selectedIds.isEmpty
+                            ? null
+                            : () async => onRejectSelected(),
                         child: Text('Незабор (${selectedIds.length})'),
                       ),
                     ),
                   ],
                 ),
-                if (!assignments.isEmpty) ...[
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: selectedIds.isEmpty ? null : () async => onRejectWithNote('Данного заказа нет'),
-                    icon: const Icon(Icons.cancel_outlined, size: 18),
-                    label: const Text('Данного заказа нет'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -502,8 +551,31 @@ class _PendingAssignmentsSection extends StatelessWidget {
         builder: (_) => BarcodeScannerSheet(title: 'Сканировать и подтвердить'),
       ),
     );
+    final normalizedScanned = scanned == null
+        ? ''
+        : _normalizedBarcode(scanned);
+    final matchingPending = controller.pendingAssignments
+        .where(
+          (assignment) =>
+              _normalizedBarcode(assignment.barcode) == normalizedScanned,
+        )
+        .length;
+    final matchingMyTasks = controller.tasks
+        .where((task) => _normalizedBarcode(task.barcode) == normalizedScanned)
+        .toList();
     if (scanned == null || scanned.isEmpty) return;
     scanController.text = scanned;
+    if (matchingPending > 0 || matchingMyTasks.isNotEmpty) {
+      await controller.scanConfirmAssignment(scanned);
+      if (!context.mounted) return;
+      if (controller.error == null) {
+        scanController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Забор подтвержден сканом: $scanned')),
+        );
+      }
+      return;
+    }
     final signature = await showGiverSignatureDialog(context);
     if (!context.mounted || signature == null || signature.isEmpty) return;
     await controller.scanConfirmAssignment(scanned, giverSignature: signature);
@@ -530,8 +602,9 @@ class _TasksGroupedByScenario extends StatelessWidget {
   final void Function(String taskId, bool selected) onToggleSelected;
   final void Function(CourierTask task) onOpenTask;
 
-  static String _scenarioKey(CourierTask t) =>
-      (t.scenario ?? '').trim().isEmpty ? 'Без сценария' : (t.scenario ?? '').trim();
+  static String _scenarioKey(CourierTask t) => (t.scenario ?? '').trim().isEmpty
+      ? 'Без сценария'
+      : (t.scenario ?? '').trim();
 
   @override
   Widget build(BuildContext context) {
@@ -539,7 +612,8 @@ class _TasksGroupedByScenario extends StatelessWidget {
     for (final task in tasks) {
       groups.putIfAbsent(_scenarioKey(task), () => []).add(task);
     }
-    final sortedKeys = groups.keys.toList()..sort((a, b) {
+    final sortedKeys = groups.keys.toList()
+      ..sort((a, b) {
         if (a == 'Без сценария') return 1;
         if (b == 'Без сценария') return -1;
         return a.compareTo(b);
@@ -554,10 +628,10 @@ class _TasksGroupedByScenario extends StatelessWidget {
             child: Text(
               scenarioKey,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
             ),
           ),
           ...groups[scenarioKey]!.map(
@@ -566,7 +640,8 @@ class _TasksGroupedByScenario extends StatelessWidget {
               child: _TaskCard(
                 task: task,
                 selected: selectedIds.contains(task.id),
-                onToggleSelected: (selected) => onToggleSelected(task.id, selected),
+                onToggleSelected: (selected) =>
+                    onToggleSelected(task.id, selected),
                 onOpen: () => onOpenTask(task),
                 dense: true,
               ),
@@ -628,7 +703,10 @@ class _TaskCard extends StatelessWidget {
                   Padding(
                     padding: EdgeInsets.only(bottom: dense ? 2 : 4),
                     child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: dense ? 6 : 8, vertical: dense ? 2 : 3),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: dense ? 6 : 8,
+                        vertical: dense ? 2 : 3,
+                      ),
                       decoration: BoxDecoration(
                         color: theme.colorScheme.tertiaryContainer,
                         borderRadius: BorderRadius.circular(6),
@@ -651,8 +729,14 @@ class _TaskCard extends StatelessWidget {
                       Text('• ${task.scenario}', style: smallStyle),
                   ],
                 ),
-                if ((task.productName != null || task.partnerName != null || (task.scenario != null && task.scenario!.isNotEmpty))) const SizedBox(height: 2),
-                Text('Взято: ${formatter.format(task.claimedAt.toLocal())}', style: smallStyle),
+                if ((task.productName != null ||
+                    task.partnerName != null ||
+                    (task.scenario != null && task.scenario!.isNotEmpty)))
+                  const SizedBox(height: 2),
+                Text(
+                  'Взято: ${formatter.format(task.claimedAt.toLocal())}',
+                  style: smallStyle,
+                ),
                 SizedBox(height: dense ? 4 : 8),
                 Align(
                   alignment: Alignment.centerRight,
@@ -660,7 +744,10 @@ class _TaskCard extends StatelessWidget {
                     onPressed: onOpen,
                     style: dense
                         ? FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           )
@@ -676,4 +763,3 @@ class _TaskCard extends StatelessWidget {
     );
   }
 }
-

@@ -32,16 +32,10 @@ class TaskRepository {
     await _apiClient.postJson('/api/courier/shift/start', body: {});
   }
 
-  Future<void> closeShift({
-    required bool force,
-    String? note,
-  }) async {
+  Future<void> closeShift({required bool force, String? note}) async {
     await _apiClient.postJson(
       '/api/courier/shift/close',
-      body: {
-        'force': force,
-        'note': note,
-      },
+      body: {'force': force, 'note': note},
     );
   }
 
@@ -63,28 +57,34 @@ class TaskRepository {
   Future<List<CourierTask>> fetchMyTasks() async {
     final response = await _apiClient.getJson('/api/courier/tasks/my');
     final raw = (response['tasks'] as List<dynamic>? ?? []);
-    return raw.whereType<Map<String, dynamic>>().map(CourierTask.fromApi).toList();
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(CourierTask.fromApi)
+        .toList();
   }
 
   Future<List<PendingAssignment>> fetchPendingAssignments() async {
-    final response = await _apiClient.getJson('/api/courier/assignments/pending');
+    final response = await _apiClient.getJson(
+      '/api/courier/assignments/pending',
+    );
     final raw = (response['assignments'] as List<dynamic>? ?? []);
-    return raw.whereType<Map<String, dynamic>>().map(PendingAssignment.fromApi).toList();
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(PendingAssignment.fromApi)
+        .toList();
   }
 
   Future<void> confirmAssignments({
     required List<String> shipmentIds,
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
-    await _apiClient.postJson(
-      '/api/courier/assignments/confirm',
-      body: <String, dynamic>{
-        'shipmentIds': shipmentIds,
-        'giver_signature': giverSignature,
-        'note': note,
-      },
-    );
+    final body = <String, dynamic>{
+      'shipmentIds': shipmentIds,
+      if (giverSignature?.isNotEmpty == true) 'giver_signature': giverSignature,
+      'note': note,
+    };
+    await _apiClient.postJson('/api/courier/assignments/confirm', body: body);
   }
 
   Future<void> rejectAssignments({
@@ -93,30 +93,31 @@ class TaskRepository {
   }) async {
     await _apiClient.postJson(
       '/api/courier/assignments/reject',
-      body: <String, dynamic>{
-        'shipmentIds': shipmentIds,
-        'note': note,
-      },
+      body: <String, dynamic>{'shipmentIds': shipmentIds, 'note': note},
     );
   }
 
   Future<void> scanConfirmAssignment({
     required String barcode,
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
+    final body = <String, dynamic>{
+      'barcode': barcode,
+      if (giverSignature?.isNotEmpty == true) 'giver_signature': giverSignature,
+      'note': note,
+    };
     await _apiClient.postJson(
       '/api/courier/assignments/scan-confirm',
-      body: <String, dynamic>{
-        'barcode': barcode,
-        'giver_signature': giverSignature,
-        'note': note,
-      },
+      body: body,
     );
   }
 
   Future<void> undoDrop(CourierTask task) async {
-    await _apiClient.postJson('/api/courier/tasks/${task.id}/drop/undo', body: {});
+    await _apiClient.postJson(
+      '/api/courier/tasks/${task.id}/drop/undo',
+      body: {},
+    );
   }
 
   Future<void> removeFromHands(CourierTask task, {String? reason}) async {
@@ -208,7 +209,10 @@ class TaskRepository {
   }
 
   Future<void> startHandover({String? note}) async {
-    await _apiClient.postJson('/api/courier/handover/start', body: {'note': note});
+    await _apiClient.postJson(
+      '/api/courier/handover/start',
+      body: {'note': note},
+    );
   }
 
   Future<List<GeoZone>> fetchZones() async {
@@ -219,26 +223,39 @@ class TaskRepository {
 
   Future<List<DropMarker>> fetchDrops() async {
     try {
-      final response = await _apiClient.getJson('/api/courier/warehouse/drops?days=3');
+      final response = await _apiClient.getJson(
+        '/api/courier/warehouse/drops?days=3',
+      );
       final rows = (response['drops'] as List<dynamic>? ?? []);
       final result = <DropMarker>[];
       for (final row in rows.whereType<Map<String, dynamic>>()) {
         final rawLat = row['lat'];
         final rawLng = row['lng'];
-        final lat = rawLat is num ? rawLat.toDouble() : (rawLat != null ? double.tryParse(rawLat.toString()) : null);
-        final lng = rawLng is num ? rawLng.toDouble() : (rawLng != null ? double.tryParse(rawLng.toString()) : null);
-        if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) continue;
+        final lat = rawLat is num
+            ? rawLat.toDouble()
+            : (rawLat != null ? double.tryParse(rawLat.toString()) : null);
+        final lng = rawLng is num
+            ? rawLng.toDouble()
+            : (rawLng != null ? double.tryParse(rawLng.toString()) : null);
+        if (lat == null || lng == null || !lat.isFinite || !lng.isFinite)
+          continue;
         final unit = row['unit'] as Map<String, dynamic>?;
-        result.add(DropMarker(
-          taskId: row['task_id']?.toString() ?? '',
-          unitBarcode: unit?['barcode']?.toString() ?? 'N/A',
-          happenedAt: DateTime.tryParse(row['happened_at']?.toString() ?? '') ?? DateTime.now(),
-          point: GeoPoint(lat: lat, lng: lng),
-        ));
+        result.add(
+          DropMarker(
+            taskId: row['task_id']?.toString() ?? '',
+            unitBarcode: unit?['barcode']?.toString() ?? 'N/A',
+            happenedAt:
+                DateTime.tryParse(row['happened_at']?.toString() ?? '') ??
+                DateTime.now(),
+            point: GeoPoint(lat: lat, lng: lng),
+          ),
+        );
       }
       return result;
     } on ApiException catch (error) {
-      if (error.statusCode == 403) return [];
+      if (error.statusCode == 403) {
+        return [];
+      }
       rethrow;
     }
   }

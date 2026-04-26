@@ -11,9 +11,12 @@ function resolveExistingScenario(
   scenarioFromPicking: string | null,
 ): string | null {
   const fromShipment =
-    (typeof shipmentMeta?.scenario === "string" && shipmentMeta.scenario.trim()) ||
-    (typeof shipmentMeta?.ops_scenario === "string" && shipmentMeta.ops_scenario.trim()) ||
-    (typeof shipmentMeta?.picking_scenario === "string" && shipmentMeta.picking_scenario.trim());
+    (typeof shipmentMeta?.scenario === "string" &&
+      shipmentMeta.scenario.trim()) ||
+    (typeof shipmentMeta?.ops_scenario === "string" &&
+      shipmentMeta.ops_scenario.trim()) ||
+    (typeof shipmentMeta?.picking_scenario === "string" &&
+      shipmentMeta.picking_scenario.trim());
   if (fromShipment) return fromShipment.trim();
   const fromUnit =
     typeof unitMeta?.ops_scenario === "string" && unitMeta.ops_scenario.trim()
@@ -25,7 +28,9 @@ function resolveExistingScenario(
 }
 
 export async function POST(req: Request) {
-  const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
+  const auth = await requireCourierAuth(req, {
+    allowedRoles: [...COURIER_ALLOWED_ROLES],
+  });
   if (!auth.ok) return auth.response;
 
   const body = await req.json().catch(() => ({}));
@@ -34,13 +39,12 @@ export async function POST(req: Request) {
     : [];
   const note = body?.note?.toString() || null;
   const giverSignature =
-    typeof body?.giver_signature === "string" ? body.giver_signature.trim() || null : null;
+    typeof body?.giver_signature === "string"
+      ? body.giver_signature.trim() || null
+      : null;
   if (shipmentIds.length === 0) {
-    return NextResponse.json({ error: "shipmentIds are required" }, { status: 400 });
-  }
-  if (!giverSignature) {
     return NextResponse.json(
-      { error: "giver_signature is required for pickup confirmation" },
+      { error: "shipmentIds are required" },
       { status: 400 },
     );
   }
@@ -51,13 +55,25 @@ export async function POST(req: Request) {
     .eq("warehouse_id", auth.profile.warehouse_id)
     .in("id", shipmentIds);
 
-  const unitIds = [...new Set((shipments || []).map((s) => s.unit_id).filter(Boolean))];
+  const unitIds = [
+    ...new Set((shipments || []).map((s) => s.unit_id).filter(Boolean)),
+  ];
   const { data: unitsData } = unitIds.length
-    ? await supabaseAdmin.from("units").select("id, barcode, meta").in("id", unitIds)
+    ? await supabaseAdmin
+        .from("units")
+        .select("id, barcode, meta")
+        .in("id", unitIds)
     : { data: [] };
-  const barcodeByUnitId = new Map((unitsData || []).map((u) => [u.id, u.barcode]));
+  const barcodeByUnitId = new Map(
+    (unitsData || []).map((u) => [u.id, u.barcode]),
+  );
   const unitMetaById = new Map(
-    (unitsData || []).map((u) => [u.id, (u as any).meta && typeof (u as any).meta === "object" ? (u as any).meta : {}]),
+    (unitsData || []).map((u) => [
+      u.id,
+      (u as any).meta && typeof (u as any).meta === "object"
+        ? (u as any).meta
+        : {},
+    ]),
   );
 
   let scenarioByUnitId = new Map<string, string>();
@@ -66,7 +82,11 @@ export async function POST(req: Request) {
       .from("picking_task_units")
       .select("unit_id, picking_task_id")
       .in("unit_id", unitIds);
-    const taskIds = [...new Set((taskUnits || []).map((r) => r.picking_task_id).filter(Boolean))];
+    const taskIds = [
+      ...new Set(
+        (taskUnits || []).map((r) => r.picking_task_id).filter(Boolean),
+      ),
+    ];
     if (taskIds.length > 0) {
       const { data: tasks } = await supabaseAdmin
         .from("picking_tasks")
@@ -94,14 +114,21 @@ export async function POST(req: Request) {
   }
 
   if (shipmentsError) {
-    return NextResponse.json({ error: shipmentsError.message }, { status: 500 });
+    return NextResponse.json(
+      { error: shipmentsError.message },
+      { status: 500 },
+    );
   }
 
   const eligible = (shipments || []).filter(
-    (shipment) => shipment.status === "out" && shipment.courier_user_id === auth.user.id,
+    (shipment) =>
+      shipment.status === "out" && shipment.courier_user_id === auth.user.id,
   );
   if (eligible.length === 0) {
-    return NextResponse.json({ error: "No eligible shipments found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "No eligible shipments found" },
+      { status: 404 },
+    );
   }
 
   const now = new Date().toISOString();
@@ -132,7 +159,9 @@ export async function POST(req: Request) {
       courier_pickup_confirmed_at: now,
       courier_pickup_confirmed_by: auth.user.id,
       courier_pickup_note: note,
-      courier_pickup_giver_signature: giverSignature,
+      ...(giverSignature
+        ? { courier_pickup_giver_signature: giverSignature }
+        : {}),
       courier_pickup_status: "confirmed",
       courier_pickup_rejected_at: null,
       courier_pickup_rejected_by: null,
@@ -183,7 +212,7 @@ export async function POST(req: Request) {
             shipment_id: shipment.id,
             pickup_confirmed: true,
             note,
-            giver_signature: giverSignature,
+            ...(giverSignature ? { giver_signature: giverSignature } : {}),
             scenario: taskScenario,
           },
         })
@@ -201,7 +230,8 @@ export async function POST(req: Request) {
         note: note || "Pickup confirmed by courier",
         meta: {
           source: "api.courier.assignments.confirm",
-          giver_signature: giverSignature,
+          confirmed_by_dialog: true,
+          ...(giverSignature ? { giver_signature: giverSignature } : {}),
         },
       });
     } else {
@@ -222,7 +252,7 @@ export async function POST(req: Request) {
             shipment_id: shipment.id,
             pickup_confirmed: true,
             note,
-            giver_signature: giverSignature,
+            ...(giverSignature ? { giver_signature: giverSignature } : {}),
             scenario: taskScenario,
           },
         })
@@ -242,7 +272,8 @@ export async function POST(req: Request) {
           note: note || "Pickup confirmed by courier",
           meta: {
             source: "api.courier.assignments.confirm",
-            giver_signature: giverSignature,
+            confirmed_by_dialog: true,
+            ...(giverSignature ? { giver_signature: giverSignature } : {}),
           },
         });
       }
@@ -261,7 +292,8 @@ export async function POST(req: Request) {
         courier_name: auth.profile.full_name || auth.user.id,
         shipment_id: shipment.id,
         unit_barcode: barcodeByUnitId.get(shipment.unit_id),
-        giver_signature_logged: true,
+        giver_signature_logged: Boolean(giverSignature),
+        confirmed_by_dialog: true,
       },
     });
   }

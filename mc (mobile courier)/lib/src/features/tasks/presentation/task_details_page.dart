@@ -17,6 +17,13 @@ bool _canUndoDrop(DateTime? lastEventAt) {
   return DateTime.now().difference(lastEventAt) < _dropUndoWindow;
 }
 
+bool canShowFinishRouteAction(CourierTask task) {
+  final showNotPicked = task.assignedByLogistics && !task.pickupConfirmed;
+  final canUndoDrop =
+      task.status == 'dropped' && _canUndoDrop(task.lastEventAt);
+  return !showNotPicked && !task.selfPickup && !canUndoDrop;
+}
+
 class TaskDetailsPage extends StatelessWidget {
   const TaskDetailsPage({
     super.key,
@@ -97,15 +104,6 @@ class TaskDetailsPage extends StatelessWidget {
       requiresPhoto: false,
       requiresComment: false,
     ),
-    _OpsStatusRule(
-      code: 'in_progress',
-      labelKey: 'ops.rule.in_progress',
-      icon: Icons.pending_actions_outlined,
-      createsDropPoint: false,
-      requiresSignature: false,
-      requiresPhoto: false,
-      requiresComment: false,
-    ),
   ];
 
   @override
@@ -123,12 +121,17 @@ class TaskDetailsPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(task.barcode, style: Theme.of(context).textTheme.headlineSmall),
+                    Text(
+                      task.barcode,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
                     const SizedBox(height: 8),
                     StatusChip(
                       status: task.status,
                       opsStatus: task.opsStatus,
-                      label: showNotPicked ? context.t('task.not_picked') : null,
+                      label: showNotPicked
+                          ? context.t('task.not_picked')
+                          : null,
                       color: showNotPicked ? Colors.red.shade700 : null,
                     ),
                     const SizedBox(height: 16),
@@ -136,14 +139,13 @@ class TaskDetailsPage extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          tr(
-                            context.t('task.source_logistics'),
-                            {
-                              'suffix': task.assignedCourierName != null
-                                  ? tr(context.t('task.source_suffix_name'), {'name': task.assignedCourierName})
-                                  : '',
-                            },
-                          ),
+                          tr(context.t('task.source_logistics'), {
+                            'suffix': task.assignedCourierName != null
+                                ? tr(context.t('task.source_suffix_name'), {
+                                    'name': task.assignedCourierName,
+                                  })
+                                : '',
+                          }),
                         ),
                       ),
                     if (showNotPicked)
@@ -154,10 +156,19 @@ class TaskDetailsPage extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
-                    Text(tr(context.t('task.claimed_at'), {'dt': formatter.format(task.claimedAt.toLocal())})),
-                    if (task.zoneId != null) Text(tr(context.t('task.zone'), {'zone': task.zoneId})),
+                    Text(
+                      tr(context.t('task.claimed_at'), {
+                        'dt': formatter.format(task.claimedAt.toLocal()),
+                      }),
+                    ),
+                    if (task.zoneId != null)
+                      Text(tr(context.t('task.zone'), {'zone': task.zoneId})),
                     if (task.scenario != null && task.scenario!.isNotEmpty)
-                      Text(tr(context.t('task.scenario'), {'scenario': task.scenario})),
+                      Text(
+                        tr(context.t('task.scenario'), {
+                          'scenario': task.scenario,
+                        }),
+                      ),
                   ],
                 ),
               ),
@@ -191,7 +202,9 @@ class TaskDetailsPage extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -223,7 +236,9 @@ class TaskDetailsPage extends StatelessWidget {
                       width: double.infinity,
                       child: FilledButton.icon(
                         onPressed: () async {
-                          final selected = await _showDropOpsStatusDialog(context);
+                          final selected = await showDropOpsStatusDialog(
+                            context,
+                          );
                           if (!context.mounted) return;
                           if (selected == null) return;
                           await onMarkDropped(selected);
@@ -243,7 +258,9 @@ class TaskDetailsPage extends StatelessWidget {
                           backgroundColor: Colors.green.shade700,
                           foregroundColor: Colors.white,
                         ),
-                        icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                        icon: const Icon(
+                          Icons.playlist_add_check_circle_outlined,
+                        ),
                         label: Text(context.t('task.finish_route')),
                       ),
                     ),
@@ -256,17 +273,17 @@ class TaskDetailsPage extends StatelessWidget {
       ),
     );
   }
+}
 
-  Future<DropData?> _showDropOpsStatusDialog(BuildContext context) async {
-    return showDialog<DropData>(
-      context: context,
-      builder: (dialogContext) => _DropDialog(
-        opsRules: _opsStatusRules,
-        onConfirm: (data) => Navigator.of(dialogContext).pop(data),
-        onCancel: () => Navigator.of(dialogContext).pop(),
-      ),
-    );
-  }
+Future<DropData?> showDropOpsStatusDialog(BuildContext context) async {
+  return showDialog<DropData>(
+    context: context,
+    builder: (dialogContext) => _DropDialog(
+      opsRules: TaskDetailsPage._opsStatusRules,
+      onConfirm: (data) => Navigator.of(dialogContext).pop(data),
+      onCancel: () => Navigator.of(dialogContext).pop(),
+    ),
+  );
 }
 
 class DropData {
@@ -352,9 +369,13 @@ class _DropDialogState extends State<_DropDialog> {
   bool get _canConfirm {
     final rule = _selectedRule;
     if (rule == null) return false;
-    if (rule.requiresComment && _noteController.text.trim().isEmpty) return false;
+    if (rule.requiresComment && _noteController.text.trim().isEmpty) {
+      return false;
+    }
     if (rule.requiresSignature && _signatureController.isEmpty) return false;
-    if (rule.requiresPhoto && (_photoBytes == null || _photoBytes!.isEmpty)) return false;
+    if (rule.requiresPhoto && (_photoBytes == null || _photoBytes!.isEmpty)) {
+      return false;
+    }
     return true;
   }
 
@@ -369,14 +390,18 @@ class _DropDialogState extends State<_DropDialog> {
     }
 
     final trimmedNote = _noteController.text.trim();
-    widget.onConfirm(DropData(
-      status: rule.code,
-      createsDropPoint: rule.createsDropPoint,
-      note: trimmedNote.isEmpty ? null : trimmedNote,
-      signaturePngBase64: base64,
-      photoBytes: rule.requiresPhoto ? _photoBytes : null,
-      photoFileName: rule.requiresPhoto ? (_photoFileName ?? 'drop_act.jpg') : null,
-    ));
+    widget.onConfirm(
+      DropData(
+        status: rule.code,
+        createsDropPoint: rule.createsDropPoint,
+        note: trimmedNote.isEmpty ? null : trimmedNote,
+        signaturePngBase64: base64,
+        photoBytes: rule.requiresPhoto ? _photoBytes : null,
+        photoFileName: rule.requiresPhoto
+            ? (_photoFileName ?? 'drop_act.jpg')
+            : null,
+      ),
+    );
   }
 
   @override
@@ -390,8 +415,13 @@ class _DropDialogState extends State<_DropDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(context.t('ops.dialog.title'),
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(
+                context.t('ops.dialog.title'),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 12),
               Flexible(
                 child: SingleChildScrollView(
@@ -415,7 +445,13 @@ class _DropDialogState extends State<_DropDialog> {
                                   width: 240,
                                   child: Row(
                                     children: [
-                                      Icon(o.icon, size: 22, color: Theme.of(context).colorScheme.primary),
+                                      Icon(
+                                        o.icon,
+                                        size: 22,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                      ),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Text(
@@ -438,7 +474,9 @@ class _DropDialogState extends State<_DropDialog> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -514,7 +552,9 @@ class _DropDialogState extends State<_DropDialog> {
                               const SizedBox(width: 8),
                               TextButton(
                                 onPressed: _capturePhoto,
-                                child: Text(context.t('ops.dialog.photo_change')),
+                                child: Text(
+                                  context.t('ops.dialog.photo_change'),
+                                ),
                               ),
                             ],
                           )

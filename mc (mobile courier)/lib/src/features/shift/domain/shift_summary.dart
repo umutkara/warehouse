@@ -1,26 +1,26 @@
+import '../../tasks/domain/courier_task.dart';
+
 class ShiftSummary {
   const ShiftSummary({
     required this.totalAssigned,
-    required this.inRoute,
     required this.delivered,
     required this.problematic,
   });
 
   final int totalAssigned;
-  final int inRoute;
   final int delivered;
   final int problematic;
 
-  factory ShiftSummary.fromTaskStatuses(List<String> statuses) {
-    final assigned = statuses.length;
-    final delivered = statuses.where((s) => s == 'delivered' || s == 'returned').length;
-    final inRoute = statuses.where((s) => s == 'in_route' || s == 'arrived' || s == 'dropped').length;
-    final problematic = statuses.where((s) => s == 'failed' || s == 'canceled').length;
-
+  factory ShiftSummary.fromTasks({
+    required List<CourierTask> tasks,
+    required int pendingLogisticsAssignments,
+    required int problematic,
+  }) {
     return ShiftSummary(
-      totalAssigned: assigned,
-      inRoute: inRoute,
-      delivered: delivered,
+      totalAssigned:
+          tasks.where((task) => task.assignedByLogistics).length +
+          pendingLogisticsAssignments,
+      delivered: tasks.where((task) => task.status == 'dropped').length,
       problematic: problematic,
     );
   }

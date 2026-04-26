@@ -21,8 +21,8 @@ class CourierAppController extends ChangeNotifier {
   CourierAppController({
     required ApiClient apiClient,
     TaskRepository? taskRepository,
-  })  : _taskRepository = taskRepository ?? TaskRepository(apiClient: apiClient),
-        _eventQueue = OfflineEventQueue(apiClient: apiClient);
+  }) : _taskRepository = taskRepository ?? TaskRepository(apiClient: apiClient),
+       _eventQueue = OfflineEventQueue(apiClient: apiClient);
 
   final TaskRepository _taskRepository;
   final OfflineEventQueue _eventQueue;
@@ -34,9 +34,9 @@ class CourierAppController extends ChangeNotifier {
   bool _foregroundTaskInit = false;
   DateTime? _lastLocationSentAt;
   _LocationPingSnapshot? _lastLocationSnapshot;
-  static const Duration _minPingInterval = Duration(seconds: 20);
-  static const Duration _offlineLocationInterval = Duration(seconds: 30);
-  static const double _minPingDistanceMeters = 45;
+  static const Duration _minPingInterval = Duration(seconds: 10);
+  static const Duration _offlineLocationInterval = Duration(seconds: 15);
+  static const double _minPingDistanceMeters = 20;
   static const double _maxAcceptedAccuracyMeters = 80;
   static const Set<String> _dropOpsStatuses = <String>{
     'partner_accepted_return',
@@ -57,8 +57,11 @@ class CourierAppController extends ChangeNotifier {
   final List<DropMarker> drops = [];
   final List<GeoPoint> routePoints = [];
 
-  ShiftSummary get summary =>
-      ShiftSummary.fromTaskStatuses(tasks.map((task) => task.status).toList());
+  ShiftSummary get summary => ShiftSummary.fromTasks(
+    tasks: tasks,
+    pendingLogisticsAssignments: pendingAssignments.length,
+    problematic: currentShift?.problematicTasks ?? 0,
+  );
 
   Future<void> bootstrap({required String initialCourierName}) async {
     courierName = initialCourierName.trim();
@@ -76,7 +79,8 @@ class CourierAppController extends ChangeNotifier {
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'courier_offline_location',
         channelName: 'Сбор геолокации офлайн',
-        channelDescription: 'Приложение собирает местоположение при отсутствии интернета',
+        channelDescription:
+            'Приложение собирает местоположение при отсутствии интернета',
         onlyAlertOnce: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
@@ -122,7 +126,8 @@ class CourierAppController extends ChangeNotifier {
     if (Platform.isAndroid || Platform.isIOS) {
       try {
         if (Platform.isAndroid) {
-          final perm = await FlutterForegroundTask.checkNotificationPermission();
+          final perm =
+              await FlutterForegroundTask.checkNotificationPermission();
           if (perm != NotificationPermission.granted) {
             await FlutterForegroundTask.requestNotificationPermission();
           }
@@ -153,7 +158,9 @@ class CourierAppController extends ChangeNotifier {
     if (_isOnline) return;
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       );
       final zoneId = _resolveZoneId(
         lat: position.latitude,
@@ -312,7 +319,7 @@ class CourierAppController extends ChangeNotifier {
 
   Future<void> confirmPendingAssignments({
     required List<String> shipmentIds,
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
     loading = true;
@@ -340,7 +347,10 @@ class CourierAppController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      await _taskRepository.rejectAssignments(shipmentIds: shipmentIds, note: note);
+      await _taskRepository.rejectAssignments(
+        shipmentIds: shipmentIds,
+        note: note,
+      );
       await refreshAll();
     } catch (e) {
       error = e.toString();
@@ -351,7 +361,7 @@ class CourierAppController extends ChangeNotifier {
 
   Future<void> scanConfirmAssignment(
     String barcode, {
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
     loading = true;
@@ -364,6 +374,10 @@ class CourierAppController extends ChangeNotifier {
         note: note,
       );
       await refreshAll();
+    } on ApiException catch (e) {
+      error = e.toString();
+      loading = false;
+      notifyListeners();
     } catch (e) {
       error = e.toString();
       loading = false;
@@ -424,25 +438,27 @@ class CourierAppController extends ChangeNotifier {
   }) async {
     double? lat;
     double? lng;
-    var locationSource = 'none';
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       );
       lat = pos.latitude;
       lng = pos.longitude;
-      locationSource = 'gps';
     } catch (_) {
       final last = _lastLocationSnapshot;
       if (last != null) {
         lat = last.point.lat;
         lng = last.point.lng;
-        locationSource = 'last_snapshot';
       }
     }
 
     String? photoUrl = actPhotoUrl;
-    if (photoUrl == null && photoBytes != null && photoBytes.isNotEmpty && task.unitId.isNotEmpty) {
+    if (photoUrl == null &&
+        photoBytes != null &&
+        photoBytes.isNotEmpty &&
+        task.unitId.isNotEmpty) {
       try {
         final resp = await _taskRepository.uploadDropPhoto(
           unitId: task.unitId,
@@ -463,7 +479,9 @@ class CourierAppController extends ChangeNotifier {
       proof['act_photo_url'] = photoUrl;
     }
 
-    final eventType = _dropOpsStatuses.contains(opsStatus) ? 'dropped' : 'ops_status_update';
+    final eventType = _dropOpsStatuses.contains(opsStatus)
+        ? 'dropped'
+        : 'ops_status_update';
 
     await _sendTaskEventWithFallback(
       task: task,
@@ -600,14 +618,14 @@ class CourierAppController extends ChangeNotifier {
     );
     _positionSubscription =
         Geolocator.getPositionStream(locationSettings: settings).listen(
-      (position) {
-        _onPosition(position);
-      },
-      onError: (Object e) {
-        trackingStatus = 'Ошибка GPS: $e';
-        notifyListeners();
-      },
-    );
+          (position) {
+            _onPosition(position);
+          },
+          onError: (Object e) {
+            trackingStatus = 'Ошибка GPS: $e';
+            notifyListeners();
+          },
+        );
   }
 
   Future<void> stopLiveTracking() async {
@@ -671,7 +689,10 @@ class CourierAppController extends ChangeNotifier {
     }
 
     _rememberSentLocation(at: now, point: point, zoneId: zoneId);
-    currentShift = currentShift?.copyWith(lastLat: point.lat, lastLng: point.lng);
+    currentShift = currentShift?.copyWith(
+      lastLat: point.lat,
+      lastLng: point.lng,
+    );
     notifyListeners();
   }
 
@@ -681,7 +702,8 @@ class CourierAppController extends ChangeNotifier {
     required String? zoneId,
     required double accuracy,
   }) {
-    if (accuracy.isFinite && accuracy > _maxAcceptedAccuracyMeters) return false;
+    if (accuracy.isFinite && accuracy > _maxAcceptedAccuracyMeters)
+      return false;
     final snapshot = _lastLocationSnapshot;
     if (snapshot == null || _lastLocationSentAt == null) return true;
     if (snapshot.zoneId != zoneId) return true;
@@ -728,7 +750,9 @@ class CourierAppController extends ChangeNotifier {
 
       final intersects =
           ((yi > lat) != (yj > lat)) &&
-          (lng < (xj - xi) * (lat - yi) / ((yj - yi) == 0 ? 1e-12 : (yj - yi)) + xi);
+          (lng <
+              (xj - xi) * (lat - yi) / ((yj - yi) == 0 ? 1e-12 : (yj - yi)) +
+                  xi);
       if (intersects) inside = !inside;
     }
     return inside;
@@ -745,10 +769,7 @@ class CourierAppController extends ChangeNotifier {
 }
 
 class _LocationPingSnapshot {
-  const _LocationPingSnapshot({
-    required this.point,
-    required this.zoneId,
-  });
+  const _LocationPingSnapshot({required this.point, required this.zoneId});
 
   final GeoPoint point;
   final String? zoneId;
