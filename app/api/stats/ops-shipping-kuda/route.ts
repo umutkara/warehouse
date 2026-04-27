@@ -1001,6 +1001,19 @@ export async function GET(req: Request) {
     .map(([zone, count]) => ({ zone, count }))
     .sort((a, b) => b.count - a.count || a.zone.localeCompare(b.zone));
 
+  const notOutBarcodes = notOutUnitsRes.data
+    .map((row) => {
+      const effectiveCellId = effectiveCellIdByUnit.get(row.id) || null;
+      const cellInfo = effectiveCellId ? cellInfoById.get(effectiveCellId) : null;
+      const cellCode = effectiveCellId ? (cellInfo?.code || effectiveCellId) : "Без ячейки";
+      return {
+        unit_id: row.id,
+        barcode: unitBarcodeById.get(row.id) || row.id,
+        cell_code: cellCode,
+      };
+    })
+    .sort((a, b) => a.barcode.localeCompare(b.barcode, "ru"));
+
   const includedTaskIds = Array.from(
     new Set(Array.from(tasksByTargetDay.values()).flatMap((rows) => rows.map((row) => row.taskId)))
   );
@@ -1107,6 +1120,7 @@ export async function GET(req: Request) {
       not_out_mbt_count: notOutMbtCountEffective,
       not_out_cells: notOutCellsEffective,
       not_out_zone_breakdown: notOutZoneBreakdown,
+      not_out_barcodes: notOutBarcodes,
       team_efficiency: {
         based_on_created_tasks: includedTasks.length,
         started_at: startedAt,
