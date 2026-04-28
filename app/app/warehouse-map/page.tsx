@@ -1704,40 +1704,34 @@ export default function WarehouseMapPage() {
         style={{
           position: "fixed",
           right: 20,
-          bottom: 20,
-          width: 320,
-          maxHeight: "45vh",
-          overflow: "auto",
-          border: "1px solid #e5e7eb",
-          borderRadius: 14,
-          background: "#ffffff",
-          boxShadow: "0 12px 30px rgba(0,0,0,0.14)",
+          left: 96,
+          bottom: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
           zIndex: 60,
+          pointerEvents: "none",
         }}
       >
         <div
           style={{
-            padding: "12px 14px",
-            borderBottom: "1px solid #eef2f7",
+            pointerEvents: "auto",
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
+            gap: 8,
+            maxWidth: "100%",
+            overflowX: "auto",
+            padding: "8px 10px",
+            borderRadius: 20,
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: "linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.10))",
+            backdropFilter: "blur(18px) saturate(130%)",
+            WebkitBackdropFilter: "blur(18px) saturate(130%)",
+            boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
           }}
         >
-          <div style={{ fontWeight: 700, fontSize: 13, color: "#111827" }}>
-            Онлайн сотрудники ({onlineStaff.length})
-          </div>
-        </div>
-
-        <div style={{ padding: 10, display: "grid", gap: 8 }}>
           {visibleOnlineStaff.length === 0 ? (
-            <div
-              style={{
-                fontSize: 12,
-                color: "#6b7280",
-                padding: "6px 4px",
-              }}
-            >
+            <div style={{ fontSize: 12, color: "rgba(17,24,39,0.78)", padding: "0 6px" }}>
               Сейчас нет активных сотрудников онлайн
             </div>
           ) : (
@@ -1747,18 +1741,24 @@ export default function WarehouseMapPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 10,
-                  border: "1px solid #eef2f7",
-                  borderRadius: 10,
-                  padding: "8px 10px",
+                  gap: 8,
+                  flexShrink: 0,
+                  minWidth: 180,
+                  maxWidth: 220,
+                  borderRadius: 16,
+                  padding: "7px 10px",
+                  border: "1px solid rgba(255,255,255,0.4)",
+                  background: "rgba(255,255,255,0.18)",
+                  backdropFilter: "blur(14px) saturate(120%)",
+                  WebkitBackdropFilter: "blur(14px) saturate(120%)",
                 }}
               >
                 <div
                   style={{
-                    width: 34,
-                    height: 34,
+                    width: 30,
+                    height: 30,
                     borderRadius: "50%",
-                    background: "#e5e7eb",
+                    background: "rgba(148,163,184,0.45)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1773,16 +1773,16 @@ export default function WarehouseMapPage() {
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
                     />
                   ) : (
-                    <span style={{ fontSize: 16, color: "#6b7280" }}>👤</span>
+                    <span style={{ fontSize: 14, color: "rgba(51,65,85,0.95)" }}>👤</span>
                   )}
                 </div>
 
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div
                     style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#111827",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "rgba(15,23,42,0.96)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -1791,7 +1791,17 @@ export default function WarehouseMapPage() {
                   >
                     {getStaffDisplayName(staff)}
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>{staff.role}</div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "rgba(30,41,59,0.78)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {staff.role}
+                  </div>
                 </div>
 
                 <span
@@ -1800,6 +1810,7 @@ export default function WarehouseMapPage() {
                     height: 8,
                     borderRadius: "50%",
                     background: "#10b981",
+                    boxShadow: "0 0 8px rgba(16,185,129,0.7)",
                     flexShrink: 0,
                   }}
                 />
@@ -1809,25 +1820,27 @@ export default function WarehouseMapPage() {
         </div>
 
         {hasHiddenOnlineStaff && (
-          <div style={{ padding: "0 10px 10px" }}>
-            <button
-              type="button"
-              onClick={() => setShowAllOnlineStaff((prev) => !prev)}
-              style={{
-                width: "100%",
-                border: "1px solid #d1d5db",
-                borderRadius: 8,
-                background: "#f9fafb",
-                padding: "8px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "#374151",
-                cursor: "pointer",
-              }}
-            >
-              {showAllOnlineStaff ? "Свернуть" : `Показать еще (${onlineStaff.length - 5})`}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAllOnlineStaff((prev) => !prev)}
+            style={{
+              pointerEvents: "auto",
+              flexShrink: 0,
+              border: "1px solid rgba(255,255,255,0.45)",
+              borderRadius: 14,
+              background: "rgba(255,255,255,0.22)",
+              backdropFilter: "blur(14px) saturate(130%)",
+              WebkitBackdropFilter: "blur(14px) saturate(130%)",
+              padding: "8px 10px",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "rgba(15,23,42,0.92)",
+              cursor: "pointer",
+              boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+            }}
+          >
+            {showAllOnlineStaff ? "Свернуть" : `Еще +${onlineStaff.length - 5}`}
+          </button>
         )}
       </div>
       </div>
