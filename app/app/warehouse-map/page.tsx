@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUIStore, type Zone } from "@/lib/ui/store";
 import { getCellColor } from "@/lib/ui/cellColors";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 // ⚡ Force dynamic for real-time warehouse data
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,15 @@ type Cell = {
   meta?: any;
   units_count: number;
   calc_status: string;
+};
+
+type OnlineStaff = {
+  userId: string;
+  role: string;
+  fullName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  lastSeenAt: string | null;
 };
 
 // Константа для размера ячеек (все ячейки одинаковые квадратные)
@@ -103,6 +113,13 @@ export default function WarehouseMapPage() {
   const searchParams = useSearchParams();
   const [cells, setCells] = useState<Cell[]>([]);
   const [role, setRole] = useState<string>("guest");
+  const [viewer, setViewer] = useState<{
+    userId: string;
+    warehouseId: string | null;
+    role: string;
+  } | null>(null);
+  const [onlineStaff, setOnlineStaff] = useState<OnlineStaff[]>([]);
+  const [showAllOnlineStaff, setShowAllOnlineStaff] = useState(false);
   const [newCode, setNewCode] = useState("");
   const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping" | "surplus" | "rejected" | "ff">("storage");
   const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -260,6 +277,17 @@ export default function WarehouseMapPage() {
     const r = await fetch("/api/me");
     const j = await r.json();
     setRole(j.role ?? "guest");
+    setViewer({
+      userId: j.user?.id ?? "",
+      warehouseId: j.warehouse_id ?? null,
+      role: j.role ?? "guest",
+    });
+  }
+
+  function getStaffDisplayName(staff: OnlineStaff) {
+    if (staff.fullName && staff.fullName.trim()) return staff.fullName.trim();
+    if (staff.email && staff.email.trim()) return staff.email.trim();
+    return "Анонимный пользователь";
   }
 
   async function loadZoneStats() {
@@ -279,6 +307,68 @@ export default function WarehouseMapPage() {
     }, 30000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!viewer?.warehouseId) return;
+
+    const supabase = supabaseBrowser();
+    const channel = supabase.channel(`warehouse-staff-online:${viewer.warehouseId}`);
+
+    const syncOnlineStaff = () => {
+      const presence = channel.presenceState() as Record<string, Array<Record<string, unknown>>>;
+      const deduped = new Map<string, OnlineStaff>();
+
+      for (const metas of Object.values(presence)) {
+        for (const meta of metas || []) {
+          const userId =
+            typeof meta.user_id === "string"
+              ? meta.user_id
+              : typeof meta.userId === "string"
+                ? meta.userId
+                : "";
+          if (!userId) continue;
+          const roleValue = typeof meta.role === "string" ? meta.role : "guest";
+          if (roleValue === "courier") continue;
+
+          const entry: OnlineStaff = {
+            userId,
+            role: roleValue,
+            fullName: typeof meta.full_name === "string" ? meta.full_name : null,
+            email: typeof meta.email === "string" ? meta.email : null,
+            avatarUrl: typeof meta.avatar_url === "string" ? meta.avatar_url : null,
+            lastSeenAt: typeof meta.last_seen_at === "string" ? meta.last_seen_at : null,
+          };
+
+          const prev = deduped.get(userId);
+          if (!prev) {
+            deduped.set(userId, entry);
+            continue;
+          }
+          const prevMs = prev.lastSeenAt ? Date.parse(prev.lastSeenAt) : 0;
+          const nextMs = entry.lastSeenAt ? Date.parse(entry.lastSeenAt) : 0;
+          if (nextMs >= prevMs) deduped.set(userId, entry);
+        }
+      }
+
+      const sorted = Array.from(deduped.values()).sort((a, b) => {
+        const aMs = a.lastSeenAt ? Date.parse(a.lastSeenAt) : 0;
+        const bMs = b.lastSeenAt ? Date.parse(b.lastSeenAt) : 0;
+        if (aMs !== bMs) return bMs - aMs;
+        return getStaffDisplayName(a).localeCompare(getStaffDisplayName(b), "ru");
+      });
+      setOnlineStaff(sorted);
+    };
+
+    channel
+      .on("presence", { event: "sync" }, syncOnlineStaff)
+      .on("presence", { event: "join" }, syncOnlineStaff)
+      .on("presence", { event: "leave" }, syncOnlineStaff)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [viewer?.warehouseId]);
 
   useEffect(() => {
     const cellIdParam = searchParams.get("cellId");
@@ -322,6 +412,9 @@ export default function WarehouseMapPage() {
       height: Math.max(400, maxY - minY + 2 * MAP_PAD),
     };
   }, [visibleCells]);
+
+  const visibleOnlineStaff = showAllOnlineStaff ? onlineStaff : onlineStaff.slice(0, 5);
+  const hasHiddenOnlineStaff = onlineStaff.length > 5;
 
   return (
     <>
@@ -1606,6 +1699,137 @@ export default function WarehouseMapPage() {
           )}
         </div>
       )}
+
+      <div
+        style={{
+          position: "fixed",
+          right: 20,
+          bottom: 20,
+          width: 320,
+          maxHeight: "45vh",
+          overflow: "auto",
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          background: "#ffffff",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.14)",
+          zIndex: 60,
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 14px",
+            borderBottom: "1px solid #eef2f7",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#111827" }}>
+            Онлайн сотрудники ({onlineStaff.length})
+          </div>
+        </div>
+
+        <div style={{ padding: 10, display: "grid", gap: 8 }}>
+          {visibleOnlineStaff.length === 0 ? (
+            <div
+              style={{
+                fontSize: 12,
+                color: "#6b7280",
+                padding: "6px 4px",
+              }}
+            >
+              Сейчас нет активных сотрудников онлайн
+            </div>
+          ) : (
+            visibleOnlineStaff.map((staff) => (
+              <div
+                key={staff.userId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  border: "1px solid #eef2f7",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                }}
+              >
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: "50%",
+                    background: "#e5e7eb",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                  }}
+                >
+                  {staff.avatarUrl ? (
+                    <img
+                      src={staff.avatarUrl}
+                      alt={getStaffDisplayName(staff)}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 16, color: "#6b7280" }}>👤</span>
+                  )}
+                </div>
+
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#111827",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={getStaffDisplayName(staff)}
+                  >
+                    {getStaffDisplayName(staff)}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{staff.role}</div>
+                </div>
+
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#10b981",
+                    flexShrink: 0,
+                  }}
+                />
+              </div>
+            ))
+          )}
+        </div>
+
+        {hasHiddenOnlineStaff && (
+          <div style={{ padding: "0 10px 10px" }}>
+            <button
+              type="button"
+              onClick={() => setShowAllOnlineStaff((prev) => !prev)}
+              style={{
+                width: "100%",
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                background: "#f9fafb",
+                padding: "8px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#374151",
+                cursor: "pointer",
+              }}
+            >
+              {showAllOnlineStaff ? "Свернуть" : `Показать еще (${onlineStaff.length - 5})`}
+            </button>
+          </div>
+        )}
+      </div>
       </div>
       </div>
     </>
