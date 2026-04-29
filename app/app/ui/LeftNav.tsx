@@ -59,6 +59,19 @@ const Icons = {
       <circle cx="13" cy="15" r="1" />
     </svg>
   ),
+  Courier: () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="4.5" cy="14.5" r="2.2" />
+      <circle cx="15.5" cy="14.5" r="2.2" />
+      <path d="M6.5 14.5h3.5l2.2-4h2.6" />
+      <path d="M10 14.5l1.2-3.2" />
+      <path d="M8.3 10.5l2.2-1.5 2.2 1.2" />
+      <circle cx="8.2" cy="6.2" r="1.2" />
+      <path d="M8.2 7.4l1.8 1.3" />
+      <path d="M10 8.7l-1.5 2.2" />
+      <path d="M11 11.5h2.2" />
+    </svg>
+  ),
   Out: () => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10 17V3M3 10l7 7 7-7" />
@@ -352,11 +365,6 @@ export default function LeftNav({ role }: { role: string }) {
                 Мерчант не принял
               </NavButton>
             )}
-            {(canOps || canLogistics) && (
-              <NavButton href="/routeplanning" icon={<Icons.Map />} isCollapsed={!shouldExpand}>
-                Route Planning
-              </NavButton>
-            )}
           </>
         )}
 
@@ -367,6 +375,9 @@ export default function LeftNav({ role }: { role: string }) {
             <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
               Отправка заказов
             </NavButton>
+            <NavButton href="/routeplanning" icon={<Icons.Courier />} isCollapsed={!shouldExpand}>
+              Route Planning
+            </NavButton>
             <NavButton href="/app/outbound" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
               OUT (В доставке)
             </NavButton>
@@ -375,9 +386,6 @@ export default function LeftNav({ role }: { role: string }) {
 
         {/* Common section */}
         {!isHubWorker && <SectionTitle isCollapsed={!shouldExpand}>ОБЩЕЕ</SectionTitle>}
-        <NavButton href="/app/units" icon={<Icons.Units />} isCollapsed={!shouldExpand}>
-          Заказы
-        </NavButton>
         {!isHubWorker && (
           <NavButton href="/app/duplicates" icon={<Icons.Duplicates />} isCollapsed={!shouldExpand}>
             Дубли

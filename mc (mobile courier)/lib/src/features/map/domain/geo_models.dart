@@ -15,7 +15,7 @@ class GeoZone {
     final rawPolygon = map['polygon'] as List<dynamic>? ?? const [];
     return GeoZone(
       id: map['id']?.toString() ?? '',
-      name: map['name']?.toString() ?? 'Зона',
+      name: map['name']?.toString() ?? 'Zona',
       code: map['code']?.toString() ?? '',
       polygon: rawPolygon
           .whereType<Map<String, dynamic>>()

@@ -117,9 +117,13 @@ export default function WarehouseMapPage() {
     userId: string;
     warehouseId: string | null;
     role: string;
+    fullName: string | null;
+    email: string | null;
   } | null>(null);
   const [onlineStaff, setOnlineStaff] = useState<OnlineStaff[]>([]);
   const [showAllOnlineStaff, setShowAllOnlineStaff] = useState(false);
+  const [onlinePanelHovered, setOnlinePanelHovered] = useState(false);
+  const onlineSeenRef = useRef<Map<string, OnlineStaff & { seenAtMs: number }>>(new Map());
   const [newCode, setNewCode] = useState("");
   const [newCellType, setNewCellType] = useState<"bin" | "storage" | "picking" | "shipping" | "surplus" | "rejected" | "ff">("storage");
   const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -281,6 +285,8 @@ export default function WarehouseMapPage() {
       userId: j.user?.id ?? "",
       warehouseId: j.warehouse_id ?? null,
       role: j.role ?? "guest",
+      fullName: j.full_name ?? null,
+      email: j.user?.email ?? null,
     });
   }
 
@@ -312,7 +318,12 @@ export default function WarehouseMapPage() {
     if (!viewer?.warehouseId) return;
 
     const supabase = supabaseBrowser();
-    const channel = supabase.channel(`warehouse-staff-online:${viewer.warehouseId}`);
+    const channel = supabase.channel(`warehouse-staff-online:${viewer.warehouseId}`, {
+      config: { presence: { key: viewer.userId } },
+    });
+    const broadcastChannel = supabase.channel(`warehouse-staff-online-feed:${viewer.warehouseId}`, {
+      config: { broadcast: { self: true } },
+    });
 
     const syncOnlineStaff = () => {
       const presence = channel.presenceState() as Record<string, Array<Record<string, unknown>>>;
@@ -359,16 +370,72 @@ export default function WarehouseMapPage() {
       setOnlineStaff(sorted);
     };
 
-    channel
-      .on("presence", { event: "sync" }, syncOnlineStaff)
-      .on("presence", { event: "join" }, syncOnlineStaff)
-      .on("presence", { event: "leave" }, syncOnlineStaff)
-      .subscribe();
+    try {
+      const subscribed = channel
+        .on("presence", { event: "sync" }, syncOnlineStaff)
+        .on("presence", { event: "join" }, syncOnlineStaff)
+        .on("presence", { event: "leave" }, syncOnlineStaff)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            const payload = {
+              user_id: viewer.userId,
+              email: viewer.email,
+              full_name: viewer.fullName,
+              role: viewer.role,
+              avatar_url: null as string | null,
+              last_seen_at: new Date().toISOString(),
+            };
+            channel.track(payload).catch(() => undefined);
+          }
+        });
+      const broadcastSubscribed = broadcastChannel
+        .on("broadcast", { event: "online_ping" }, ({ payload }) => {
+          const ping = (payload || {}) as Record<string, unknown>;
+          const userId = typeof ping.user_id === "string" ? ping.user_id : "";
+          if (!userId) return;
+          const roleValue = typeof ping.role === "string" ? ping.role : "guest";
+          if (roleValue === "courier") return;
+          const item: OnlineStaff & { seenAtMs: number } = {
+            userId,
+            role: roleValue,
+            fullName: typeof ping.full_name === "string" ? ping.full_name : null,
+            email: typeof ping.email === "string" ? ping.email : null,
+            avatarUrl: typeof ping.avatar_url === "string" ? ping.avatar_url : null,
+            lastSeenAt: typeof ping.last_seen_at === "string" ? ping.last_seen_at : new Date().toISOString(),
+            seenAtMs: Date.now(),
+          };
+          onlineSeenRef.current.set(userId, item);
+          const now = Date.now();
+          const alive = Array.from(onlineSeenRef.current.values())
+            .filter((entry) => now - entry.seenAtMs <= 45000)
+            .sort((a, b) => b.seenAtMs - a.seenAtMs)
+            .map(({ seenAtMs, ...rest }) => rest);
+          setOnlineStaff(alive);
+        })
+        .subscribe();
+    } catch (e) {
+      console.error("Warehouse online channels subscribe failed", e);
+    }
+    const pruneId = setInterval(() => {
+      const now = Date.now();
+      const alive = Array.from(onlineSeenRef.current.values())
+        .filter((entry) => now - entry.seenAtMs <= 45000)
+        .sort((a, b) => b.seenAtMs - a.seenAtMs)
+        .map(({ seenAtMs, ...rest }) => rest);
+      setOnlineStaff(alive);
+    }, 5000);
 
     return () => {
+      clearInterval(pruneId);
+      channel.untrack().catch(() => undefined);
       supabase.removeChannel(channel);
+      supabase.removeChannel(broadcastChannel);
     };
-  }, [viewer?.warehouseId]);
+  }, [viewer?.warehouseId, viewer?.userId, viewer?.role, viewer?.fullName, viewer?.email]);
+
+  useEffect(() => {
+    // keep state effect for future online-related reactions if needed
+  }, [onlineStaff]);
 
   useEffect(() => {
     const cellIdParam = searchParams.get("cellId");
@@ -1700,149 +1767,6 @@ export default function WarehouseMapPage() {
         </div>
       )}
 
-      <div
-        style={{
-          position: "fixed",
-          right: 20,
-          left: 96,
-          bottom: 16,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          zIndex: 60,
-          pointerEvents: "none",
-        }}
-      >
-        <div
-          style={{
-            pointerEvents: "auto",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            maxWidth: "100%",
-            overflowX: "auto",
-            padding: "8px 10px",
-            borderRadius: 20,
-            border: "1px solid rgba(255,255,255,0.35)",
-            background: "linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.10))",
-            backdropFilter: "blur(18px) saturate(130%)",
-            WebkitBackdropFilter: "blur(18px) saturate(130%)",
-            boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-          }}
-        >
-          {visibleOnlineStaff.length === 0 ? (
-            <div style={{ fontSize: 12, color: "rgba(17,24,39,0.78)", padding: "0 6px" }}>
-              Сейчас нет активных сотрудников онлайн
-            </div>
-          ) : (
-            visibleOnlineStaff.map((staff) => (
-              <div
-                key={staff.userId}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexShrink: 0,
-                  minWidth: 180,
-                  maxWidth: 220,
-                  borderRadius: 16,
-                  padding: "7px 10px",
-                  border: "1px solid rgba(255,255,255,0.4)",
-                  background: "rgba(255,255,255,0.18)",
-                  backdropFilter: "blur(14px) saturate(120%)",
-                  WebkitBackdropFilter: "blur(14px) saturate(120%)",
-                }}
-              >
-                <div
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: "50%",
-                    background: "rgba(148,163,184,0.45)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    overflow: "hidden",
-                    flexShrink: 0,
-                  }}
-                >
-                  {staff.avatarUrl ? (
-                    <img
-                      src={staff.avatarUrl}
-                      alt={getStaffDisplayName(staff)}
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                  ) : (
-                    <span style={{ fontSize: 14, color: "rgba(51,65,85,0.95)" }}>👤</span>
-                  )}
-                </div>
-
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: "rgba(15,23,42,0.96)",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                    title={getStaffDisplayName(staff)}
-                  >
-                    {getStaffDisplayName(staff)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "rgba(30,41,59,0.78)",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {staff.role}
-                  </div>
-                </div>
-
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "#10b981",
-                    boxShadow: "0 0 8px rgba(16,185,129,0.7)",
-                    flexShrink: 0,
-                  }}
-                />
-              </div>
-            ))
-          )}
-        </div>
-
-        {hasHiddenOnlineStaff && (
-          <button
-            type="button"
-            onClick={() => setShowAllOnlineStaff((prev) => !prev)}
-            style={{
-              pointerEvents: "auto",
-              flexShrink: 0,
-              border: "1px solid rgba(255,255,255,0.45)",
-              borderRadius: 14,
-              background: "rgba(255,255,255,0.22)",
-              backdropFilter: "blur(14px) saturate(130%)",
-              WebkitBackdropFilter: "blur(14px) saturate(130%)",
-              padding: "8px 10px",
-              fontSize: 12,
-              fontWeight: 700,
-              color: "rgba(15,23,42,0.92)",
-              cursor: "pointer",
-              boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
-            }}
-          >
-            {showAllOnlineStaff ? "Свернуть" : `Еще +${onlineStaff.length - 5}`}
-          </button>
-        )}
-      </div>
       </div>
       </div>
     </>

@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
+import PublicLanding from "./PublicLanding";
 
-export default async function RootPage() {
-  // Простой редирект на основную страницу
-  // Проверка авторизации выполняется в middleware для /app путей
-  redirect("/app/warehouse-map");
+export default function RootPage() {
+  return <PublicLanding />;
 }

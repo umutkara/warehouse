@@ -24,8 +24,10 @@ class PendingAssignment {
     return PendingAssignment(
       id: map['id']?.toString() ?? '',
       unitId: map['unit_id']?.toString() ?? '',
-      barcode: unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'Н/Д',
-      outAt: DateTime.tryParse(map['out_at']?.toString() ?? '') ?? DateTime.now(),
+      barcode:
+          unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'N/A',
+      outAt:
+          DateTime.tryParse(map['out_at']?.toString() ?? '') ?? DateTime.now(),
       courierName: map['courier_name']?.toString(),
       productName: unit?['product_name']?.toString(),
       partnerName: unit?['partner_name']?.toString(),

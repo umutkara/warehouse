@@ -78,9 +78,9 @@ class CourierAppController extends ChangeNotifier {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'courier_offline_location',
-        channelName: 'Сбор геолокации офлайн',
+        channelName: 'Oflayn geolokasiya',
         channelDescription:
-            'Приложение собирает местоположение при отсутствии интернета',
+            'İnternet olmadıqda tətbiq məkan məlumatını toplayır',
         onlyAlertOnce: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
@@ -133,8 +133,8 @@ class CourierAppController extends ChangeNotifier {
           }
         }
         await FlutterForegroundTask.startService(
-          notificationTitle: 'Курьер',
-          notificationText: 'Сбор геолокации при отсутствии интернета',
+          notificationTitle: 'Kuryer',
+          notificationText: 'İnternet olmadıqda geolokasiya toplanır',
           serviceId: 256,
           callback: startOfflineLocationTask,
         );
@@ -570,7 +570,7 @@ class CourierAppController extends ChangeNotifier {
         },
       );
       pendingQueueCount = await _eventQueue.pendingCount();
-      error = 'Сохранено офлайн: $eventType';
+      error = 'Oflayn saxlanıldı: $eventType';
       loading = false;
       notifyListeners();
     }
@@ -582,11 +582,8 @@ class CourierAppController extends ChangeNotifier {
   }
 
   Future<void> closeShift({bool force = false, String? note}) async {
-    debugPrint('[CourierAppController] closeShift: force=$force, note=$note');
     await stopLiveTracking();
-    debugPrint('[CourierAppController] closeShift: calling API');
     await _taskRepository.closeShift(force: force, note: note);
-    debugPrint('[CourierAppController] closeShift: API ok, refreshing');
     await refreshAll();
   }
 
@@ -594,7 +591,7 @@ class CourierAppController extends ChangeNotifier {
     if (_positionSubscription != null) return;
     final isLocationEnabled = await Geolocator.isLocationServiceEnabled();
     if (!isLocationEnabled) {
-      trackingStatus = 'Включите GPS на устройстве';
+      trackingStatus = 'Cihazda GPS-i aktiv edin';
       notifyListeners();
       return;
     }
@@ -605,12 +602,12 @@ class CourierAppController extends ChangeNotifier {
     }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      trackingStatus = 'Нет разрешения на геолокацию';
+      trackingStatus = 'Geolokasiya icazəsi yoxdur';
       notifyListeners();
       return;
     }
 
-    trackingStatus = 'GPS трекинг активен';
+    trackingStatus = 'GPS izləmə aktivdir';
     notifyListeners();
     const settings = LocationSettings(
       accuracy: LocationAccuracy.high,
@@ -622,7 +619,7 @@ class CourierAppController extends ChangeNotifier {
             _onPosition(position);
           },
           onError: (Object e) {
-            trackingStatus = 'Ошибка GPS: $e';
+            trackingStatus = 'GPS xətası: $e';
             notifyListeners();
           },
         );
@@ -631,7 +628,7 @@ class CourierAppController extends ChangeNotifier {
   Future<void> stopLiveTracking() async {
     await _positionSubscription?.cancel();
     _positionSubscription = null;
-    trackingStatus = 'GPS трекинг остановлен';
+    trackingStatus = 'GPS izləmə dayandırıldı';
     notifyListeners();
   }
 

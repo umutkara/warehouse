@@ -6,10 +6,8 @@ import 'package:http_parser/http_parser.dart';
 import '../config/app_config.dart';
 
 class ApiClient {
-  ApiClient({
-    http.Client? httpClient,
-    this.accessTokenProvider,
-  }) : _http = httpClient ?? http.Client();
+  ApiClient({http.Client? httpClient, this.accessTokenProvider})
+    : _http = httpClient ?? http.Client();
 
   final http.Client _http;
   final Future<String?> Function()? accessTokenProvider;
@@ -50,21 +48,23 @@ class ApiClient {
     }
     final request = http.MultipartRequest('POST', uri)
       ..headers.addAll(headers)
-      ..files.add(http.MultipartFile.fromBytes(
-        fileField,
-        fileBytes,
-        filename: fileName,
-        contentType: contentType != null ? MediaType.parse(contentType) : null,
-      ));
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          fileField,
+          fileBytes,
+          filename: fileName,
+          contentType: contentType != null
+              ? MediaType.parse(contentType)
+              : null,
+        ),
+      );
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
     return _decodeResponse(response, path);
   }
 
   Future<Map<String, String>> _defaultHeaders() async {
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-    };
+    final headers = <String, String>{'Content-Type': 'application/json'};
     final token = await accessTokenProvider?.call();
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
@@ -73,7 +73,9 @@ class ApiClient {
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response, String path) {
-    final dynamic decoded = response.body.isEmpty ? {} : jsonDecode(response.body);
+    final dynamic decoded = response.body.isEmpty
+        ? {}
+        : jsonDecode(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (decoded is Map<String, dynamic>) {
         return decoded;
@@ -81,8 +83,8 @@ class ApiClient {
       return {'ok': true, 'data': decoded};
     }
     final message = decoded is Map<String, dynamic>
-        ? decoded['error']?.toString() ?? 'Ошибка запроса'
-        : 'Ошибка запроса';
+        ? decoded['error']?.toString() ?? 'Sorğu xətası'
+        : 'Sorğu xətası';
     throw ApiException(message, response.statusCode);
   }
 }

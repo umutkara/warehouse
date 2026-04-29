@@ -53,13 +53,6 @@ const TopIcons = {
 export default function TopBarExcel() {
   const router = useRouter();
   const [role, setRole] = useState<string>("guest");
-  const [presenceMe, setPresenceMe] = useState<{
-    id: string;
-    email: string | null;
-    role: string;
-    full_name: string | null;
-    warehouse_id: string | null;
-  } | null>(null);
 
   useEffect(() => {
     async function loadRole() {
@@ -68,57 +61,13 @@ export default function TopBarExcel() {
         const json = await res.json();
         if (res.ok && json.role) {
           setRole(json.role);
-          setPresenceMe({
-            id: json.user?.id ?? "",
-            email: json.user?.email ?? null,
-            role: json.role ?? "guest",
-            full_name: json.full_name ?? null,
-            warehouse_id: json.warehouse_id ?? null,
-          });
         }
       } catch {
         setRole("guest");
-        setPresenceMe(null);
       }
     }
     loadRole();
   }, []);
-
-  useEffect(() => {
-    if (!presenceMe?.id || !presenceMe.warehouse_id || presenceMe.role === "courier") return;
-
-    const supabase = supabaseBrowser();
-    const channel = supabase.channel(`warehouse-staff-online:${presenceMe.warehouse_id}`, {
-      config: { presence: { key: presenceMe.id } },
-    });
-
-    const buildPresencePayload = () => ({
-      user_id: presenceMe.id,
-      email: presenceMe.email,
-      full_name: presenceMe.full_name,
-      role: presenceMe.role,
-      avatar_url: null,
-      last_seen_at: new Date().toISOString(),
-    });
-
-    let disposed = false;
-    channel.subscribe(async (status) => {
-      if (status === "SUBSCRIBED" && !disposed) {
-        await channel.track(buildPresencePayload());
-      }
-    });
-
-    const heartbeat = setInterval(() => {
-      channel.track(buildPresencePayload()).catch(() => undefined);
-    }, 25000);
-
-    return () => {
-      disposed = true;
-      clearInterval(heartbeat);
-      channel.untrack().catch(() => undefined);
-      supabase.removeChannel(channel);
-    };
-  }, [presenceMe]);
 
   async function handleLogout() {
     const supabase = supabaseBrowser();

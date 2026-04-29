@@ -117,15 +117,11 @@ class ShiftPage extends StatelessWidget {
                               ),
                             );
                             if (confirm != true || !context.mounted) return;
-                            debugPrint(
-                              '[ShiftPage] closeShift: sending request',
-                            );
                             try {
                               await controller.closeShift(
                                 force: false,
-                                note: 'Обычное закрытие из мобильного',
+                                note: context.t('shift.close.default_note'),
                               );
-                              debugPrint('[ShiftPage] closeShift: success');
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -135,9 +131,6 @@ class ShiftPage extends StatelessWidget {
                                 ),
                               );
                             } on ApiException catch (e) {
-                              debugPrint(
-                                '[ShiftPage] closeShift error: ${e.statusCode} ${e.message}',
-                              );
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -147,15 +140,15 @@ class ShiftPage extends StatelessWidget {
                                   ).colorScheme.error,
                                 ),
                               );
-                            } catch (e, st) {
-                              debugPrint(
-                                '[ShiftPage] closeShift unexpected error: $e',
-                              );
-                              debugPrint(st.toString());
+                            } catch (e, _) {
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('Ошибка: ${e.toString()}'),
+                                  content: Text(
+                                    tr(context.t('common.error_with_message'), {
+                                      'error': e.toString(),
+                                    }),
+                                  ),
                                   backgroundColor: Theme.of(
                                     context,
                                   ).colorScheme.error,

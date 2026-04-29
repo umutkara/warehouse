@@ -440,28 +440,24 @@ class _PendingAssignmentsSection extends StatelessWidget {
         initiallyExpanded: false,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         title: Text(
-          'Задания от логистов — неподтвержденные ($count)',
+          tr(context.t('tasks.pending.title'), {'count': count}),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: highlighted ? FontWeight.bold : null,
           ),
         ),
-        subtitle: const Text(
-          'Подтвердите забор или укажите незабор с причиной',
-        ),
+        subtitle: Text(context.t('tasks.pending.subtitle')),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Подтвердите забор сканом или выберите заказы и подтвердите массово.',
-                ),
+                Text(context.t('tasks.pending.body')),
                 const SizedBox(height: 10),
                 TextField(
                   controller: scanController,
-                  decoration: const InputDecoration(
-                    labelText: 'Скан штрихкода для авто-подтверждения',
+                  decoration: InputDecoration(
+                    labelText: context.t('tasks.pending.scan_label'),
                     border: OutlineInputBorder(),
                   ),
                   onSubmitted: (_) async => _scanConfirm(context),
@@ -470,11 +466,11 @@ class _PendingAssignmentsSection extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: () async => _scanConfirm(context),
                   icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('Сканировать и подтвердить'),
+                  label: Text(context.t('tasks.pending.scan_confirm')),
                 ),
                 const SizedBox(height: 12),
                 if (assignments.isEmpty)
-                  const Text('Нет неподтвержденных заказов')
+                  Text(context.t('tasks.pending.none'))
                 else
                   ...assignments.map((assignment) {
                     final selected = selectedIds.contains(assignment.id);
@@ -497,15 +493,31 @@ class _PendingAssignmentsSection extends StatelessWidget {
                                   style: Theme.of(context).textTheme.titleSmall,
                                 ),
                                 Text(
-                                  'Отгружен: ${formatter.format(assignment.outAt.toLocal())}',
+                                  tr(context.t('tasks.pending.out_at'), {
+                                    'dt': formatter.format(
+                                      assignment.outAt.toLocal(),
+                                    ),
+                                  }),
                                 ),
                                 if (assignment.productName != null)
-                                  Text('Товар: ${assignment.productName}'),
+                                  Text(
+                                    tr(context.t('tasks.pending.product'), {
+                                      'name': assignment.productName,
+                                    }),
+                                  ),
                                 if (assignment.partnerName != null)
-                                  Text('Партнер: ${assignment.partnerName}'),
+                                  Text(
+                                    tr(context.t('tasks.pending.partner'), {
+                                      'name': assignment.partnerName,
+                                    }),
+                                  ),
                                 if (assignment.scenario != null &&
                                     assignment.scenario!.isNotEmpty)
-                                  Text('Сценарий: ${assignment.scenario}'),
+                                  Text(
+                                    tr(context.t('tasks.pending.scenario'), {
+                                      'scenario': assignment.scenario,
+                                    }),
+                                  ),
                               ],
                             ),
                           ),
@@ -522,7 +534,9 @@ class _PendingAssignmentsSection extends StatelessWidget {
                             ? null
                             : () async => onConfirmSelected(),
                         child: Text(
-                          'Подтвердить забор (${selectedIds.length})',
+                          tr(context.t('tasks.pending.confirm_bulk'), {
+                            'count': selectedIds.length,
+                          }),
                         ),
                       ),
                     ),
@@ -532,7 +546,11 @@ class _PendingAssignmentsSection extends StatelessWidget {
                         onPressed: selectedIds.isEmpty
                             ? null
                             : () async => onRejectSelected(),
-                        child: Text('Незабор (${selectedIds.length})'),
+                        child: Text(
+                          tr(context.t('tasks.pending.reject_bulk'), {
+                            'count': selectedIds.length,
+                          }),
+                        ),
                       ),
                     ),
                   ],
@@ -548,7 +566,9 @@ class _PendingAssignmentsSection extends StatelessWidget {
   Future<void> _scanConfirm(BuildContext context) async {
     final scanned = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => BarcodeScannerSheet(title: 'Сканировать и подтвердить'),
+        builder: (_) => BarcodeScannerSheet(
+          title: context.t('tasks.pending.scan_confirm_title'),
+        ),
       ),
     );
     final normalizedScanned = scanned == null
@@ -571,7 +591,13 @@ class _PendingAssignmentsSection extends StatelessWidget {
       if (controller.error == null) {
         scanController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Забор подтвержден сканом: $scanned')),
+          SnackBar(
+            content: Text(
+              tr(context.t('tasks.pending.scan_confirm_snack'), {
+                'barcode': scanned,
+              }),
+            ),
+          ),
         );
       }
       return;
@@ -583,7 +609,13 @@ class _PendingAssignmentsSection extends StatelessWidget {
     if (controller.error == null) {
       scanController.clear();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Забор подтвержден сканом: $scanned')),
+        SnackBar(
+          content: Text(
+            tr(context.t('tasks.pending.scan_confirm_snack'), {
+              'barcode': scanned,
+            }),
+          ),
+        ),
       );
     }
   }
@@ -602,9 +634,7 @@ class _TasksGroupedByScenario extends StatelessWidget {
   final void Function(String taskId, bool selected) onToggleSelected;
   final void Function(CourierTask task) onOpenTask;
 
-  static String _scenarioKey(CourierTask t) => (t.scenario ?? '').trim().isEmpty
-      ? 'Без сценария'
-      : (t.scenario ?? '').trim();
+  static String _scenarioKey(CourierTask t) => (t.scenario ?? '').trim();
 
   @override
   Widget build(BuildContext context) {
@@ -614,8 +644,8 @@ class _TasksGroupedByScenario extends StatelessWidget {
     }
     final sortedKeys = groups.keys.toList()
       ..sort((a, b) {
-        if (a == 'Без сценария') return 1;
-        if (b == 'Без сценария') return -1;
+        if (a.isEmpty) return 1;
+        if (b.isEmpty) return -1;
         return a.compareTo(b);
       });
 
@@ -626,7 +656,9 @@ class _TasksGroupedByScenario extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Text(
-              scenarioKey,
+              scenarioKey.isEmpty
+                  ? context.t('tasks.no_scenario')
+                  : scenarioKey,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.w600,
@@ -691,7 +723,7 @@ class _TaskCard extends StatelessWidget {
             action: StatusChip(
               status: task.status,
               opsStatus: task.opsStatus,
-              label: showNotPicked ? 'НЕ ЗАБРАН' : null,
+              label: showNotPicked ? context.t('task.not_picked') : null,
               color: showNotPicked ? Colors.red.shade700 : null,
             ),
             dense: dense,
@@ -712,7 +744,13 @@ class _TaskCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'Назначено логистом${task.assignedCourierName != null ? ': ${task.assignedCourierName}' : ''}',
+                        tr(context.t('task.assigned_by_logistics'), {
+                          'suffix': task.assignedCourierName != null
+                              ? tr(context.t('task.assigned_suffix_name'), {
+                                  'name': task.assignedCourierName,
+                                })
+                              : '',
+                        }),
                         style: smallStyle,
                       ),
                     ),
@@ -734,7 +772,9 @@ class _TaskCard extends StatelessWidget {
                     (task.scenario != null && task.scenario!.isNotEmpty)))
                   const SizedBox(height: 2),
                 Text(
-                  'Взято: ${formatter.format(task.claimedAt.toLocal())}',
+                  tr(context.t('task.claimed_short'), {
+                    'dt': formatter.format(task.claimedAt.toLocal()),
+                  }),
                   style: smallStyle,
                 ),
                 SizedBox(height: dense ? 4 : 8),
@@ -752,7 +792,7 @@ class _TaskCard extends StatelessWidget {
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           )
                         : null,
-                    child: const Text('Открыть'),
+                    child: Text(context.t('common.open')),
                   ),
                 ),
               ],

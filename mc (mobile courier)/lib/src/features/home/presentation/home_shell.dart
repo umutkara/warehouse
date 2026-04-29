@@ -29,12 +29,29 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _handlingUnauthorized = false;
 
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.parse(AppConfig.privacyPolicyUrl);
+    bool opened;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.t('home.privacy_open_error'))),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller = CourierAppController(
-      apiClient: ApiClient(accessTokenProvider: () => AuthService.getValidAccessToken()),
+      apiClient: ApiClient(
+        accessTokenProvider: () => AuthService.getValidAccessToken(),
+      ),
     );
     _controller.bootstrap(initialCourierName: widget.courierName);
   }
@@ -58,7 +75,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        if (!_handlingUnauthorized && _controller.error?.contains('ApiException(401)') == true) {
+        if (!_handlingUnauthorized &&
+            _controller.error?.contains('ApiException(401)') == true) {
           _handlingUnauthorized = true;
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             await widget.onLogout();
@@ -73,7 +91,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(tr(context.t('home.title'), {'name': _controller.courierName})),
+            title: Text(
+              tr(context.t('home.title'), {'name': _controller.courierName}),
+            ),
             actions: [
               PopupMenuButton<AppLang>(
                 initialValue: context.lang,
@@ -93,7 +113,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Center(
                     child: Text(
-                      context.lang == AppLang.az ? context.t('lang.az') : context.t('lang.ru'),
+                      context.lang == AppLang.az
+                          ? context.t('lang.az')
+                          : context.t('lang.ru'),
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
@@ -103,7 +125,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Center(
-                    child: Text(tr(context.t('home.queue'), {'count': _controller.pendingQueueCount})),
+                    child: Text(
+                      tr(context.t('home.queue'), {
+                        'count': _controller.pendingQueueCount,
+                      }),
+                    ),
                   ),
                 ),
               IconButton(
@@ -112,12 +138,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 tooltip: context.t('home.refresh'),
               ),
               IconButton(
-                onPressed: () async {
-                  final uri = Uri.parse(AppConfig.privacyPolicyUrl);
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  }
-                },
+                onPressed: _openPrivacyPolicy,
                 icon: const Icon(Icons.privacy_tip_outlined),
                 tooltip: context.t('home.privacy_policy'),
               ),
@@ -130,7 +151,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ),
           body: pages[_selectedIndex],
           floatingActionButton: _buildCenterFab(context),
-          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+          floatingActionButtonLocation:
+              FloatingActionButtonLocation.centerDocked,
           bottomNavigationBar: _buildBottomNav(context),
         );
       },
@@ -143,8 +165,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final selected = _selectedIndex == centerIndex;
     return FloatingActionButton(
       onPressed: () => setState(() => _selectedIndex = centerIndex),
-      backgroundColor: selected ? colorScheme.primaryContainer : colorScheme.secondaryContainer,
-      foregroundColor: selected ? colorScheme.onPrimaryContainer : colorScheme.onSecondaryContainer,
+      backgroundColor: selected
+          ? colorScheme.primaryContainer
+          : colorScheme.secondaryContainer,
+      foregroundColor: selected
+          ? colorScheme.onPrimaryContainer
+          : colorScheme.onSecondaryContainer,
       elevation: 6,
       heroTag: 'center_fab',
       child: const Icon(Icons.add_box, size: 28),
@@ -153,9 +179,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   Widget _buildBottomNav(BuildContext context) {
     final navItems = [
-      (icon: Icons.assignment_outlined, selectedIcon: Icons.assignment, label: context.t('nav.tasks')),
-      (icon: Icons.add_box_outlined, selectedIcon: Icons.add_box, label: context.t('nav.pickup')),
-      (icon: Icons.query_stats_outlined, selectedIcon: Icons.query_stats, label: context.t('nav.shift')),
+      (
+        icon: Icons.assignment_outlined,
+        selectedIcon: Icons.assignment,
+        label: context.t('nav.tasks'),
+      ),
+      (
+        icon: Icons.add_box_outlined,
+        selectedIcon: Icons.add_box,
+        label: context.t('nav.pickup'),
+      ),
+      (
+        icon: Icons.query_stats_outlined,
+        selectedIcon: Icons.query_stats,
+        label: context.t('nav.shift'),
+      ),
     ];
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -169,21 +207,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            Expanded(child: _NavItem(
-              icon: navItems[0].icon,
-              selectedIcon: navItems[0].selectedIcon,
-              label: navItems[0].label,
-              selected: _selectedIndex == 0,
-              onTap: () => setState(() => _selectedIndex = 0),
-            )),
+            Expanded(
+              child: _NavItem(
+                icon: navItems[0].icon,
+                selectedIcon: navItems[0].selectedIcon,
+                label: navItems[0].label,
+                selected: _selectedIndex == 0,
+                onTap: () => setState(() => _selectedIndex = 0),
+              ),
+            ),
             const SizedBox(width: 56),
-            Expanded(child: _NavItem(
-              icon: navItems[2].icon,
-              selectedIcon: navItems[2].selectedIcon,
-              label: navItems[2].label,
-              selected: _selectedIndex == 2,
-              onTap: () => setState(() => _selectedIndex = 2),
-            )),
+            Expanded(
+              child: _NavItem(
+                icon: navItems[2].icon,
+                selectedIcon: navItems[2].selectedIcon,
+                label: navItems[2].label,
+                selected: _selectedIndex == 2,
+                onTap: () => setState(() => _selectedIndex = 2),
+              ),
+            ),
           ],
         ),
       ),
@@ -218,10 +260,25 @@ class _NavItem extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(selected ? selectedIcon : icon, size: 20, color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant),
+            Icon(
+              selected ? selectedIcon : icon,
+              size: 20,
+              color: selected
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 4),
             Flexible(
-              child: Text(label, style: TextStyle(fontSize: 11, color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: selected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -229,4 +286,3 @@ class _NavItem extends StatelessWidget {
     );
   }
 }
-

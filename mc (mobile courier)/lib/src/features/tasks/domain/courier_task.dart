@@ -49,9 +49,11 @@ class CourierTask {
     return CourierTask(
       id: map['id']?.toString() ?? '',
       unitId: map['unit_id']?.toString() ?? '',
-      barcode: unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'Н/Д',
+      barcode:
+          unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'N/A',
       status: map['status']?.toString() ?? 'claimed',
-      claimedAt: DateTime.tryParse(
+      claimedAt:
+          DateTime.tryParse(
             map['claimed_at']?.toString() ?? map['out_at']?.toString() ?? '',
           ) ??
           DateTime.now(),

@@ -20,9 +20,12 @@ class TaskPoolItem {
     return TaskPoolItem(
       id: map['id']?.toString() ?? '',
       unitId: map['unit_id']?.toString() ?? '',
-      barcode: unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'Н/Д',
+      barcode:
+          unit?['barcode']?.toString() ?? map['unit_id']?.toString() ?? 'N/A',
       priority: (map['priority'] as num?)?.toInt() ?? 0,
-      availableFrom: DateTime.tryParse(map['available_from']?.toString() ?? '') ?? DateTime.now(),
+      availableFrom:
+          DateTime.tryParse(map['available_from']?.toString() ?? '') ??
+          DateTime.now(),
       zoneId: map['zone_id']?.toString(),
     );
   }
