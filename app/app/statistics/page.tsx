@@ -47,6 +47,14 @@ type OpsShippingStats = {
       zone: string;
       count: number;
     }>;
+    not_out_drill?: {
+      daily_violations_count: number;
+      current_open_count: number;
+      late_out_count: number;
+      daily_violations: Array<NotOutDrillRow>;
+      current_open: Array<NotOutDrillRow>;
+      late_out: Array<NotOutDrillRow>;
+    };
     team_efficiency?: {
       based_on_created_tasks: number;
       started_at: string | null;
@@ -64,12 +72,18 @@ type OpsShippingStats = {
         user_id: string;
         user_name: string;
         tasks_count: number;
+        orders_count?: number;
       }>;
       shipped_tasks_per_user?: Array<{
         user_id: string;
         user_name: string;
         tasks_count: number;
       }>;
+      tsd_collected_orders_count?: number;
+      completed_tasks_count?: number;
+      completed_units_count?: number;
+      completed_without_tsd_scan_count?: number;
+      picked_completed_different_user_count?: number;
     };
     not_out_cells: Array<
       | string
@@ -89,6 +103,17 @@ type OpsShippingStats = {
       accepted_in_bin_at: string;
     }>;
   }>;
+};
+
+type NotOutDrillRow = {
+  task_id: string;
+  unit_id: string;
+  barcode: string;
+  planned_day: string;
+  kuda: string;
+  cell_code?: string;
+  out_at?: string;
+  out_day?: string;
 };
 
 function getTodayDateUtc() {
@@ -300,6 +325,10 @@ const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
     .filter((row) => row.out_returned_tasks > 0)
     .sort((a, b) => b.out_returned_tasks - a.out_returned_tasks || b.out_tasks - a.out_tasks);
   const rowsToDisplay = topLimit > 0 ? rowsWithReturned.slice(0, topLimit) : rowsWithReturned;
+  const rowsWithReturnedSum = rowsWithReturned.reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0);
+  const rowsToDisplaySum = rowsToDisplay.reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0);
+  const merchantSplitRowsSum = merchantSplitRows.reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0);
+  const nonMerchantRowsReturnedSum = nonMerchantRows.reduce((acc, row) => acc + Number(row.out_returned_tasks || 0), 0);
 
   if (rowsToDisplay.length === 0) {
     return (
@@ -312,10 +341,41 @@ const OpsShippingKudaBars = memo(function OpsShippingKudaBars({
   const maxReturned = Math.max(1, ...rowsToDisplay.map((row) => row.out_returned_tasks));
   return (
     <div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-        <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 700 }}>● Селлер не принял</div>
-        <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
-          Показано: {rowsToDisplay.length} из {rowsWithReturned.length}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <div style={{ border: "1px solid #7f1d1d", borderRadius: 10, background: "rgba(127,29,29,0.18)", padding: "7px 9px" }}>
+          <div style={{ fontSize: 11, color: "#fecaca", fontWeight: 800 }}>Всего не принято</div>
+          <div style={{ fontSize: 18, color: "#fecaca", fontWeight: 900 }}>{rowsWithReturnedSum}</div>
+          <div style={{ fontSize: 10, color: "#fca5a5", marginTop: 1 }}>Сумма всех красных баров</div>
+        </div>
+        <div style={{ border: "1px solid #334155", borderRadius: 10, background: "#111827", padding: "7px 9px" }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800 }}>Показано сегментов</div>
+          <div style={{ fontSize: 18, color: "#e2e8f0", fontWeight: 900 }}>
+            {rowsToDisplay.length} из {rowsWithReturned.length}
+          </div>
+          <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>Сегменты — это бары, не заказы</div>
+        </div>
+        <div style={{ border: "1px solid #334155", borderRadius: 10, background: "#111827", padding: "7px 9px" }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800 }}>В показанных барах</div>
+          <div style={{ fontSize: 18, color: "#fca5a5", fontWeight: 900 }}>{rowsToDisplaySum}</div>
+          <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
+            {topLimit > 0 ? `Top ${topLimit} по количеству` : "Выбраны все сегменты"}
+          </div>
+        </div>
+        <div style={{ border: "1px solid #334155", borderRadius: 10, background: "#111827", padding: "7px 9px" }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800 }}>Разбивка</div>
+          <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 800 }}>
+            Прочие: {nonMerchantRowsReturnedSum} / Мерчант: {merchantSplitRowsSum}
+          </div>
+          <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
+            Мерчант раздроблен на {merchantSplitRows.length} селлеров
+          </div>
         </div>
       </div>
 
@@ -818,6 +878,7 @@ export default function StatisticsPage() {
   const [fromDate, setFromDate] = useState<string>(() => getDateDaysAgoUtc(13));
   const [toDate, setToDate] = useState<string>(() => getTodayDateUtc());
   const [kudaTopLimit, setKudaTopLimit] = useState<number>(20);
+  const [notOutDrillMode, setNotOutDrillMode] = useState<"current" | "late" | "daily">("current");
   const [stats, setStats] = useState<OpsShippingStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1020,6 +1081,7 @@ export default function StatisticsPage() {
               const pickingCount = zoneRows.find((row) => row.zone === "picking")?.count || 0;
               const rejectedCount = zoneRows.find((row) => row.zone === "rejected")?.count || 0;
               if (notOutTotal <= 0) return null;
+              const drill = stats.summary.not_out_drill;
               return (
                 <div
                   style={{
@@ -1031,7 +1093,9 @@ export default function StatisticsPage() {
                   }}
                 >
                   <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
-                    Не выехало: {notOutTotal} (по дням OUT). По текущей зоне: picking {pickingCount}, rejected {rejectedCount}
+                    Не выехало по дням: {notOutTotal}
+                    {drill ? ` · актуальный остаток: ${drill.current_open_count} · выехало позже: ${drill.late_out_count}` : ""}
+                    . По текущей зоне: picking {pickingCount}, rejected {rejectedCount}
                   </div>
                 </div>
               );
@@ -1126,9 +1190,9 @@ export default function StatisticsPage() {
                 color="#f87171"
               />
               <StatCard
-                title="Не выехало"
+                title="Не выехало по дням"
                 value={Math.max(0, stats.summary.total_tasks - stats.summary.out_tasks)}
-                subtitle="Задачи без OUT"
+                subtitle="Исторические дневные нарушения"
                 color="#94a3b8"
               />
             </div>
@@ -1142,7 +1206,126 @@ export default function StatisticsPage() {
               }}
             >
               <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                Не выехало — в каких ячейках числятся
+                Не выехало — drill по периоду
+              </div>
+              {(() => {
+                const drill = stats.summary.not_out_drill;
+                if (!drill) return null;
+                const options = [
+                  {
+                    key: "current" as const,
+                    label: "На конец периода",
+                    count: drill.current_open_count,
+                    hint: "Еще не выехали к последнему дню периода",
+                  },
+                  {
+                    key: "late" as const,
+                    label: "Выехали позже",
+                    count: drill.late_out_count,
+                    hint: "Не выехали в свой день, но закрылись позже",
+                  },
+                  {
+                    key: "daily" as const,
+                    label: "Дневные нарушения",
+                    count: drill.daily_violations_count,
+                    hint: "Исторический факт по каждому плановому дню",
+                  },
+                ];
+                const rows =
+                  notOutDrillMode === "current"
+                    ? drill.current_open
+                    : notOutDrillMode === "late"
+                      ? drill.late_out
+                      : drill.daily_violations;
+                const visibleRows = rows.slice(0, 80);
+                return (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 6, marginBottom: 8 }}>
+                      {options.map((option) => {
+                        const active = notOutDrillMode === option.key;
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setNotOutDrillMode(option.key)}
+                            style={{
+                              textAlign: "left",
+                              border: active ? "1px solid #38bdf8" : "1px solid #334155",
+                              borderRadius: 10,
+                              background: active ? "rgba(14,165,233,0.14)" : "#111827",
+                              padding: "8px 10px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                              <span style={{ fontSize: 12, color: active ? "#bae6fd" : "#cbd5e1", fontWeight: 800 }}>
+                                {option.label}
+                              </span>
+                              <span style={{ fontSize: 16, color: active ? "#7dd3fc" : "#e2e8f0", fontWeight: 900 }}>
+                                {option.count}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 10, color: "#64748b", marginTop: 3 }}>{option.hint}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ border: "1px solid #334155", borderRadius: 10, overflow: "hidden", background: "#0b1220" }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(120px, 1.2fr) 100px minmax(140px, 1fr) minmax(120px, 1fr)",
+                          gap: 8,
+                          padding: "7px 9px",
+                          borderBottom: "1px solid #1f2937",
+                          fontSize: 11,
+                          color: "#94a3b8",
+                          fontWeight: 800,
+                        }}
+                      >
+                        <div>Barcode</div>
+                        <div>Плановый день</div>
+                        <div>{notOutDrillMode === "late" ? "Выехал" : "Текущая ячейка"}</div>
+                        <div>Куда</div>
+                      </div>
+                      {visibleRows.length > 0 ? (
+                        visibleRows.map((row) => (
+                          <div
+                            key={`${notOutDrillMode}-${row.task_id}-${row.unit_id}-${row.planned_day}-${row.out_at || ""}`}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(120px, 1.2fr) 100px minmax(140px, 1fr) minmax(120px, 1fr)",
+                              gap: 8,
+                              padding: "6px 9px",
+                              borderBottom: "1px solid #1f2937",
+                              fontSize: 12,
+                              color: "#cbd5e1",
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, wordBreak: "break-word" }}>{row.barcode}</div>
+                            <div>{row.planned_day}</div>
+                            <div style={{ color: notOutDrillMode === "late" ? "#86efac" : "#fcd34d", fontWeight: 700 }}>
+                              {notOutDrillMode === "late"
+                                ? `${row.out_day || "—"} ${row.out_at ? formatDateTime(row.out_at) : ""}`
+                                : row.cell_code || "—"}
+                            </div>
+                            <div style={{ wordBreak: "break-word" }}>{row.kuda}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ padding: 10, fontSize: 12, color: "#94a3b8" }}>Нет заказов в этой категории</div>
+                      )}
+                    </div>
+                    {rows.length > visibleRows.length && (
+                      <div style={{ marginTop: 6, fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+                        Показано {visibleRows.length} из {rows.length}. Используйте более узкий период для детального просмотра.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
+                Текущие ячейки заказов с дневными нарушениями
               </div>
               <div
                 style={{
@@ -1333,24 +1516,32 @@ export default function StatisticsPage() {
                         </div>
                       </div>
                       <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Отсканировано заказов (TSD)</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Собрано заказов (TSD)</div>
                         <div style={{ fontSize: 13, color: "#fca5a5", fontWeight: 800 }}>
-                          {Number(stats.summary.team_efficiency.scanned_orders_count || 0)}
+                          {Number(
+                            stats.summary.team_efficiency.tsd_collected_orders_count ??
+                              stats.summary.team_efficiency.scanned_orders_count ??
+                              0
+                          )}
                         </div>
                         <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          База созданных задач: {Number(stats.summary.team_efficiency.based_on_created_tasks || 0)}
+                          Пока по picked_by: {Number(stats.summary.team_efficiency.scanned_orders_count || 0)} задач
                         </div>
                       </div>
                       <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Собрано/завершено задач</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Завершено задач всего</div>
                         <div style={{ fontSize: 13, color: "#86efac", fontWeight: 800 }}>
-                          {Number(stats.summary.team_efficiency.completed_orders_count || 0)}
+                          {Number(
+                            stats.summary.team_efficiency.completed_tasks_count ??
+                              stats.summary.team_efficiency.completed_orders_count ??
+                              0
+                          )}
                         </div>
                         <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          Выехало (OUT): {Number(stats.summary.team_efficiency.out_tasks_count || 0)}
+                          Без TSD-исполнителя: {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0)}
                         </div>
                         <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          OUT без TSD-скана: {Number(stats.summary.team_efficiency.out_tasks_without_tsd_scan_count || 0)}
+                          Это закрытие задач, не персональная сборка TSD
                         </div>
                       </div>
                       <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
@@ -1377,7 +1568,7 @@ export default function StatisticsPage() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "minmax(220px, 1fr) 120px",
+                          gridTemplateColumns: "minmax(220px, 1fr) 100px 100px",
                           gap: 8,
                           padding: "6px 8px",
                           borderBottom: "1px solid #1f2937",
@@ -1387,7 +1578,8 @@ export default function StatisticsPage() {
                         }}
                       >
                         <div>Сотрудник (TSD)</div>
-                        <div style={{ textAlign: "right" }}>Отсканировано</div>
+                        <div style={{ textAlign: "right" }}>Заказов</div>
+                        <div style={{ textAlign: "right" }}>Задач</div>
                       </div>
                       {(stats.summary.team_efficiency.tasks_per_tsd || []).length > 0 ? (
                         stats.summary.team_efficiency.tasks_per_tsd.map((row) => (
@@ -1395,7 +1587,7 @@ export default function StatisticsPage() {
                             key={row.user_id}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "minmax(220px, 1fr) 120px",
+                              gridTemplateColumns: "minmax(220px, 1fr) 100px 100px",
                               gap: 8,
                               padding: "6px 8px",
                               borderBottom: "1px solid #1f2937",
@@ -1404,6 +1596,9 @@ export default function StatisticsPage() {
                             }}
                           >
                             <div>{row.user_name}</div>
+                            <div style={{ textAlign: "right", fontWeight: 800, color: "#fca5a5" }}>
+                              {Number(row.orders_count ?? row.tasks_count ?? 0)}
+                            </div>
                             <div style={{ textAlign: "right", fontWeight: 700 }}>{row.tasks_count}</div>
                           </div>
                         ))
@@ -1413,6 +1608,23 @@ export default function StatisticsPage() {
                         </div>
                       )}
                     </div>
+                    {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0) > 0 && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          border: "1px solid rgba(245,158,11,0.35)",
+                          borderRadius: 8,
+                          background: "rgba(245,158,11,0.08)",
+                          padding: "7px 8px",
+                          fontSize: 12,
+                          color: "#fcd34d",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0)} завершенных задач не имеют
+                        picked_by/picked_at. Проверяем, можно ли восстановить складчика через audit logs или unit_moves.
+                      </div>
+                    )}
                     <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", overflow: "hidden", marginTop: 8 }}>
                       <div
                         style={{

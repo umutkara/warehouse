@@ -26,6 +26,17 @@ type ShipmentOutRow = {
   out_at: string;
 };
 
+type NotOutDrillRow = {
+  task_id: string;
+  unit_id: string;
+  barcode: string;
+  planned_day: string;
+  kuda: string;
+  cell_code?: string;
+  out_at?: string;
+  out_day?: string;
+};
+
 type ShipmentReturnedRow = {
   unit_id: string;
   returned_at: string;
@@ -678,6 +689,9 @@ export async function GET(req: Request) {
   const merchantSellerReturnedOrders = new Map<string, Array<{ barcode: string; accepted_in_bin_at: string }>>();
   const notOutUnitIds = new Set<string>();
   const outTaskIds = new Set<string>();
+  const dailyNotOutRows: NotOutDrillRow[] = [];
+  const currentNotOutRows = new Map<string, NotOutDrillRow>();
+  const lateOutRows = new Map<string, NotOutDrillRow>();
 
   let excludedByKeyword = 0;
   let excludedByRequiredScenario = 0;
@@ -734,6 +748,19 @@ export async function GET(req: Request) {
     return Boolean(byDay && (byDay.get(day)?.length || 0) > 0);
   };
 
+  const getEarliestOutAfterDayInPeriod = (unitId: string, day: string) => {
+    const byDay = outTimesByUnitAndDay.get(unitId);
+    if (!byDay) return null;
+    const laterTimes: string[] = [];
+    for (const [outDay, times] of byDay.entries()) {
+      if (outDay > day && dateKeySet.has(outDay)) {
+        laterTimes.push(...times);
+      }
+    }
+    if (laterTimes.length === 0) return null;
+    return laterTimes.sort((a, b) => a.localeCompare(b))[0];
+  };
+
   const hasReturnedAfterOutOnDay = (unitId: string, day: string) => {
     const outTimes = outTimesByUnitAndDay.get(unitId)?.get(day);
     if (!outTimes?.length) return false;
@@ -770,6 +797,26 @@ export async function GET(req: Request) {
         task.unitIds.forEach((unitId) => {
           notOutUnitIds.add(unitId);
           dayNotOutUnits.add(unitId);
+          const barcode = unitBarcodeById.get(unitId) || unitId;
+          const baseRow = {
+            task_id: task.taskId,
+            unit_id: unitId,
+            barcode,
+            planned_day: day,
+            kuda: task.kuda,
+          };
+          dailyNotOutRows.push(baseRow);
+
+          const lateOutAt = getEarliestOutAfterDayInPeriod(unitId, day);
+          if (lateOutAt) {
+            lateOutRows.set(`${task.taskId}-${unitId}-${day}`, {
+              ...baseRow,
+              out_at: lateOutAt,
+              out_day: dayInTimeZone(lateOutAt),
+            });
+          } else {
+            currentNotOutRows.set(`${task.taskId}-${unitId}`, baseRow);
+          }
         });
         notOutUnitIdsByDay.set(day, dayNotOutUnits);
       }
@@ -1014,6 +1061,28 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => a.barcode.localeCompare(b.barcode, "ru"));
 
+  const cellCodeForNotOutUnit = (unitId: string) => {
+    const effectiveCellId = effectiveCellIdByUnit.get(unitId) || null;
+    if (!effectiveCellId) return "Без ячейки";
+    const cellInfo = cellInfoById.get(effectiveCellId);
+    return cellInfo?.code || effectiveCellId;
+  };
+
+  const withCurrentCell = (row: NotOutDrillRow): NotOutDrillRow => ({
+    ...row,
+    cell_code: cellCodeForNotOutUnit(row.unit_id),
+  });
+  const sortDrillRows = (rows: NotOutDrillRow[]) =>
+    rows.sort(
+      (a, b) =>
+        a.planned_day.localeCompare(b.planned_day) ||
+        a.kuda.localeCompare(b.kuda, "ru") ||
+        a.barcode.localeCompare(b.barcode, "ru")
+    );
+  const notOutDailyViolations = sortDrillRows(dailyNotOutRows.map(withCurrentCell));
+  const notOutCurrentOpen = sortDrillRows(Array.from(currentNotOutRows.values()).map(withCurrentCell));
+  const notOutLateOut = sortDrillRows(Array.from(lateOutRows.values()).map(withCurrentCell));
+
   const includedTaskIds = Array.from(
     new Set(Array.from(tasksByTargetDay.values()).flatMap((rows) => rows.map((row) => row.taskId)))
   );
@@ -1031,6 +1100,16 @@ export async function GET(req: Request) {
   };
 
   const scannedTasks = includedTasks.filter((task) => Boolean(task.picked_at));
+  const completedTasks = includedTasks.filter((task) => Boolean(task.completed_at));
+  const taskUnitCount = (taskId: string) => Math.max(1, taskUnitsByTaskId.get(taskId)?.size || 0);
+  const pickedAndCompletedTasks = includedTasks.filter((task) => Boolean(task.picked_at) && Boolean(task.completed_at));
+  const completedOnlyTasks = includedTasks.filter((task) => !task.picked_at && Boolean(task.completed_at));
+  const pickedCompletedDifferentUserTasks = pickedAndCompletedTasks.filter(
+    (task) => Boolean(task.picked_by && task.completed_by && task.picked_by !== task.completed_by)
+  );
+  const scannedUnitsCount = scannedTasks.reduce((acc, task) => acc + taskUnitCount(task.id), 0);
+  const completedUnitsCount = completedTasks.reduce((acc, task) => acc + taskUnitCount(task.id), 0);
+
   const startedAt = minIso(scannedTasks.map((task) => task.picked_at || null));
   const firstScanAt = startedAt;
   const lastScanAt = maxIso(scannedTasks.map((task) => task.picked_at || null));
@@ -1056,12 +1135,14 @@ export async function GET(req: Request) {
     .filter((task): task is PickingTaskRow => Boolean(task));
   const outTasksWithPickedAt = outTasksForPeriod.filter((task) => Boolean(task.picked_at)).length;
   const outTasksWithoutPickedAt = Math.max(0, outTasksForPeriod.length - outTasksWithPickedAt);
-  const includedTasksWithCompletedAt = includedTasks.filter((task) => Boolean(task.completed_at)).length;
+  const includedTasksWithCompletedAt = completedTasks.length;
 
   const tasksByTsdUser = new Map<string, number>();
+  const ordersByTsdUser = new Map<string, number>();
   for (const task of scannedTasks) {
     if (!task.picked_by) continue;
     tasksByTsdUser.set(task.picked_by, (tasksByTsdUser.get(task.picked_by) || 0) + 1);
+    ordersByTsdUser.set(task.picked_by, (ordersByTsdUser.get(task.picked_by) || 0) + taskUnitCount(task.id));
   }
   const shippedTasksByUser = new Map<string, number>();
   for (const task of outTasksForPeriod) {
@@ -1088,8 +1169,9 @@ export async function GET(req: Request) {
       user_id: userId,
       user_name: profileNameById.get(userId) || "Без имени",
       tasks_count: tasksByTsdUser.get(userId) || 0,
+      orders_count: ordersByTsdUser.get(userId) || 0,
     }))
-    .sort((a, b) => b.tasks_count - a.tasks_count || a.user_name.localeCompare(b.user_name, "ru"));
+    .sort((a, b) => b.orders_count - a.orders_count || b.tasks_count - a.tasks_count || a.user_name.localeCompare(b.user_name, "ru"));
   const shipped_tasks_per_user = shippedUserIds
     .filter((userId) => String(profileRoleById.get(userId) || "").toLowerCase() === "worker")
     .map((userId) => ({
@@ -1121,6 +1203,14 @@ export async function GET(req: Request) {
       not_out_cells: notOutCellsEffective,
       not_out_zone_breakdown: notOutZoneBreakdown,
       not_out_barcodes: notOutBarcodes,
+      not_out_drill: {
+        daily_violations_count: notOutDailyViolations.length,
+        current_open_count: notOutCurrentOpen.length,
+        late_out_count: notOutLateOut.length,
+        daily_violations: notOutDailyViolations,
+        current_open: notOutCurrentOpen,
+        late_out: notOutLateOut,
+      },
       team_efficiency: {
         based_on_created_tasks: includedTasks.length,
         started_at: startedAt,
@@ -1128,6 +1218,11 @@ export async function GET(req: Request) {
         last_scan_at: lastScanAt,
         scanned_orders_count: scannedTasks.length,
         completed_orders_count: includedTasksWithCompletedAt,
+        tsd_collected_orders_count: scannedUnitsCount,
+        completed_tasks_count: completedTasks.length,
+        completed_units_count: completedUnitsCount,
+        completed_without_tsd_scan_count: completedOnlyTasks.length,
+        picked_completed_different_user_count: pickedCompletedDifferentUserTasks.length,
         out_tasks_count: outTasksForPeriod.length,
         out_tasks_without_tsd_scan_count: outTasksWithoutPickedAt,
         first_started_unit_barcode: firstStartedUnit?.barcode || null,
