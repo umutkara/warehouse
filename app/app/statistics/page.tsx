@@ -116,6 +116,37 @@ type NotOutDrillRow = {
   out_day?: string;
 };
 
+type NotOutDrillMode = "current" | "late" | "daily";
+
+function getNotOutDrillModeMeta(
+  mode: NotOutDrillMode,
+  drill: OpsShippingStats["summary"]["not_out_drill"] | undefined,
+  fallbackDailyCount: number
+) {
+  if (mode === "current") {
+    return {
+      title: "Не выехало на конец периода",
+      value: drill?.current_open_count ?? fallbackDailyCount,
+      subtitle: "Актуальный остаток",
+      rows: drill?.current_open || [],
+    };
+  }
+  if (mode === "late") {
+    return {
+      title: "Выехало позже",
+      value: drill?.late_out_count ?? 0,
+      subtitle: "Закрытые дневные нарушения",
+      rows: drill?.late_out || [],
+    };
+  }
+  return {
+    title: "Не выехало по дням",
+    value: drill?.daily_violations_count ?? fallbackDailyCount,
+    subtitle: "Исторические дневные нарушения",
+    rows: drill?.daily_violations || [],
+  };
+}
+
 function getTodayDateUtc() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -878,7 +909,8 @@ export default function StatisticsPage() {
   const [fromDate, setFromDate] = useState<string>(() => getDateDaysAgoUtc(13));
   const [toDate, setToDate] = useState<string>(() => getTodayDateUtc());
   const [kudaTopLimit, setKudaTopLimit] = useState<number>(20);
-  const [notOutDrillMode, setNotOutDrillMode] = useState<"current" | "late" | "daily">("current");
+  const [notOutDrillMode, setNotOutDrillMode] = useState<NotOutDrillMode>("current");
+  const [notOutDrillExpanded, setNotOutDrillExpanded] = useState(false);
   const [stats, setStats] = useState<OpsShippingStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1189,12 +1221,18 @@ export default function StatisticsPage() {
                 subtitle="OUT и потом вернулось в BIN"
                 color="#f87171"
               />
-              <StatCard
-                title="Не выехало по дням"
-                value={Math.max(0, stats.summary.total_tasks - stats.summary.out_tasks)}
-                subtitle="Исторические дневные нарушения"
-                color="#94a3b8"
-              />
+              {(() => {
+                const fallbackDailyCount = Math.max(0, stats.summary.total_tasks - stats.summary.out_tasks);
+                const selectedMeta = getNotOutDrillModeMeta(notOutDrillMode, stats.summary.not_out_drill, fallbackDailyCount);
+                return (
+                  <StatCard
+                    title={selectedMeta.title}
+                    value={selectedMeta.value}
+                    subtitle={selectedMeta.subtitle}
+                    color="#94a3b8"
+                  />
+                );
+              })()}
             </div>
             <div
               style={{
@@ -1205,12 +1243,50 @@ export default function StatisticsPage() {
                 background: "#0f172a",
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                Не выехало — drill по периоду
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1" }}>
+                  Не выехало — drill по периоду
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNotOutDrillExpanded((value) => !value)}
+                  style={{
+                    border: "1px solid #334155",
+                    background: notOutDrillExpanded ? "rgba(14,165,233,0.14)" : "#111827",
+                    color: notOutDrillExpanded ? "#bae6fd" : "#cbd5e1",
+                    borderRadius: 8,
+                    padding: "5px 9px",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  {notOutDrillExpanded ? "Свернуть" : "Раскрыть"}
+                </button>
               </div>
               {(() => {
                 const drill = stats.summary.not_out_drill;
                 if (!drill) return null;
+                const fallbackDailyCount = Math.max(0, stats.summary.total_tasks - stats.summary.out_tasks);
+                const selectedMeta = getNotOutDrillModeMeta(notOutDrillMode, drill, fallbackDailyCount);
+                if (!notOutDrillExpanded) {
+                  return (
+                    <div
+                      style={{
+                        marginBottom: 10,
+                        border: "1px solid #334155",
+                        borderRadius: 10,
+                        background: "#111827",
+                        padding: "8px 10px",
+                        fontSize: 12,
+                        color: "#cbd5e1",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Выбран режим: {selectedMeta.title} ({selectedMeta.value}). Раскройте блок для списка заказов и переключения режима.
+                    </div>
+                  );
+                }
                 const options = [
                   {
                     key: "current" as const,

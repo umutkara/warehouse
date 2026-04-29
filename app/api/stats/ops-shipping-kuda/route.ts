@@ -748,6 +748,19 @@ export async function GET(req: Request) {
     return Boolean(byDay && (byDay.get(day)?.length || 0) > 0);
   };
 
+  const getEarliestOutOnOrBeforeDayInPeriod = (unitId: string, day: string) => {
+    const byDay = outTimesByUnitAndDay.get(unitId);
+    if (!byDay) return null;
+    const onTimeTimes: string[] = [];
+    for (const [outDay, times] of byDay.entries()) {
+      if (outDay <= day && dateKeySet.has(outDay)) {
+        onTimeTimes.push(...times);
+      }
+    }
+    if (onTimeTimes.length === 0) return null;
+    return onTimeTimes.sort((a, b) => a.localeCompare(b))[0];
+  };
+
   const getEarliestOutAfterDayInPeriod = (unitId: string, day: string) => {
     const byDay = outTimesByUnitAndDay.get(unitId);
     if (!byDay) return null;
@@ -785,7 +798,7 @@ export async function GET(req: Request) {
     let returnedCount = 0;
 
     for (const task of dayTasks) {
-      const hasOut = task.unitIds.some((unitId) => hasOutOnDay(unitId, day));
+      const hasOut = task.unitIds.some((unitId) => Boolean(getEarliestOutOnOrBeforeDayInPeriod(unitId, day)));
       const hasReturned = task.unitIds.some((unitId) => hasReturnedAfterOutOnDay(unitId, day));
 
       if (hasOut) {
