@@ -37,6 +37,11 @@ type NotOutDrillRow = {
   out_day?: string;
 };
 
+type StatsExportRow = NotOutDrillRow & {
+  created_at?: string;
+  returned_at?: string;
+};
+
 type ShipmentReturnedRow = {
   unit_id: string;
   returned_at: string;
@@ -692,6 +697,9 @@ export async function GET(req: Request) {
   const dailyNotOutRows: NotOutDrillRow[] = [];
   const currentNotOutRows = new Map<string, NotOutDrillRow>();
   const lateOutRows = new Map<string, NotOutDrillRow>();
+  const createdTaskUnitRows: StatsExportRow[] = [];
+  const outNotReturnedRows: StatsExportRow[] = [];
+  const sellerRejectedRows: StatsExportRow[] = [];
 
   let excludedByKeyword = 0;
   let excludedByRequiredScenario = 0;
@@ -736,6 +744,17 @@ export async function GET(req: Request) {
     const list = tasksByTargetDay.get(targetDay) || [];
     list.push({ taskId: task.id, unitIds, kuda, sellerName });
     tasksByTargetDay.set(targetDay, list);
+
+    unitIds.forEach((unitId) => {
+      createdTaskUnitRows.push({
+        task_id: task.id,
+        unit_id: unitId,
+        barcode: unitBarcodeById.get(unitId) || unitId,
+        planned_day: targetDay,
+        kuda,
+        created_at: task.created_at,
+      });
+    });
 
     dayCreated.set(targetDay, (dayCreated.get(targetDay) || 0) + 1);
     kudaCreated.set(kuda, (kudaCreated.get(kuda) || 0) + 1);
@@ -805,6 +824,21 @@ export async function GET(req: Request) {
         outCount += 1;
         kudaOut.set(task.kuda, (kudaOut.get(task.kuda) || 0) + 1);
         outTaskIds.add(task.taskId);
+        task.unitIds.forEach((unitId) => {
+          const outAt = getEarliestOutOnOrBeforeDayInPeriod(unitId, day);
+          if (!outAt) return;
+          const returnedDetail = getReturnedUnitDetailOnDay(unitId, day);
+          if (returnedDetail) return;
+          outNotReturnedRows.push({
+            task_id: task.taskId,
+            unit_id: unitId,
+            barcode: unitBarcodeById.get(unitId) || unitId,
+            planned_day: day,
+            kuda: task.kuda,
+            out_at: outAt,
+            out_day: dayInTimeZone(outAt),
+          });
+        });
       } else {
         const dayNotOutUnits = notOutUnitIdsByDay.get(day) || new Set<string>();
         task.unitIds.forEach((unitId) => {
@@ -864,6 +898,27 @@ export async function GET(req: Request) {
             }
           }
         }
+        task.unitIds
+          .map((unitId) => ({
+            unitId,
+            returnedDetail: getReturnedUnitDetailOnDay(unitId, day),
+          }))
+          .filter((row): row is { unitId: string; returnedDetail: { barcode: string; accepted_in_bin_at: string } } =>
+            Boolean(row.returnedDetail)
+          )
+          .forEach(({ unitId, returnedDetail }) => {
+            const outAt = getEarliestOutOnOrBeforeDayInPeriod(unitId, day);
+            sellerRejectedRows.push({
+              task_id: task.taskId,
+              unit_id: unitId,
+              barcode: returnedDetail.barcode,
+              planned_day: day,
+              kuda: task.kuda,
+              out_at: outAt || undefined,
+              out_day: outAt ? dayInTimeZone(outAt) : undefined,
+              returned_at: returnedDetail.accepted_in_bin_at,
+            });
+          });
       }
     }
 
@@ -1095,6 +1150,13 @@ export async function GET(req: Request) {
   const notOutDailyViolations = sortDrillRows(dailyNotOutRows.map(withCurrentCell));
   const notOutCurrentOpen = sortDrillRows(Array.from(currentNotOutRows.values()).map(withCurrentCell));
   const notOutLateOut = sortDrillRows(Array.from(lateOutRows.values()).map(withCurrentCell));
+  const sortExportRows = (rows: StatsExportRow[]) =>
+    rows.sort(
+      (a, b) =>
+        a.planned_day.localeCompare(b.planned_day) ||
+        a.kuda.localeCompare(b.kuda, "ru") ||
+        a.barcode.localeCompare(b.barcode, "ru")
+    );
 
   const includedTaskIds = Array.from(
     new Set(Array.from(tasksByTargetDay.values()).flatMap((rows) => rows.map((row) => row.taskId)))
@@ -1249,5 +1311,13 @@ export async function GET(req: Request) {
     by_day: byDay,
     by_kuda: byKuda,
     merchant_seller_returned_breakdown: merchantSellerReturnedBreakdown,
+    excel_export: {
+      created_task_units: sortExportRows(createdTaskUnitRows.map(withCurrentCell)),
+      out_not_returned: sortExportRows(outNotReturnedRows.map(withCurrentCell)),
+      seller_rejected: sortExportRows(sellerRejectedRows.map(withCurrentCell)),
+      not_out_current_open: notOutCurrentOpen,
+      not_out_late_out: notOutLateOut,
+      not_out_daily_violations: notOutDailyViolations,
+    },
   });
 }

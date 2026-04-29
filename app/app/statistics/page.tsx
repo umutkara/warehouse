@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 
 type OpsShippingByDay = {
   date: string;
@@ -95,6 +96,14 @@ type OpsShippingStats = {
   };
   by_day: OpsShippingByDay[];
   by_kuda: OpsShippingByKuda[];
+  excel_export?: {
+    created_task_units: Array<StatsExportRow>;
+    out_not_returned: Array<StatsExportRow>;
+    seller_rejected: Array<StatsExportRow>;
+    not_out_current_open: Array<StatsExportRow>;
+    not_out_late_out: Array<StatsExportRow>;
+    not_out_daily_violations: Array<StatsExportRow>;
+  };
   merchant_seller_returned_breakdown?: Array<{
     seller_name: string;
     out_returned_tasks: number;
@@ -114,6 +123,11 @@ type NotOutDrillRow = {
   cell_code?: string;
   out_at?: string;
   out_day?: string;
+};
+
+type StatsExportRow = NotOutDrillRow & {
+  created_at?: string;
+  returned_at?: string;
 };
 
 type NotOutDrillMode = "current" | "late" | "daily";
@@ -186,11 +200,11 @@ const StatCard = memo(function StatCard({
     <div
       style={{
         position: "relative",
-        border: "1px solid #243244",
-        borderRadius: 12,
-        padding: 12,
-        background: "linear-gradient(160deg, #0f172a 0%, #111827 100%)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02), 0 10px 20px rgba(0,0,0,0.22)",
+        border: "1px solid #1f2937",
+        borderRadius: 14,
+        padding: "14px 14px 13px",
+        background: "#0f172a",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
         overflow: "hidden",
       }}
     >
@@ -200,14 +214,17 @@ const StatCard = memo(function StatCard({
           top: 0,
           left: 0,
           right: 0,
-          height: 3,
+          height: 2,
           background: color,
-          opacity: 0.9,
+          opacity: 0.75,
         }}
       />
-      <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>{title}</div>
-      <div style={{ fontSize: 28, color, fontWeight: 800, marginTop: 2, lineHeight: 1.1 }}>{value}</div>
-      {subtitle && <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>{subtitle}</div>}
+      <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 5 }}>
+        <div style={{ fontSize: 30, color: "#f8fafc", fontWeight: 900, lineHeight: 1 }}>{value}</div>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: color, opacity: 0.9 }} />
+      </div>
+      {subtitle && <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, fontWeight: 600 }}>{subtitle}</div>}
     </div>
   );
 });
@@ -914,6 +931,7 @@ export default function StatisticsPage() {
   const [stats, setStats] = useState<OpsShippingStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const requestSeqRef = useRef(0);
   /** True while a stats request is in flight; used so the 60s poller does not stack requests (slow wide-range loads can exceed 60s, which previously left only "stale" responses). */
   const opsStatsInFlightRef = useRef(false);
@@ -961,6 +979,63 @@ export default function StatisticsPage() {
     return () => clearInterval(interval);
   }, [fromDate, toDate]);
 
+  const handleExportStatsExcel = useCallback(() => {
+    if (!stats?.excel_export) {
+      setError("Нет данных для Excel-выгрузки");
+      return;
+    }
+    setExportingExcel(true);
+    try {
+      const toSheetRows = (category: string, rows: StatsExportRow[]) =>
+        rows.map((row) => ({
+          Категория: category,
+          "Unit barcode": row.barcode,
+          "Плановый день": row.planned_day,
+          Куда: row.kuda,
+          "Текущая ячейка": row.cell_code || "",
+          OUT: row.out_at ? formatDateTime(row.out_at) : "",
+          "День OUT": row.out_day || "",
+          "Возврат/BIN": row.returned_at ? formatDateTime(row.returned_at) : "",
+          "Создана задача": row.created_at ? formatDateTime(row.created_at) : "",
+          "Task ID": row.task_id,
+          "Unit ID": row.unit_id,
+        }));
+
+      const sheets: Array<{ name: string; rows: ReturnType<typeof toSheetRows> }> = [
+        { name: "Созданные", rows: toSheetRows("Создана задача", stats.excel_export.created_task_units || []) },
+        { name: "OUT без возврата", rows: toSheetRows("Выехало к партнеру и не вернулось", stats.excel_export.out_not_returned || []) },
+        { name: "Селлер не принял", rows: toSheetRows("Селлер не принял", stats.excel_export.seller_rejected || []) },
+        { name: "Не выехало конец", rows: toSheetRows("Не выехало на конец периода", stats.excel_export.not_out_current_open || []) },
+        { name: "Выехали позже", rows: toSheetRows("Выехали позже", stats.excel_export.not_out_late_out || []) },
+        { name: "Дневные нарушения", rows: toSheetRows("Дневные нарушения", stats.excel_export.not_out_daily_violations || []) },
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      sheets.forEach((sheet) => {
+        const worksheet = XLSX.utils.json_to_sheet(sheet.rows.length ? sheet.rows : [{ Категория: sheet.name }]);
+        worksheet["!cols"] = [
+          { wch: 30 },
+          { wch: 18 },
+          { wch: 14 },
+          { wch: 24 },
+          { wch: 18 },
+          { wch: 22 },
+          { wch: 14 },
+          { wch: 22 },
+          { wch: 22 },
+          { wch: 38 },
+          { wch: 38 },
+        ];
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheet.name);
+      });
+      XLSX.writeFile(workbook, `statistics_${stats.filters.from}_${stats.filters.to}.xlsx`);
+    } catch (e: any) {
+      setError(e?.message || "Ошибка Excel-выгрузки");
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [stats]);
+
   return (
     <div
       style={{
@@ -975,6 +1050,9 @@ export default function StatisticsPage() {
       <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 26, margin: 0, fontWeight: 800, color: "#e5e7eb" }}>Статистика</h1>
+          <div style={{ marginTop: 3, fontSize: 13, color: "#94a3b8", fontWeight: 600 }}>
+            Операционная сводка по задачам, OUT и возвратам за выбранный период
+          </div>
         </div>
         <div
           style={{
@@ -994,65 +1072,84 @@ export default function StatisticsPage() {
 
       <div
         style={{
-          background: "rgba(17,24,39,0.88)",
+          background: "rgba(15,23,42,0.92)",
           border: "1px solid #1f2937",
-          borderRadius: 12,
-          padding: 12,
-          boxShadow: "0 16px 30px rgba(0,0,0,0.28)",
+          borderRadius: 16,
+          padding: 14,
+          boxShadow: "0 14px 28px rgba(0,0,0,0.22)",
           backdropFilter: "blur(4px)",
         }}
       >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
-          <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#9ca3af", minWidth: 170 }}>
-            С даты
-            <input
-              type="date"
-              value={fromDate}
-              max={toDate}
-              onChange={(e) => setFromDate(e.target.value)}
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#9ca3af", minWidth: 170 }}>
+              С даты
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={{
+                  padding: "7px 9px",
+                  border: "1px solid #334155",
+                  borderRadius: 8,
+                  background: "#0f172a",
+                  color: "#e5e7eb",
+                  fontWeight: 600,
+                }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#9ca3af", minWidth: 170 }}>
+              По дату
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate}
+                onChange={(e) => setToDate(e.target.value)}
+                style={{
+                  padding: "7px 9px",
+                  border: "1px solid #334155",
+                  borderRadius: 8,
+                  background: "#0f172a",
+                  color: "#e5e7eb",
+                  fontWeight: 600,
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => loadOpsShippingStats(fromDate, toDate)}
+              disabled={loading}
               style={{
-                padding: "7px 9px",
-                border: "1px solid #334155",
+                padding: "8px 12px",
                 borderRadius: 8,
-                background: "#0f172a",
-                color: "#e5e7eb",
-                fontWeight: 600,
+                border: "1px solid #2563eb",
+                background: loading ? "#374151" : "linear-gradient(135deg,#2563eb,#1d4ed8)",
+                color: loading ? "#9ca3af" : "#f8fafc",
+                fontWeight: 800,
+                cursor: loading ? "not-allowed" : "pointer",
+                boxShadow: loading ? "none" : "0 8px 16px rgba(37,99,235,0.28)",
               }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#9ca3af", minWidth: 170 }}>
-            По дату
-            <input
-              type="date"
-              value={toDate}
-              min={fromDate}
-              onChange={(e) => setToDate(e.target.value)}
-              style={{
-                padding: "7px 9px",
-                border: "1px solid #334155",
-                borderRadius: 8,
-                background: "#0f172a",
-                color: "#e5e7eb",
-                fontWeight: 600,
-              }}
-            />
-          </label>
+            >
+              {loading ? "Загрузка..." : "Обновить период"}
+            </button>
+          </div>
           <button
             type="button"
-            onClick={() => loadOpsShippingStats(fromDate, toDate)}
-            disabled={loading}
+            onClick={handleExportStatsExcel}
+            disabled={!stats || loading || exportingExcel}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
-              border: "1px solid #2563eb",
-              background: loading ? "#374151" : "linear-gradient(135deg,#2563eb,#1d4ed8)",
-              color: loading ? "#9ca3af" : "#f8fafc",
+              border: !stats || loading || exportingExcel ? "1px solid #374151" : "1px solid rgba(34,197,94,0.55)",
+              background: !stats || loading || exportingExcel ? "#1f2937" : "rgba(22,163,74,0.16)",
+              color: !stats || loading || exportingExcel ? "#9ca3af" : "#f8fafc",
               fontWeight: 800,
-              cursor: loading ? "not-allowed" : "pointer",
-              boxShadow: loading ? "none" : "0 8px 16px rgba(37,99,235,0.28)",
+              cursor: !stats || loading || exportingExcel ? "not-allowed" : "pointer",
+              boxShadow: "none",
             }}
           >
-            {loading ? "Загрузка..." : "Обновить период"}
+            {exportingExcel ? "Подготовка..." : "Скачать Excel"}
           </button>
         </div>
 
@@ -1118,16 +1215,39 @@ export default function StatisticsPage() {
                 <div
                   style={{
                     marginBottom: 10,
-                    border: "1px solid #334155",
-                    borderRadius: 10,
-                    padding: "8px 10px",
-                    background: "rgba(15,23,42,0.6)",
+                    border: "1px solid #243244",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "#0b1220",
                   }}
                 >
-                  <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
-                    Не выехало по дням: {notOutTotal}
-                    {drill ? ` · актуальный остаток: ${drill.current_open_count} · выехало позже: ${drill.late_out_count}` : ""}
-                    . По текущей зоне: picking {pickingCount}, rejected {rejectedCount}
+                  <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 800, marginBottom: 7 }}>
+                    Быстрая сводка по “не выехало”
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {[
+                      { label: "По дням", value: notOutTotal },
+                      { label: "На конец периода", value: drill?.current_open_count ?? 0 },
+                      { label: "Выехало позже", value: drill?.late_out_count ?? 0 },
+                      { label: "Picking", value: pickingCount },
+                      { label: "Rejected", value: rejectedCount },
+                    ].map((item) => (
+                      <span
+                        key={item.label}
+                        style={{
+                          border: "1px solid #1f2937",
+                          borderRadius: 999,
+                          background: "#111827",
+                          padding: "5px 9px",
+                          color: "#cbd5e1",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <span style={{ color: "#94a3b8", fontWeight: 700 }}>{item.label}: </span>
+                        <span style={{ color: "#e5e7eb", fontWeight: 900 }}>{item.value}</span>
+                      </span>
+                    ))}
                   </div>
                 </div>
               );
@@ -1203,6 +1323,9 @@ export default function StatisticsPage() {
                 marginBottom: 10,
               }}
             >
+              <div style={{ gridColumn: "1 / -1", fontSize: 13, color: "#cbd5e1", fontWeight: 800, marginBottom: 2 }}>
+                Основные показатели
+              </div>
               <StatCard
                 title="Создано задач"
                 value={stats.summary.total_tasks}
@@ -1558,195 +1681,6 @@ export default function StatisticsPage() {
               />
             </div>
 
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ border: "1px solid #1f2937", borderRadius: 12, padding: 10, background: "#0f172a" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", marginBottom: 8 }}>
-                  Эффективность команды (по созданным задачам периода)
-                </div>
-                {stats.summary.team_efficiency ? (
-                  <>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-                        gap: 6,
-                        marginBottom: 8,
-                      }}
-                    >
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Начало отгрузки (TSD)</div>
-                        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>
-                          {formatDateTime(stats.summary.team_efficiency.started_at)}
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Первый скан</div>
-                        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>
-                          {formatDateTime(stats.summary.team_efficiency.first_scan_at)}
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Последний скан</div>
-                        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>
-                          {formatDateTime(stats.summary.team_efficiency.last_scan_at)}
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Собрано заказов (TSD)</div>
-                        <div style={{ fontSize: 13, color: "#fca5a5", fontWeight: 800 }}>
-                          {Number(
-                            stats.summary.team_efficiency.tsd_collected_orders_count ??
-                              stats.summary.team_efficiency.scanned_orders_count ??
-                              0
-                          )}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          Пока по picked_by: {Number(stats.summary.team_efficiency.scanned_orders_count || 0)} задач
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Завершено задач всего</div>
-                        <div style={{ fontSize: 13, color: "#86efac", fontWeight: 800 }}>
-                          {Number(
-                            stats.summary.team_efficiency.completed_tasks_count ??
-                              stats.summary.team_efficiency.completed_orders_count ??
-                              0
-                          )}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          Без TSD-исполнителя: {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0)}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          Это закрытие задач, не персональная сборка TSD
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Первый начатый unit</div>
-                        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>
-                          {stats.summary.team_efficiency.first_started_unit_barcode || "—"}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          {formatDateTime(stats.summary.team_efficiency.first_started_unit_at || null)}
-                        </div>
-                      </div>
-                      <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", padding: "6px 8px" }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>Последний начатый unit</div>
-                        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>
-                          {stats.summary.team_efficiency.last_started_unit_barcode || "—"}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
-                          {formatDateTime(stats.summary.team_efficiency.last_started_unit_at || null)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", overflow: "hidden" }}>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(220px, 1fr) 100px 100px",
-                          gap: 8,
-                          padding: "6px 8px",
-                          borderBottom: "1px solid #1f2937",
-                          fontSize: 11,
-                          color: "#94a3b8",
-                          fontWeight: 700,
-                        }}
-                      >
-                        <div>Сотрудник (TSD)</div>
-                        <div style={{ textAlign: "right" }}>Заказов</div>
-                        <div style={{ textAlign: "right" }}>Задач</div>
-                      </div>
-                      {(stats.summary.team_efficiency.tasks_per_tsd || []).length > 0 ? (
-                        stats.summary.team_efficiency.tasks_per_tsd.map((row) => (
-                          <div
-                            key={row.user_id}
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "minmax(220px, 1fr) 100px 100px",
-                              gap: 8,
-                              padding: "6px 8px",
-                              borderBottom: "1px solid #1f2937",
-                              fontSize: 12,
-                              color: "#cbd5e1",
-                            }}
-                          >
-                            <div>{row.user_name}</div>
-                            <div style={{ textAlign: "right", fontWeight: 800, color: "#fca5a5" }}>
-                              {Number(row.orders_count ?? row.tasks_count ?? 0)}
-                            </div>
-                            <div style={{ textAlign: "right", fontWeight: 700 }}>{row.tasks_count}</div>
-                          </div>
-                        ))
-                      ) : (
-                        <div style={{ padding: "8px", fontSize: 12, color: "#94a3b8" }}>
-                          Нет задач с зафиксированным TSD-исполнителем
-                        </div>
-                      )}
-                    </div>
-                    {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0) > 0 && (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          border: "1px solid rgba(245,158,11,0.35)",
-                          borderRadius: 8,
-                          background: "rgba(245,158,11,0.08)",
-                          padding: "7px 8px",
-                          fontSize: 12,
-                          color: "#fcd34d",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {Number(stats.summary.team_efficiency.completed_without_tsd_scan_count || 0)} завершенных задач не имеют
-                        picked_by/picked_at. Проверяем, можно ли восстановить складчика через audit logs или unit_moves.
-                      </div>
-                    )}
-                    <div style={{ border: "1px solid #334155", borderRadius: 8, background: "#111827", overflow: "hidden", marginTop: 8 }}>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(220px, 1fr) 120px",
-                          gap: 8,
-                          padding: "6px 8px",
-                          borderBottom: "1px solid #1f2937",
-                          fontSize: 11,
-                          color: "#94a3b8",
-                          fontWeight: 700,
-                        }}
-                      >
-                        <div>Сотрудник (worker)</div>
-                        <div style={{ textAlign: "right" }}>Отгружено (OUT, по picked_by)</div>
-                      </div>
-                      {(stats.summary.team_efficiency.shipped_tasks_per_user || []).length > 0 ? (
-                        stats.summary.team_efficiency.shipped_tasks_per_user!.map((row) => (
-                          <div
-                            key={`ship-${row.user_id}`}
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "minmax(220px, 1fr) 120px",
-                              gap: 8,
-                              padding: "6px 8px",
-                              borderBottom: "1px solid #1f2937",
-                              fontSize: 12,
-                              color: "#cbd5e1",
-                            }}
-                          >
-                            <div>{row.user_name}</div>
-                            <div style={{ textAlign: "right", fontWeight: 700 }}>{row.tasks_count}</div>
-                          </div>
-                        ))
-                      ) : (
-                        <div style={{ padding: "8px", fontSize: 12, color: "#94a3b8" }}>
-                          Нет данных по исполнителям отгрузки
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>Нет данных по эффективности команды</div>
-                )}
-              </div>
-            </div>
           </>
         )}
       </div>
