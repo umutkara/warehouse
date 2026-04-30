@@ -1248,6 +1248,7 @@ function ZoneEditorModal({
   const [draftPoints, setDraftPoints] = useState<
     Array<{ lat: number; lng: number }>
   >([]);
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
 
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -1279,6 +1280,17 @@ function ZoneEditorModal({
       draftPolygonRef.current.setMap(null);
       draftPolygonRef.current = null;
     }
+  }, []);
+
+  const resetDraftForm = useCallback(() => {
+    setEditingZoneId(null);
+    setZoneName("");
+    setZoneCode("");
+    setZonePriority("100");
+    setStrokeColor(DEFAULT_ZONE_STYLE.strokeColor);
+    setFillColor(DEFAULT_ZONE_STYLE.fillColor);
+    setFillOpacity("0.20");
+    setDraftPoints([]);
   }, []);
 
   const fetchZones = useCallback(
@@ -1327,8 +1339,9 @@ function ZoneEditorModal({
     setZones(seedZones);
     setModalError(null);
     setModalMessage(null);
+    resetDraftForm();
     void fetchZones(false);
-  }, [fetchZones, open]);
+  }, [fetchZones, open, resetDraftForm]);
 
   useEffect(() => {
     if (!open || !canEdit) return;
@@ -1503,7 +1516,27 @@ function ZoneEditorModal({
     strokeColor,
   ]);
 
-  const handleCreateZone = useCallback(async () => {
+  const handleStartEditZone = useCallback((zone: Zone) => {
+    const style = normalizeZoneStyle(zone.style);
+    setEditingZoneId(zone.id);
+    setZoneName(zone.name);
+    setZoneCode(zone.code);
+    setZonePriority(String(zone.priority || 100));
+    setStrokeColor(style.strokeColor);
+    setFillColor(style.fillColor);
+    setFillOpacity(style.fillOpacity.toFixed(2));
+    setDraftPoints(parsePolygon(zone.polygon));
+    setModalError(null);
+    setModalMessage(`Редактирование зоны "${zone.name}"`);
+  }, []);
+
+  const handleCancelEditing = useCallback(() => {
+    resetDraftForm();
+    setModalError(null);
+    setModalMessage("Режим редактирования отменен");
+  }, [resetDraftForm]);
+
+  const handleSaveZone = useCallback(async () => {
     if (!canEdit) return;
     const name = zoneName.trim();
     if (!name) {
@@ -1520,9 +1553,10 @@ function ZoneEditorModal({
     setModalMessage(null);
     try {
       const res = await fetch("/api/routeplanning/zones", {
-        method: "POST",
+        method: editingZoneId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          id: editingZoneId,
           name,
           code: zoneCode.trim() || codeFromName(name),
           priority: Number(zonePriority) || 100,
@@ -1545,19 +1579,25 @@ function ZoneEditorModal({
         error?: string;
       } | null;
       if (!res.ok || !payload?.ok) {
-        setModalError(payload?.error || "Не удалось создать геозону");
+        setModalError(
+          payload?.error ||
+            (editingZoneId
+              ? "Не удалось обновить геозону"
+              : "Не удалось создать геозону"),
+        );
         return;
       }
 
-      setModalMessage("Геозона создана");
-      setZoneName("");
-      setZoneCode("");
-      setZonePriority("100");
-      setDraftPoints([]);
+      setModalMessage(editingZoneId ? "Геозона обновлена" : "Геозона создана");
+      resetDraftForm();
       await fetchZones(true);
     } catch (error: unknown) {
       setModalError(
-        error instanceof Error ? error.message : "Ошибка создания зоны",
+        error instanceof Error
+          ? error.message
+          : editingZoneId
+            ? "Ошибка обновления зоны"
+            : "Ошибка создания зоны",
       );
     } finally {
       setSaving(false);
@@ -1565,10 +1605,12 @@ function ZoneEditorModal({
   }, [
     canEdit,
     draftPoints,
+    editingZoneId,
     fetchZones,
     fillColor,
     fillOpacity,
     onUnauthorized,
+    resetDraftForm,
     strokeColor,
     zoneCode,
     zoneName,
@@ -1663,7 +1705,12 @@ function ZoneEditorModal({
                   <div className={styles.empty}>Геозон пока нет</div>
                 ) : (
                   zones.map((zone) => (
-                    <div key={zone.id} className={styles.unitRow}>
+                    <div
+                      key={zone.id}
+                      className={`${styles.unitRow} ${
+                        editingZoneId === zone.id ? styles.unitRowSelected : ""
+                      }`}
+                    >
                       <div className={styles.unitBarcode}>{zone.name}</div>
                       <div className={styles.unitMeta}>code: {zone.code}</div>
                       <div className={styles.zoneStyleRow}>
@@ -1679,16 +1726,26 @@ function ZoneEditorModal({
                         </span>
                       </div>
                       {canEdit && (
-                        <button
-                          type="button"
-                          className={styles.zoneDeleteButton}
-                          onClick={() =>
-                            void handleDeleteZone(zone.id, zone.name)
-                          }
-                          disabled={deletingId === zone.id}
-                        >
-                          {deletingId === zone.id ? "Удаление..." : "Удалить"}
-                        </button>
+                        <div className={styles.actions}>
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            onClick={() => handleStartEditZone(zone)}
+                            disabled={saving}
+                          >
+                            Редактировать
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.zoneDeleteButton}
+                            onClick={() =>
+                              void handleDeleteZone(zone.id, zone.name)
+                            }
+                            disabled={deletingId === zone.id}
+                          >
+                            {deletingId === zone.id ? "Удаление..." : "Удалить"}
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))
@@ -1699,7 +1756,9 @@ function ZoneEditorModal({
 
           <div className={styles.modalColumn}>
             <div className={styles.assignPanel}>
-              <h4 className={styles.sectionTitle}>Создать новую зону</h4>
+              <h4 className={styles.sectionTitle}>
+                {editingZoneId ? "Редактировать зону" : "Создать новую зону"}
+              </h4>
               <div className={styles.row}>
                 <div className={styles.field}>
                   <label className={styles.label}>Название зоны</label>
@@ -1791,20 +1850,33 @@ function ZoneEditorModal({
                 >
                   Очистить контур
                 </button>
+                {editingZoneId && (
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={handleCancelEditing}
+                    disabled={!canEdit || saving}
+                  >
+                    Отменить редактирование
+                  </button>
+                )}
                 <button
                   type="button"
                   className={styles.primaryButton}
-                  onClick={() => void handleCreateZone()}
+                  onClick={() => void handleSaveZone()}
                   disabled={!canEdit || saving}
                 >
                   {saving
                     ? "Сохранение..."
-                    : `Сохранить зону (${draftPoints.length} точек)`}
+                    : editingZoneId
+                      ? `Сохранить изменения (${draftPoints.length} точек)`
+                      : `Сохранить зону (${draftPoints.length} точек)`}
                 </button>
               </div>
               <span className={styles.hint}>
                 Клик по карте добавляет точку. Перетащите точку для коррекции,
-                ПКМ по точке удаляет ее. Минимум 3 точки.
+                ПКМ по точке удаляет ее. Минимум 3 точки. Для изменения
+                существующей зоны нажмите "Редактировать".
               </span>
             </div>
 

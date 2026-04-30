@@ -235,3 +235,68 @@ export async function DELETE(req: Request) {
 
   return NextResponse.json({ ok: true, id });
 }
+
+export async function PUT(req: Request) {
+  const auth = await requireRoutePlanningProfile();
+  if (!auth.ok) return auth.response;
+  if (!canEditRoutePlanning(auth.profile.role)) {
+    return NextResponse.json(
+      { error: "Only logistics/admin can edit geozones" },
+      { status: 403 },
+    );
+  }
+
+  const body = (await req.json().catch(() => null)) as JsonRecord | null;
+  const id = asTrimmedString(body?.id);
+  if (!id) {
+    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  }
+  const name = asTrimmedString(body?.name);
+  if (!name) {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+
+  const polygon = normalizePolygon(body?.polygon);
+  if (polygon.length < 3) {
+    return NextResponse.json(
+      { error: "polygon must contain at least 3 valid points" },
+      { status: 400 },
+    );
+  }
+
+  const style = normalizeZoneStyle(body?.style);
+  const priority = clampNumber(body?.priority, 100, 1, 1000);
+  const code = normalizeCode(asTrimmedString(body?.code), name);
+
+  const { data: updatedZone, error } = await supabaseAdmin
+    .from("delivery_zones")
+    .update({
+      name,
+      code,
+      polygon,
+      priority,
+      meta: { display: style },
+    })
+    .eq("id", id)
+    .eq("warehouse_id", auth.profile.warehouse_id)
+    .select("id, name, code, polygon, priority, meta")
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "23505") {
+      return NextResponse.json(
+        { error: "Zone code already exists in this warehouse" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!updatedZone) {
+    return NextResponse.json({ error: "Zone not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    zone: toZoneDto(updatedZone),
+  });
+}
