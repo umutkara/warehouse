@@ -681,6 +681,12 @@ export async function GET(req: Request) {
     binMoveTimesByUnit.set(unitId, times);
   }
 
+  const outTimesByUnit = new Map<string, string[]>();
+  for (const [unitId, byDay] of outTimesByUnitAndDay.entries()) {
+    const times = Array.from(byDay.values()).flat().sort((a, b) => a.localeCompare(b));
+    outTimesByUnit.set(unitId, times);
+  }
+
   const dayCreated = new Map<string, number>(dateKeys.map((key) => [key, 0]));
   const dayOut = new Map<string, number>(dateKeys.map((key) => [key, 0]));
   const dayReturned = new Map<string, number>(dateKeys.map((key) => [key, 0]));
@@ -793,12 +799,14 @@ export async function GET(req: Request) {
     return laterTimes.sort((a, b) => a.localeCompare(b))[0];
   };
 
+  const getEarliestOutAfterTimeInPeriod = (unitId: string, timestamp: string) => {
+    const laterTimes = (outTimesByUnit.get(unitId) || []).filter((outAt) => outAt > timestamp);
+    if (laterTimes.length === 0) return null;
+    return laterTimes[0];
+  };
+
   const hasReturnedAfterOutOnDay = (unitId: string, day: string) => {
-    const outTimes = outTimesByUnitAndDay.get(unitId)?.get(day);
-    if (!outTimes?.length) return false;
-    const earliestOut = outTimes.reduce((min, current) => (current < min ? current : min), outTimes[0]);
-    const moveTimes = binMoveTimesByUnit.get(unitId) || [];
-    return moveTimes.some((moveTime) => moveTime > earliestOut);
+    return Boolean(getReturnedUnitDetailOnDay(unitId, day));
   };
 
   const getReturnedUnitDetailOnDay = (unitId: string, day: string) => {
@@ -806,7 +814,10 @@ export async function GET(req: Request) {
     if (!outTimes?.length) return null;
     const earliestOut = outTimes.reduce((min, current) => (current < min ? current : min), outTimes[0]);
     const moveTimes = binMoveTimesByUnit.get(unitId) || [];
-    const acceptedInBinAt = moveTimes.find((moveTime) => moveTime > earliestOut);
+    const acceptedInBinAt = moveTimes.find((moveTime) => {
+      if (moveTime <= earliestOut) return false;
+      return !getEarliestOutAfterTimeInPeriod(unitId, moveTime);
+    });
     if (!acceptedInBinAt) return null;
     return { barcode: unitBarcodeById.get(unitId) || unitId, accepted_in_bin_at: acceptedInBinAt };
   };
