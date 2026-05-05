@@ -19,7 +19,9 @@ class OfflineLocationTaskHandler extends TaskHandler {
   Future<void> _collectAndEnqueue() async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       );
       final payload = <String, dynamic>{
         'lat': position.latitude,
@@ -27,8 +29,12 @@ class OfflineLocationTaskHandler extends TaskHandler {
         'recordedAt': position.timestamp.toIso8601String(),
         'accuracy': position.accuracy,
         'zoneId': null,
-        'speed': position.speed.isFinite && position.speed >= 0 ? position.speed : null,
-        'heading': position.heading.isFinite && position.heading >= 0 ? position.heading : null,
+        'speed': position.speed.isFinite && position.speed >= 0
+            ? position.speed
+            : null,
+        'heading': position.heading.isFinite && position.heading >= 0
+            ? position.heading
+            : null,
       };
       await OfflineEventQueue.enqueueLocationFromBackground(payload);
     } catch (_) {
@@ -40,7 +46,7 @@ class OfflineLocationTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
 
   @override
-  Future<void> onDestroy(DateTime timestamp) async {}
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
 
   @override
   void onReceiveData(Object data) {}

@@ -161,6 +161,13 @@ const Map<String, String> _ru = <String, String>{
   'gps.body':
       'Приложение курьера работает только с включённой геолокацией. Включите GPS в настройках устройства.',
   'gps.retry': 'Проверить снова',
+  'location_disclosure.title': 'Разрешите геолокацию в фоне',
+  'location_disclosure.body':
+      'Приложение использует геолокацию в фоновом режиме, чтобы отслеживать маршрут курьера, фиксировать статус доставки и отправлять координаты при отсутствии интернета. Данные геолокации могут собираться, даже когда приложение свернуто.',
+  'location_disclosure.confirm': 'Продолжить',
+  'location_disclosure.cancel': 'Не сейчас',
+  'location_disclosure.required':
+      'Для начала смены нужно подтвердить использование фоновой геолокации.',
 
   'login.supabase_not_configured':
       'Supabase не настроен. Передайте SUPABASE_URL и SUPABASE_ANON_KEY через --dart-define.',
@@ -359,6 +366,13 @@ const Map<String, String> _az = <String, String>{
   'gps.body':
       'Kuryer tətbiqi yalnız aktiv geolokasiya ilə işləyir. Cihaz ayarlarında GPS-i aktiv edin.',
   'gps.retry': 'Yenidən yoxla',
+  'location_disclosure.title': 'Fon geolokasiyasına icazə verin',
+  'location_disclosure.body':
+      'Tətbiq kuryerin marşrutunu izləmək, çatdırılma statusunu qeyd etmək və internet olmadıqda koordinatları göndərmək üçün geolokasiyanı fon rejimində istifadə edir. Geolokasiya məlumatı tətbiq arxa planda olanda da toplanıla bilər.',
+  'location_disclosure.confirm': 'Davam et',
+  'location_disclosure.cancel': 'İndi yox',
+  'location_disclosure.required':
+      'Növbəyə başlamaq üçün fon geolokasiyası istifadəsini təsdiqləmək lazımdır.',
 
   'login.supabase_not_configured':
       'Supabase qurulmayıb. SUPABASE_URL və SUPABASE_ANON_KEY-ni --dart-define ilə verin.',

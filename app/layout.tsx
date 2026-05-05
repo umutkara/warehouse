@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Warehouse B",
-  description: "Warehouse management system",
+  title: "Warehouse Flow — операционная платформа склада, логистики и доставки",
+  description:
+    "WMS, ТСД, операционный отдел, маршрутное планирование, мультисклад и мобильный курьер в одном промышленном контуре. Прозрачная цепочка статусов, аудит каждого действия, готовность к Enterprise-нагрузке.",
 };
 
 export default function RootLayout({

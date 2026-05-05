@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 abstract class AuthPreferences {
   static const _keyRememberEmail = 'auth_remember_email';
   static const _keyRememberMe = 'auth_remember_me';
+  static const _keyBackgroundLocationDisclosureAccepted =
+      'bg_location_disclosure_accepted';
 
   static Future<String?> getRememberedEmail() async {
     final prefs = await SharedPreferences.getInstance();
@@ -26,5 +28,17 @@ abstract class AuthPreferences {
   static Future<bool> getRememberMeChecked() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_keyRememberMe) ?? true;
+  }
+
+  static Future<bool> isBackgroundLocationDisclosureAccepted() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyBackgroundLocationDisclosureAccepted) ?? false;
+  }
+
+  static Future<void> setBackgroundLocationDisclosureAccepted(
+    bool value,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBackgroundLocationDisclosureAccepted, value);
   }
 }

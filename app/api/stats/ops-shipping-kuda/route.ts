@@ -725,6 +725,7 @@ export async function GET(req: Request) {
     if (!dateKeySet.has(targetDay) || expectedSourceDay !== createdDayBaku) continue;
 
     const scenario = task.scenario || null;
+    const taskUnitIds = Array.from(taskUnitsByTaskId.get(task.id) || []);
     if (!hasRequiredScenarioPhrase(scenario)) {
       excludedByRequiredScenario += 1;
       continue;
@@ -741,7 +742,7 @@ export async function GET(req: Request) {
       continue;
     }
 
-    const unitIds = Array.from(taskUnitsByTaskId.get(task.id) || []);
+    const unitIds = taskUnitIds;
     if (unitIds.some((unitId) => unitHasOpsNs.get(unitId))) {
       excludedByOpsNs += 1;
       continue;
@@ -828,7 +829,20 @@ export async function GET(req: Request) {
     let returnedCount = 0;
 
     for (const task of dayTasks) {
-      const hasOut = task.unitIds.some((unitId) => Boolean(getEarliestOutOnOrBeforeDayInPeriod(unitId, day)));
+      const taskCreatedAt = createdTaskById.get(task.taskId)?.created_at || null;
+      const getEarliestOutOnOrBeforeDayForTask = (unitId: string) => {
+        const outAt = getEarliestOutOnOrBeforeDayInPeriod(unitId, day);
+        if (!outAt) return null;
+        if (!taskCreatedAt) return outAt;
+        return outAt >= taskCreatedAt ? outAt : null;
+      };
+      const getEarliestOutAfterDayForTask = (unitId: string) => {
+        const outAt = getEarliestOutAfterDayInPeriod(unitId, day);
+        if (!outAt) return null;
+        if (!taskCreatedAt) return outAt;
+        return outAt >= taskCreatedAt ? outAt : null;
+      };
+      const hasOut = task.unitIds.some((unitId) => Boolean(getEarliestOutOnOrBeforeDayForTask(unitId)));
       const hasReturned = task.unitIds.some((unitId) => hasReturnedAfterOutOnDay(unitId, day));
 
       if (hasOut) {
@@ -836,7 +850,7 @@ export async function GET(req: Request) {
         kudaOut.set(task.kuda, (kudaOut.get(task.kuda) || 0) + 1);
         outTaskIds.add(task.taskId);
         task.unitIds.forEach((unitId) => {
-          const outAt = getEarliestOutOnOrBeforeDayInPeriod(unitId, day);
+          const outAt = getEarliestOutOnOrBeforeDayForTask(unitId);
           if (!outAt) return;
           const returnedDetail = getReturnedUnitDetailOnDay(unitId, day);
           if (returnedDetail) return;
@@ -865,7 +879,7 @@ export async function GET(req: Request) {
           };
           dailyNotOutRows.push(baseRow);
 
-          const lateOutAt = getEarliestOutAfterDayInPeriod(unitId, day);
+          const lateOutAt = getEarliestOutAfterDayForTask(unitId);
           if (lateOutAt) {
             lateOutRows.set(`${task.taskId}-${unitId}-${day}`, {
               ...baseRow,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/auth/auth_preferences.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/i18n/app_i18n.dart';
@@ -53,7 +54,56 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         accessTokenProvider: () => AuthService.getValidAccessToken(),
       ),
     );
-    _controller.bootstrap(initialCourierName: widget.courierName);
+    _bootstrapWithLocationDisclosure();
+  }
+
+  Future<void> _bootstrapWithLocationDisclosure() async {
+    final acceptedBefore =
+        await AuthPreferences.isBackgroundLocationDisclosureAccepted();
+    if (!mounted) return;
+
+    var accepted = acceptedBefore;
+    if (!accepted) {
+      accepted = await _showBackgroundLocationDisclosure();
+      if (!mounted) return;
+      if (accepted) {
+        await AuthPreferences.setBackgroundLocationDisclosureAccepted(true);
+      }
+    }
+
+    if (!accepted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.t('location_disclosure.required'))),
+        );
+      }
+      await widget.onLogout();
+      return;
+    }
+
+    await _controller.bootstrap(initialCourierName: widget.courierName);
+  }
+
+  Future<bool> _showBackgroundLocationDisclosure() async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.t('location_disclosure.title')),
+        content: Text(context.t('location_disclosure.body')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.t('location_disclosure.cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(context.t('location_disclosure.confirm')),
+          ),
+        ],
+      ),
+    );
+    return accepted == true;
   }
 
   @override

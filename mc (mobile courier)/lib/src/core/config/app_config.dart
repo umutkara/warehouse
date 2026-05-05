@@ -1,19 +1,37 @@
 class AppConfig {
   const AppConfig._();
 
+  static const String productionBaseUrl =
+      'https://warehouse-nu-three.vercel.app';
+
   /// Backend API URL. Override via:
   /// `--dart-define=API_BASE_URL=https://your-server.example.com`
   /// Tip: use `./scripts/run-mobile-courier.sh` to reuse .env.local value.
   static const String _baseUrlFromEnv = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: '',
+    defaultValue: productionBaseUrl,
   );
 
   static String get baseUrl {
-    // Force explicit configuration in release builds to avoid shipping
-    // an accidental localhost/staging endpoint to Google Play.
-    assert(_baseUrlFromEnv.isNotEmpty, 'API_BASE_URL is not set');
+    final uri = Uri.parse(_baseUrlFromEnv);
+    if (!uri.hasScheme || uri.host.isEmpty) {
+      throw StateError(
+        'API_BASE_URL must be an absolute URL: $_baseUrlFromEnv',
+      );
+    }
     return _baseUrlFromEnv;
+  }
+
+  static Uri apiUri(String path) {
+    final normalizedBaseUrl = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    final uri = Uri.parse('$normalizedBaseUrl$normalizedPath');
+    if (!uri.hasScheme || uri.host.isEmpty) {
+      throw StateError('API request URL must be absolute: $uri');
+    }
+    return uri;
   }
 
   static const String supabaseUrl = String.fromEnvironment(

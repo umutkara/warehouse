@@ -13,7 +13,7 @@ class ApiClient {
   final Future<String?> Function()? accessTokenProvider;
 
   Future<Map<String, dynamic>> getJson(String path) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = AppConfig.apiUri(path);
     final headers = await _defaultHeaders();
     final response = await _http.get(uri, headers: headers);
     return _decodeResponse(response, path);
@@ -23,7 +23,7 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? body,
   }) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = AppConfig.apiUri(path);
     final headers = await _defaultHeaders();
     final response = await _http.post(
       uri,
@@ -40,7 +40,7 @@ class ApiClient {
     required String fileName,
     String? contentType,
   }) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = AppConfig.apiUri(path);
     final headers = <String, String>{};
     final token = await accessTokenProvider?.call();
     if (token != null && token.isNotEmpty) {
