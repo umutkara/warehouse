@@ -419,6 +419,22 @@ function fromDateTimeLocalValue(value: string): string | null {
   return date.toISOString();
 }
 
+function dateInputStartToIso(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(`${trimmed}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function dateInputEndToIso(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(`${trimmed}T23:59:59.999`);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
 function getRoleLabel(role: string): string {
   const map: Record<string, string> = {
     admin: "admin",
@@ -3284,6 +3300,9 @@ export default function RoutePlanningClient({
   const [allOrdersOpen, setAllOrdersOpen] = useState(false);
   const [colorsInfoOpen, setColorsInfoOpen] = useState(false);
   const [showCouriersOnMap, setShowCouriersOnMap] = useState(true);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [leftPaneWidthPct, setLeftPaneWidthPct] = useState(52);
   const [isResizing, setIsResizing] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3444,7 +3463,16 @@ export default function RoutePlanningClient({
   const filteredPickingUnits = useMemo(() => {
     const units = dashboard?.picking_units || [];
     const q = searchPicking.trim().toLowerCase();
+    const fromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00`) : null;
+    const toMs = dateTo ? Date.parse(`${dateTo}T23:59:59.999`) : null;
     return units.filter((unit) => {
+      const createdMs = Date.parse(unit.created_at);
+      if (fromMs !== null && Number.isFinite(fromMs) && Number.isFinite(createdMs) && createdMs < fromMs) {
+        return false;
+      }
+      if (toMs !== null && Number.isFinite(toMs) && Number.isFinite(createdMs) && createdMs > toMs) {
+        return false;
+      }
       if (pickingCellFilter.size > 0) {
         const cellKey = unit.cell_id || "__no_cell__";
         if (!pickingCellFilter.has(cellKey)) return false;
@@ -3457,7 +3485,7 @@ export default function RoutePlanningClient({
         barcode.includes(q) || cellCode.includes(q) || scenario.includes(q)
       );
     });
-  }, [dashboard?.picking_units, searchPicking, pickingCellFilter]);
+  }, [dashboard?.picking_units, searchPicking, pickingCellFilter, dateFrom, dateTo]);
 
   const availablePickingCells = useMemo(() => {
     const cells = new Map<string, string>();
@@ -3492,7 +3520,16 @@ export default function RoutePlanningClient({
   const filteredDroppedUnits = useMemo(() => {
     const units = dashboard?.dropped_units || [];
     const q = searchDropped.trim().toLowerCase();
+    const fromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00`) : null;
+    const toMs = dateTo ? Date.parse(`${dateTo}T23:59:59.999`) : null;
     return units.filter((unit) => {
+      const droppedMs = Date.parse(unit.dropped_at);
+      if (fromMs !== null && Number.isFinite(fromMs) && Number.isFinite(droppedMs) && droppedMs < fromMs) {
+        return false;
+      }
+      if (toMs !== null && Number.isFinite(toMs) && Number.isFinite(droppedMs) && droppedMs > toMs) {
+        return false;
+      }
       if (!droppedColorFilter.has(unit.color_key)) return false;
       if (droppedZoneFilter.size > 0) {
         const unitZoneKey = unit.zone_code || "__no_zone__";
@@ -3511,6 +3548,8 @@ export default function RoutePlanningClient({
     droppedColorFilter,
     droppedZoneFilter,
     searchDropped,
+    dateFrom,
+    dateTo,
   ]);
 
   const unitZoneMap = useMemo(() => {
@@ -3523,7 +3562,16 @@ export default function RoutePlanningClient({
 
   const filteredDropPoints = useMemo(() => {
     const points = dashboard?.drop_points || [];
+    const fromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00`) : null;
+    const toMs = dateTo ? Date.parse(`${dateTo}T23:59:59.999`) : null;
     return points.filter((point) => {
+      const happenedMs = Date.parse(point.happened_at);
+      if (fromMs !== null && Number.isFinite(fromMs) && Number.isFinite(happenedMs) && happenedMs < fromMs) {
+        return false;
+      }
+      if (toMs !== null && Number.isFinite(toMs) && Number.isFinite(happenedMs) && happenedMs > toMs) {
+        return false;
+      }
       if (!droppedColorFilter.has(point.color_key)) return false;
       if (droppedZoneFilter.size > 0) {
         const zoneKey = unitZoneMap.get(point.unit_id) ?? "__no_zone__";
@@ -3536,6 +3584,8 @@ export default function RoutePlanningClient({
     droppedColorFilter,
     droppedZoneFilter,
     unitZoneMap,
+    dateFrom,
+    dateTo,
   ]);
   const availableDroppedColors = useMemo(
     () =>
@@ -3754,6 +3804,62 @@ export default function RoutePlanningClient({
       selectedPickingUnitIds,
     ],
   );
+
+  const isDateRangeInvalid = useMemo(() => {
+    if (!dateFrom || !dateTo) return false;
+    return Date.parse(`${dateFrom}T00:00:00`) > Date.parse(`${dateTo}T23:59:59.999`);
+  }, [dateFrom, dateTo]);
+
+  const resetDateRange = useCallback(() => {
+    setDateFrom("");
+    setDateTo("");
+  }, []);
+
+  const handleExportXlsx = useCallback(async () => {
+    if (isDateRangeInvalid) {
+      setError("Период указан некорректно: дата 'от' позже даты 'до'");
+      return;
+    }
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      const fromIso = dateInputStartToIso(dateFrom);
+      const toIso = dateInputEndToIso(dateTo);
+      if (fromIso) params.set("from", fromIso);
+      if (toIso) params.set("to", toIso);
+
+      const response = await fetch(`/api/routeplanning/export?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        router.push("/login");
+        return;
+      }
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(payload?.error || "Не удалось выгрузить XLSX");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const fallbackDate = new Date().toISOString().slice(0, 10);
+      const fromName = dateFrom || "all";
+      const toName = dateTo || fallbackDate;
+      link.download = `routeplanning_${fromName}_${toName}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (exportError: unknown) {
+      setError(exportError instanceof Error ? exportError.message : "Ошибка выгрузки XLSX");
+    } finally {
+      setExportingXlsx(false);
+    }
+  }, [dateFrom, dateTo, isDateRangeInvalid, router]);
 
   const handleZonesUpdated = useCallback((zones: Zone[]) => {
     setDashboard((prev) => (prev ? { ...prev, zones } : prev));
@@ -4107,6 +4213,43 @@ export default function RoutePlanningClient({
         </div>
 
         <div className={styles.toolbarRight}>
+          <div className={styles.field} style={{ minWidth: 150 }}>
+            <label className={styles.label}>Дата от</label>
+            <input
+              className={styles.input}
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              max={dateTo || undefined}
+            />
+          </div>
+          <div className={styles.field} style={{ minWidth: 150 }}>
+            <label className={styles.label}>Дата до</label>
+            <input
+              className={styles.input}
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              min={dateFrom || undefined}
+            />
+          </div>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={resetDateRange}
+            disabled={!dateFrom && !dateTo}
+          >
+            Сброс дат
+          </button>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={() => void handleExportXlsx()}
+            disabled={exportingXlsx || loading || isDateRangeInvalid}
+            title={isDateRangeInvalid ? "Дата 'от' позже даты 'до'" : undefined}
+          >
+            {exportingXlsx ? "Выгрузка..." : "Выгрузить XLSX"}
+          </button>
           <button
             type="button"
             className={styles.secondaryButton}

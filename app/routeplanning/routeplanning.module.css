@@ -146,6 +146,7 @@
   min-height: 200px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .mainCouriersResizer {
@@ -196,6 +197,8 @@
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .paneLeft {
@@ -208,6 +211,7 @@
 }
 
 .paneInner {
+  flex: 1;
   height: 100%;
   min-height: 0;
   padding: 12px;
@@ -336,12 +340,16 @@
   flex-shrink: 0;
   min-height: 120px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .listsWrapDropped {
   flex: 1;
   min-height: 120px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .listsWrapResizer {
@@ -357,12 +365,8 @@
   background: linear-gradient(180deg, transparent 1px, #3b82f6 1px, #3b82f6 7px, transparent 7px);
 }
 
-.listsWrapDropped {
-  flex: 1;
-  min-height: 120px;
-}
-
 .listCard {
+  flex: 1;
   min-height: 0;
   border: 1px solid #dbe2ea;
   border-radius: 12px;
@@ -385,7 +389,8 @@
 .listBody {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 8px;
   padding: 8px;
