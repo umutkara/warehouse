@@ -41,14 +41,14 @@ class TaskRepository {
 
   Future<void> claimByBarcode({
     required String barcode,
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
     await _apiClient.postJson(
       '/api/courier/tasks/scan-claim',
       body: <String, dynamic>{
         'barcode': barcode,
-        'giver_signature': giverSignature,
+        if (giverSignature?.isNotEmpty == true) 'giver_signature': giverSignature,
         'note': note,
       },
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'core/auth/auth_service.dart';
 import 'core/config/app_config.dart';
@@ -6,6 +7,18 @@ import 'core/i18n/app_i18n.dart';
 import 'features/auth/presentation/login_page.dart';
 import 'features/home/presentation/home_shell.dart';
 import 'shared/widgets/gps_gate.dart';
+
+/// Avoids [Window.setStatusBarColor] / [Window.setNavigationBarColor] on Android 15+
+/// (Google Play pre-launch): transparent bars come from edge-to-edge; only icon appearance is set.
+const SystemUiOverlayStyle edgeToEdgeSystemUiOverlay = SystemUiOverlayStyle(
+  statusBarIconBrightness: Brightness.light,
+  systemNavigationBarIconBrightness: Brightness.light,
+  statusBarColor: null,
+  systemNavigationBarColor: null,
+  systemNavigationBarDividerColor: null,
+  systemNavigationBarContrastEnforced: false,
+  systemStatusBarContrastEnforced: false,
+);
 
 class MobileCourierApp extends StatefulWidget {
   const MobileCourierApp({super.key});
@@ -39,6 +52,9 @@ class _MobileCourierAppState extends State<MobileCourierApp> {
               brightness: Brightness.dark,
             ),
             useMaterial3: true,
+            appBarTheme: const AppBarTheme(
+              systemOverlayStyle: edgeToEdgeSystemUiOverlay,
+            ),
             cardTheme: CardThemeData(
               elevation: 0,
               shape: RoundedRectangleBorder(

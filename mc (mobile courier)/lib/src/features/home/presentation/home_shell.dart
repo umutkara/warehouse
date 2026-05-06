@@ -10,6 +10,7 @@ import '../../self_pickup/presentation/self_pickup_page.dart';
 import '../../shift/presentation/shift_page.dart';
 import '../../tasks/presentation/tasks_page.dart';
 import '../application/courier_app_controller.dart';
+import 'shift_start_gate_overlay.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({
@@ -28,7 +29,6 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   late final CourierAppController _controller;
   int _selectedIndex = 0;
-  bool _handlingUnauthorized = false;
 
   Future<void> _openPrivacyPolicy() async {
     final uri = Uri.parse(AppConfig.privacyPolicyUrl);
@@ -84,6 +84,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     await _controller.bootstrap(initialCourierName: widget.courierName);
   }
 
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.t('home.logout_confirm_title')),
+        content: Text(context.t('home.logout_confirm_body')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.t('common.cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(context.t('home.logout')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.onLogout();
+  }
+
   Future<bool> _showBackgroundLocationDisclosure() async {
     final accepted = await showDialog<bool>(
       context: context,
@@ -116,7 +138,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _controller.refreshAll();
+      _controller.resumeSync();
     }
   }
 
@@ -125,21 +147,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        if (!_handlingUnauthorized &&
-            _controller.error?.contains('ApiException(401)') == true) {
-          _handlingUnauthorized = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            await widget.onLogout();
-            if (mounted) _handlingUnauthorized = false;
-          });
-        }
         final pages = [
           TasksPage(controller: _controller),
           SelfPickupPage(controller: _controller),
           ShiftPage(controller: _controller),
         ];
 
-        return Scaffold(
+        final gate = !_controller.hasActiveWorkShift;
+        final topInset =
+            MediaQuery.of(context).padding.top + kToolbarHeight;
+
+        return Stack(
+          children: [
+            Scaffold(
           appBar: AppBar(
             title: Text(
               tr(context.t('home.title'), {'name': _controller.courierName}),
@@ -193,17 +213,34 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 tooltip: context.t('home.privacy_policy'),
               ),
               IconButton(
-                onPressed: () async => widget.onLogout(),
+                onPressed: _confirmLogout,
                 icon: const Icon(Icons.logout),
                 tooltip: context.t('home.logout'),
               ),
             ],
           ),
-          body: pages[_selectedIndex],
-          floatingActionButton: _buildCenterFab(context),
+          body: Column(
+            children: [
+              if (_controller.syncing)
+                const LinearProgressIndicator(minHeight: 2),
+              Expanded(child: pages[_selectedIndex]),
+            ],
+          ),
+          floatingActionButton:
+              gate ? null : _buildCenterFab(context),
           floatingActionButtonLocation:
               FloatingActionButtonLocation.centerDocked,
           bottomNavigationBar: _buildBottomNav(context),
+            ),
+            if (gate)
+              Positioned(
+                top: topInset,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: ShiftStartGateOverlay(controller: _controller),
+              ),
+          ],
         );
       },
     );

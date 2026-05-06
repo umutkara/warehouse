@@ -10,8 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_courier/src/app.dart';
 
 void main() {
-  testWidgets('Login page shows start shift button', (WidgetTester tester) async {
+  testWidgets('Login page shows sign-in button', (WidgetTester tester) async {
     await tester.pumpWidget(const MobileCourierApp());
-    expect(find.text('Start shift'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Войти'), findsOneWidget);
   });
 }

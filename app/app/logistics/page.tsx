@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
@@ -49,6 +49,7 @@ export default function LogisticsPage() {
   const [loadingCouriers, setLoadingCouriers] = useState(false);
   const [shipping, setShipping] = useState(false);
   const [lastShipment, setLastShipment] = useState<LastShipmentInfo | null>(null);
+  const selectAllFilteredRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadUnits();
@@ -276,6 +277,33 @@ export default function LogisticsPage() {
       const q = searchOrder.trim().toLowerCase();
       return (unit.barcode || "").toLowerCase().includes(q);
     });
+
+  const allFilteredSelected =
+    filteredUnits.length > 0 && filteredUnits.every((u) => selectedUnitIds.has(u.id));
+  const someFilteredSelected =
+    filteredUnits.some((u) => selectedUnitIds.has(u.id)) && !allFilteredSelected;
+
+  useEffect(() => {
+    const el = selectAllFilteredRef.current;
+    if (el) el.indeterminate = someFilteredSelected;
+  }, [someFilteredSelected]);
+
+  function handleToggleSelectAllFiltered() {
+    setSelectedUnit(null);
+    const ids = filteredUnits.map((u) => u.id);
+    if (ids.length === 0) return;
+    setSelectedUnitIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.every((id) => next.has(id));
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
   const selectedCourierName =
     couriers.find((courier) => courier.id === selectedCourierUserId)?.full_name || "";
   const effectiveCourierName = selectedCourierName
@@ -674,6 +702,43 @@ export default function LogisticsPage() {
                   Выбрано заказов: {selectedUnitIds.size}
                 </div>
               )}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-sm)",
+                  marginBottom: "var(--spacing-md)",
+                  padding: "var(--spacing-sm) 0",
+                  borderBottom: "1px solid #e5e7eb",
+                }}
+              >
+                <input
+                  ref={selectAllFilteredRef}
+                  id="selectAllFiltered"
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  onChange={handleToggleSelectAllFiltered}
+                  style={{
+                    cursor: "pointer",
+                    width: 18,
+                    height: 18,
+                    flexShrink: 0,
+                  }}
+                  title="Выбрать или снять все заказы из текущего списка (с учётом поиска и фильтра по ячейке)"
+                />
+                <label
+                  htmlFor="selectAllFiltered"
+                  style={{
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "var(--color-text)",
+                    userSelect: "none",
+                  }}
+                >
+                  Выбрать все в списке ({filteredUnits.length})
+                </label>
+              </div>
               <div style={{ display: "grid", gap: "var(--spacing-md)" }}>
                 {filteredUnits.map((unit) => {
                   const isSelected = selectedUnit?.id === unit.id;

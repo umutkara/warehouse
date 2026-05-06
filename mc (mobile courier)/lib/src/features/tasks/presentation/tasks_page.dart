@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
-import '../../shared/widgets/giver_signature_dialog.dart';
 import '../../shared/widgets/section_card.dart';
 import '../../shared/widgets/status_chip.dart';
 import '../domain/courier_task.dart';
@@ -48,35 +47,8 @@ class _TasksPageState extends State<TasksPage> {
         ),
       );
     }
-    if (widget.controller.tasks.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.all(10),
-        children: [
-          _PendingAssignmentsSection(
-            controller: widget.controller,
-            scanController: _confirmScanController,
-            selectedIds: _selectedPendingIds,
-            onToggleSelected: (shipmentId, selected) {
-              setState(() {
-                if (selected) {
-                  _selectedPendingIds.add(shipmentId);
-                } else {
-                  _selectedPendingIds.remove(shipmentId);
-                }
-              });
-            },
-            onConfirmSelected: () async => _confirmSelected(context),
-            onRejectSelected: () async => _rejectSelected(context),
-          ),
-          const SizedBox(height: 20),
-          SectionCard(
-            title: context.t('tasks.my_tasks'),
-            child: Text(context.t('tasks.no_active_tasks')),
-          ),
-        ],
-      );
-    }
     final showFinishBar = _selectedTaskIds.isNotEmpty;
+    final tasksEmpty = widget.controller.tasks.isEmpty;
     return Stack(
       children: [
         ListView(
@@ -98,52 +70,56 @@ class _TasksPageState extends State<TasksPage> {
               onConfirmSelected: () async => _confirmSelected(context),
               onRejectSelected: () async => _rejectSelected(context),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: tasksEmpty ? 20 : 12),
             SectionCard(
               title: context.t('tasks.my_tasks'),
-              dense: true,
-              child: _TasksGroupedByScenario(
-                tasks: widget.controller.tasks,
-                selectedIds: _selectedTaskIds,
-                onToggleSelected: (taskId, selected) {
-                  setState(() {
-                    if (selected) {
-                      _selectedTaskIds.add(taskId);
-                    } else {
-                      _selectedTaskIds.remove(taskId);
-                    }
-                  });
-                },
-                onOpenTask: (task) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => TaskDetailsPage(
-                        task: task,
-                        onMarkDropped: (data) =>
-                            widget.controller.markTaskDropped(
-                              task,
-                              opsStatus: data.status,
-                              note: data.note,
-                              signaturePngBase64: data.signaturePngBase64,
-                              photoBytes: data.photoBytes,
-                              photoFileName: data.photoFileName,
+              dense: !tasksEmpty,
+              child: tasksEmpty
+                  ? Text(context.t('tasks.no_active_tasks'))
+                  : _TasksGroupedByScenario(
+                      tasks: widget.controller.tasks,
+                      selectedIds: _selectedTaskIds,
+                      onToggleSelected: (taskId, selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedTaskIds.add(taskId);
+                          } else {
+                            _selectedTaskIds.remove(taskId);
+                          }
+                        });
+                      },
+                      onOpenTask: (task) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => TaskDetailsPage(
+                              task: task,
+                              onMarkDropped: (data) =>
+                                  widget.controller.markTaskDropped(
+                                    task,
+                                    opsStatus: data.status,
+                                    note: data.note,
+                                    signaturePngBase64: data.signaturePngBase64,
+                                    photoBytes: data.photoBytes,
+                                    photoFileName: data.photoFileName,
+                                  ),
+                              onUndoDrop: task.status == 'dropped'
+                                  ? () => widget.controller.undoTaskDrop(task)
+                                  : null,
+                              onConfirmPickup:
+                                  task.assignedByLogistics &&
+                                      !task.pickupConfirmed
+                                  ? () => _confirmPickupForTask(context, task)
+                                  : null,
+                              onRejectPickup:
+                                  task.assignedByLogistics &&
+                                      !task.pickupConfirmed
+                                  ? () => _rejectPickupForTask(context, task)
+                                  : null,
                             ),
-                        onUndoDrop: task.status == 'dropped'
-                            ? () => widget.controller.undoTaskDrop(task)
-                            : null,
-                        onConfirmPickup:
-                            task.assignedByLogistics && !task.pickupConfirmed
-                            ? () => _confirmPickupForTask(context, task)
-                            : null,
-                        onRejectPickup:
-                            task.assignedByLogistics && !task.pickupConfirmed
-                            ? () => _rejectPickupForTask(context, task)
-                            : null,
-                      ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
@@ -413,8 +389,6 @@ class _PendingAssignmentsSection extends StatelessWidget {
   final Future<void> Function() onConfirmSelected;
   final Future<void> Function() onRejectSelected;
 
-  String _normalizedBarcode(String value) => value.trim().toLowerCase();
-
   @override
   Widget build(BuildContext context) {
     final assignments = controller.pendingAssignments;
@@ -571,40 +545,9 @@ class _PendingAssignmentsSection extends StatelessWidget {
         ),
       ),
     );
-    final normalizedScanned = scanned == null
-        ? ''
-        : _normalizedBarcode(scanned);
-    final matchingPending = controller.pendingAssignments
-        .where(
-          (assignment) =>
-              _normalizedBarcode(assignment.barcode) == normalizedScanned,
-        )
-        .length;
-    final matchingMyTasks = controller.tasks
-        .where((task) => _normalizedBarcode(task.barcode) == normalizedScanned)
-        .toList();
     if (scanned == null || scanned.isEmpty) return;
     scanController.text = scanned;
-    if (matchingPending > 0 || matchingMyTasks.isNotEmpty) {
-      await controller.scanConfirmAssignment(scanned);
-      if (!context.mounted) return;
-      if (controller.error == null) {
-        scanController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              tr(context.t('tasks.pending.scan_confirm_snack'), {
-                'barcode': scanned,
-              }),
-            ),
-          ),
-        );
-      }
-      return;
-    }
-    final signature = await showGiverSignatureDialog(context);
-    if (!context.mounted || signature == null || signature.isEmpty) return;
-    await controller.scanConfirmAssignment(scanned, giverSignature: signature);
+    await controller.scanConfirmAssignment(scanned);
     if (!context.mounted) return;
     if (controller.error == null) {
       scanController.clear();

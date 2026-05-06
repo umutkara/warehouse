@@ -6,7 +6,6 @@ import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../map/domain/geo_models.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
-import '../../shared/widgets/giver_signature_dialog.dart';
 import '../../shared/widgets/section_card.dart';
 import '../../tasks/domain/courier_task.dart';
 
@@ -84,14 +83,9 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
   Future<void> _addAllPending() async {
     if (_pendingBarcodes.isEmpty) return;
     if (!mounted) return;
-    final signature = await showGiverSignatureDialog(context);
-    if (signature == null || !mounted) return;
     final toAdd = List<String>.from(_pendingBarcodes);
     setState(() => _pendingBarcodes.clear());
-    final successCount = await widget.controller.claimTasksByBarcodes(
-      toAdd,
-      giverSignature: signature,
-    );
+    final successCount = await widget.controller.claimTasksByBarcodes(toAdd);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(tr(context.t('self_pickup.added_snack'), {'ok': successCount, 'total': toAdd.length}))),

@@ -55,6 +55,8 @@ const Map<String, String> _ru = <String, String>{
   'home.privacy_policy': 'Политика конфиденциальности',
   'home.privacy_open_error': 'Не удалось открыть политику конфиденциальности',
   'home.logout': 'Выйти',
+  'home.logout_confirm_title': 'Выход',
+  'home.logout_confirm_body': 'Выйти из аккаунта?',
   'lang.ru': 'RU',
   'lang.az': 'AZ',
   'task.finish_route': 'Закончить рейс',
@@ -179,8 +181,13 @@ const Map<String, String> _ru = <String, String>{
   'login.password': 'Пароль',
   'login.password_short': 'Слишком короткий пароль',
   'login.remember': 'Запомнить вход',
-  'login.start_shift': 'Начать смену',
+  'login.submit': 'Войти',
   'login.privacy_policy': 'Политика конфиденциальности',
+
+  'shift.gate.title': 'Смена не начата',
+  'shift.gate.body':
+      'Чтобы видеть задачи и работать в приложении, откройте смену.',
+  'shift.gate.start_button': 'Начать смену',
 
   'shift.current.title': 'Текущая смена',
   'shift.current.none': 'Открытая смена не найдена',
@@ -261,6 +268,8 @@ const Map<String, String> _az = <String, String>{
   'home.privacy_policy': 'Məxfilik siyasəti',
   'home.privacy_open_error': 'Məxfilik siyasətini açmaq mümkün olmadı',
   'home.logout': 'Çıxış',
+  'home.logout_confirm_title': 'Çıxış',
+  'home.logout_confirm_body': 'Hesabdan çıxmaq istəyirsiniz?',
   'lang.ru': 'RU',
   'lang.az': 'AZ',
   'task.finish_route': 'Reysi bağlamaq',
@@ -384,8 +393,13 @@ const Map<String, String> _az = <String, String>{
   'login.password': 'Şifrə',
   'login.password_short': 'Şifrə çox qısadır',
   'login.remember': 'Girişi yadda saxla',
-  'login.start_shift': 'Növbəyə başla',
+  'login.submit': 'Daxil ol',
   'login.privacy_policy': 'Məxfilik siyasəti',
+
+  'shift.gate.title': 'Növbə başlamayıb',
+  'shift.gate.body':
+      'Tapşırıqları görmək və tətbiqdə işləmək üçün növbəni açın.',
+  'shift.gate.start_button': 'Növbəyə başla',
 
   'shift.current.title': 'Cari növbə',
   'shift.current.none': 'Açıq növbə tapılmadı',

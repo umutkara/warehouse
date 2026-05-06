@@ -46,6 +46,8 @@ class CourierAppController extends ChangeNotifier {
   };
 
   bool loading = false;
+  /// Узкая полоска прогресса (не блокирует экран задач целиком).
+  bool syncing = false;
   String? error;
   String courierName = '';
   String? trackingStatus;
@@ -63,12 +65,104 @@ class CourierAppController extends ChangeNotifier {
     problematic: currentShift?.problematicTasks ?? 0,
   );
 
+  /// Активная рабочая смена (не показываем закрытую «последнюю» как доступ к задачам).
+  bool get hasActiveWorkShift {
+    final s = currentShift;
+    if (s == null) return false;
+    final st = s.status.toLowerCase();
+    return st == 'open' || st == 'closing';
+  }
+
+  Future<void> _flushAndPendingCount() async {
+    await _eventQueue.flush();
+    pendingQueueCount = await _eventQueue.pendingCount();
+  }
+
+  Future<void> _reloadData({required bool includeZonesAndDrops}) async {
+    if (includeZonesAndDrops) {
+      final results = await Future.wait([
+        _taskRepository.loadCurrentShift(),
+        _taskRepository.fetchMyTasks(),
+        _taskRepository.fetchPendingAssignments(),
+        _taskRepository.fetchZones(),
+        _taskRepository.fetchDrops(),
+      ]);
+      currentShift = results[0] as CurrentShift?;
+      tasks
+        ..clear()
+        ..addAll(results[1] as List<CourierTask>);
+      pendingAssignments
+        ..clear()
+        ..addAll(results[2] as List<PendingAssignment>);
+      zones
+        ..clear()
+        ..addAll(results[3] as List<GeoZone>);
+      drops
+        ..clear()
+        ..addAll(results[4] as List<DropMarker>);
+    } else {
+      final results = await Future.wait([
+        _taskRepository.loadCurrentShift(),
+        _taskRepository.fetchMyTasks(),
+        _taskRepository.fetchPendingAssignments(),
+      ]);
+      currentShift = results[0] as CurrentShift?;
+      tasks
+        ..clear()
+        ..addAll(results[1] as List<CourierTask>);
+      pendingAssignments
+        ..clear()
+        ..addAll(results[2] as List<PendingAssignment>);
+    }
+
+    if (hasActiveWorkShift) {
+      await ensureLiveTracking();
+    } else {
+      await stopLiveTracking();
+    }
+  }
+
+  Future<void> _syncCoreAfterFlush() async {
+    await _flushAndPendingCount();
+    await _reloadData(includeZonesAndDrops: false);
+  }
+
+  Future<void> _syncFullAfterFlush() async {
+    await _flushAndPendingCount();
+    await _reloadData(includeZonesAndDrops: true);
+  }
+
+  /// Лёгкая синхронизация без спиннера (например после возврата из фона).
+  Future<void> resumeSync() async {
+    try {
+      await _syncCoreAfterFlush();
+    } catch (_) {
+      // оставляем последний успешный снимок
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Future<void> bootstrap({required String initialCourierName}) async {
     courierName = initialCourierName.trim();
-    await _taskRepository.startShift();
     await refreshAll();
-    await ensureLiveTracking();
     _initConnectivityAndForegroundTask();
+  }
+
+  Future<void> beginShift() async {
+    syncing = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _taskRepository.startShift();
+      await refreshAll();
+    } catch (e) {
+      error = e.toString();
+      rethrow;
+    } finally {
+      syncing = false;
+      notifyListeners();
+    }
   }
 
   void _initConnectivityAndForegroundTask() {
@@ -110,6 +204,9 @@ class CourierAppController extends ChangeNotifier {
       _stopOfflineLocationCollection();
       _eventQueue.flush().then((_) async {
         pendingQueueCount = await _eventQueue.pendingCount();
+        try {
+          await _reloadData(includeZonesAndDrops: false);
+        } catch (_) {}
         notifyListeners();
       });
     } else {
@@ -197,25 +294,7 @@ class CourierAppController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      await _eventQueue.flush();
-      pendingQueueCount = await _eventQueue.pendingCount();
-      currentShift = await _taskRepository.loadCurrentShift();
-      final result = await _taskRepository.fetchMyTasks();
-      final assigned = await _taskRepository.fetchPendingAssignments();
-      final loadedZones = await _taskRepository.fetchZones();
-      final loadedDrops = await _taskRepository.fetchDrops();
-      tasks
-        ..clear()
-        ..addAll(result);
-      pendingAssignments
-        ..clear()
-        ..addAll(assigned);
-      zones
-        ..clear()
-        ..addAll(loadedZones);
-      drops
-        ..clear()
-        ..addAll(loadedDrops);
+      await _syncFullAfterFlush();
     } catch (e) {
       error = e.toString();
     } finally {
@@ -224,14 +303,26 @@ class CourierAppController extends ChangeNotifier {
     }
   }
 
-  Future<void> refreshTasks() => refreshAll();
+  Future<void> refreshTasks() async {
+    syncing = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _syncCoreAfterFlush();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      syncing = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> claimTaskByBarcode(
     String barcode, {
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -240,10 +331,11 @@ class CourierAppController extends ChangeNotifier {
         giverSignature: giverSignature,
         note: note,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } catch (e) {
       error = e.toString();
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
@@ -251,11 +343,11 @@ class CourierAppController extends ChangeNotifier {
   /// Добавляет несколько заказов оптом. Возвращает число успешно добавленных.
   Future<int> claimTasksByBarcodes(
     List<String> barcodes, {
-    required String giverSignature,
+    String? giverSignature,
     String? note,
   }) async {
     if (barcodes.isEmpty) return 0;
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     var successCount = 0;
@@ -270,24 +362,25 @@ class CourierAppController extends ChangeNotifier {
           successCount++;
         } catch (_) {}
       }
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } finally {
-      loading = false;
+      syncing = false;
       notifyListeners();
     }
     return successCount;
   }
 
   Future<void> removeTaskFromHands(CourierTask task, {String? reason}) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
       await _taskRepository.removeFromHands(task, reason: reason);
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } catch (e) {
       error = e.toString();
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
@@ -298,7 +391,7 @@ class CourierAppController extends ChangeNotifier {
     String? reason,
   }) async {
     if (taskIds.isEmpty) return 0;
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -306,13 +399,13 @@ class CourierAppController extends ChangeNotifier {
         taskIds: taskIds,
         reason: reason,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
       return count;
     } catch (e) {
       error = e.toString();
       return 0;
     } finally {
-      loading = false;
+      syncing = false;
       notifyListeners();
     }
   }
@@ -322,7 +415,7 @@ class CourierAppController extends ChangeNotifier {
     String? giverSignature,
     String? note,
   }) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -331,10 +424,11 @@ class CourierAppController extends ChangeNotifier {
         giverSignature: giverSignature,
         note: note,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } catch (e) {
       error = e.toString();
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
@@ -343,7 +437,7 @@ class CourierAppController extends ChangeNotifier {
     required List<String> shipmentIds,
     required String note,
   }) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -351,10 +445,11 @@ class CourierAppController extends ChangeNotifier {
         shipmentIds: shipmentIds,
         note: note,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } catch (e) {
       error = e.toString();
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
@@ -364,7 +459,7 @@ class CourierAppController extends ChangeNotifier {
     String? giverSignature,
     String? note,
   }) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -373,14 +468,13 @@ class CourierAppController extends ChangeNotifier {
         giverSignature: giverSignature,
         note: note,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } on ApiException catch (e) {
       error = e.toString();
-      loading = false;
-      notifyListeners();
     } catch (e) {
       error = e.toString();
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
@@ -495,20 +589,19 @@ class CourierAppController extends ChangeNotifier {
   }
 
   Future<void> undoTaskDrop(CourierTask task) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
       await _taskRepository.undoDrop(task);
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } catch (e) {
       error = e.toString();
-      loading = false;
-      notifyListeners();
       rethrow;
+    } finally {
+      syncing = false;
+      notifyListeners();
     }
-    loading = false;
-    notifyListeners();
   }
 
   Future<void> markTaskFailed(
@@ -534,7 +627,7 @@ class CourierAppController extends ChangeNotifier {
     double? lng,
     Map<String, dynamic>? proof,
   }) async {
-    loading = true;
+    syncing = true;
     error = null;
     notifyListeners();
     try {
@@ -549,13 +642,11 @@ class CourierAppController extends ChangeNotifier {
         failReason: failReason,
         proof: proof,
       );
-      await refreshAll();
+      await _syncCoreAfterFlush();
     } on ApiException catch (e) {
       error = e.toString();
-      loading = false;
-      notifyListeners();
       rethrow;
-    } catch (e) {
+    } catch (_) {
       await _eventQueue.enqueue(
         path: '/api/courier/tasks/${task.id}/event',
         payload: {
@@ -571,20 +662,39 @@ class CourierAppController extends ChangeNotifier {
       );
       pendingQueueCount = await _eventQueue.pendingCount();
       error = 'Oflayn saxlanıldı: $eventType';
-      loading = false;
+    } finally {
+      syncing = false;
       notifyListeners();
     }
   }
 
   Future<void> startHandover({String? note}) async {
-    await _taskRepository.startHandover(note: note);
-    await refreshAll();
+    syncing = true;
+    notifyListeners();
+    try {
+      await _taskRepository.startHandover(note: note);
+      await _syncCoreAfterFlush();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      syncing = false;
+      notifyListeners();
+    }
   }
 
   Future<void> closeShift({bool force = false, String? note}) async {
     await stopLiveTracking();
-    await _taskRepository.closeShift(force: force, note: note);
-    await refreshAll();
+    syncing = true;
+    notifyListeners();
+    try {
+      await _taskRepository.closeShift(force: force, note: note);
+      await _syncCoreAfterFlush();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      syncing = false;
+      notifyListeners();
+    }
   }
 
   Future<void> ensureLiveTracking() async {
@@ -699,8 +809,9 @@ class CourierAppController extends ChangeNotifier {
     required String? zoneId,
     required double accuracy,
   }) {
-    if (accuracy.isFinite && accuracy > _maxAcceptedAccuracyMeters)
+    if (accuracy.isFinite && accuracy > _maxAcceptedAccuracyMeters) {
       return false;
+    }
     final snapshot = _lastLocationSnapshot;
     if (snapshot == null || _lastLocationSentAt == null) return true;
     if (snapshot.zoneId != zoneId) return true;

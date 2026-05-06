@@ -14,12 +14,6 @@ export async function POST(req: Request) {
   if (!barcode) {
     return NextResponse.json({ error: "barcode is required" }, { status: 400 });
   }
-  if (!giverSignature) {
-    return NextResponse.json(
-      { error: "giver_signature is required for self-pickup (подпись передающего)" },
-      { status: 400 },
-    );
-  }
 
   const { data: foundUnit, error: unitError } = await supabaseAdmin
     .from("units")

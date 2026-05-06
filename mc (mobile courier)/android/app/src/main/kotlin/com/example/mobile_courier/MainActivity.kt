@@ -10,8 +10,10 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Use edge-to-edge layout without deprecated system bar color APIs.
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Android 15+ enforces edge-to-edge for apps targeting SDK 35. This API
+        // matches the platform (transparent system bars, content behind insets) on
+        // older versions too. Flutter: also set SystemUiMode.edgeToEdge in Dart.
+        WindowCompat.enableEdgeToEdge(window)
 
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.isAppearanceLightStatusBars = false

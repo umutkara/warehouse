@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireCourierAuth } from "@/app/api/courier/_shared/auth";
 import { COURIER_ALLOWED_ROLES, WAREHOUSE_CONTROL_ROLES } from "@/app/api/courier/_shared/state";
 import { hasAnyRole } from "@/app/api/_shared/role-access";
+import { closeStaleCalendarDayCourierShiftIfNeeded } from "@/app/api/courier/_shared/stale-calendar-shift-close";
 
 export async function POST(req: Request) {
   const auth = await requireCourierAuth(req, { allowedRoles: [...COURIER_ALLOWED_ROLES] });
@@ -14,6 +15,12 @@ export async function POST(req: Request) {
   const courierUserId =
     requestedCourierUserId && canStartForAnotherCourier ? requestedCourierUserId : auth.user.id;
   const note = body?.note?.toString() || null;
+
+  await closeStaleCalendarDayCourierShiftIfNeeded({
+    warehouseId: auth.profile.warehouse_id,
+    courierUserId,
+    closedByUserId: auth.user.id,
+  });
 
   const { data: existingShift } = await supabaseAdmin
     .from("courier_shifts")

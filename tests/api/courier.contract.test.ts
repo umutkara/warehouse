@@ -39,10 +39,22 @@ describe("Courier API contracts", () => {
   it("POST /api/courier/shift/start is idempotent when shift already open", async () => {
     mockServerAuthOnly({ supabaseServerMock, userId: "courier-1" });
     const { supabaseAdmin } = await import("../../lib/supabase/admin");
+    const nowIso = new Date().toISOString();
     const adminMock = createAdminFromMock({
       profiles: [{ data: { warehouse_id: "w1", role: "courier", full_name: "Courier One" }, error: null }],
+      // 1) stale-day check in shift/start, 2) existing open shift in shift/start
       courier_shifts: [
-        { data: { id: "s1", status: "open", started_at: "2026-01-01T10:00:00.000Z" }, error: null },
+        {
+          data: {
+            id: "s1",
+            status: "open",
+            started_at: nowIso,
+            courier_user_id: "courier-1",
+            warehouse_id: "w1",
+          },
+          error: null,
+        },
+        { data: { id: "s1", status: "open", started_at: nowIso }, error: null },
       ],
     });
     vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);

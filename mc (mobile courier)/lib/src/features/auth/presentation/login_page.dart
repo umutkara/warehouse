@@ -369,7 +369,7 @@ class _LoginPageState extends State<LoginPage> {
                       color: colorScheme.onPrimary,
                     ),
                   )
-                : Text(context.t('login.start_shift')),
+                : Text(context.t('login.submit')),
           ),
           const SizedBox(height: 16),
           Center(

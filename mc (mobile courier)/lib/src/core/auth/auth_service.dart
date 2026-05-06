@@ -1,6 +1,22 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
+
+bool _isLikelyNetworkError(Object e) {
+  if (e is SocketException) return true;
+  if (e is TimeoutException) return true;
+  final s = e.toString().toLowerCase();
+  return s.contains('socketexception') ||
+      s.contains('failed host lookup') ||
+      s.contains('network is unreachable') ||
+      s.contains('connection refused') ||
+      s.contains('connection reset') ||
+      s.contains('timed out') ||
+      s.contains('handshake exception');
+}
 
 class AuthService {
   const AuthService._();
@@ -32,8 +48,7 @@ class AuthService {
     if (currentSession == null) return false;
     final token = await getValidAccessToken();
     if (token == null || token.isEmpty) {
-      await signOut();
-      return false;
+      return currentSession != null;
     }
     try {
       final response = await client.auth.getUser(token);
@@ -42,9 +57,11 @@ class AuthService {
         return false;
       }
       return true;
-    } catch (_) {
-      await signOut();
-      return false;
+    } catch (e) {
+      if (_isLikelyNetworkError(e)) {
+        return currentSession != null;
+      }
+      return currentSession != null;
     }
   }
 
@@ -67,8 +84,11 @@ class AuthService {
     try {
       final refreshed = await client.auth.refreshSession();
       return refreshed.session?.accessToken ?? client.auth.currentSession?.accessToken;
-    } catch (_) {
-      return null;
+    } catch (e) {
+      if (_isLikelyNetworkError(e)) {
+        return session.accessToken;
+      }
+      return client.auth.currentSession?.accessToken;
     }
   }
 
