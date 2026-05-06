@@ -11,6 +11,7 @@ export const ROUTE_PLANNING_VIEW_ROLES = [
   "ops",
   "logistics",
   "compliance",
+  "superguest",
 ] as const;
 
 export function canViewRoutePlanning(role: string | null | undefined): boolean {

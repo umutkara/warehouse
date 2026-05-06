@@ -1,5 +1,6 @@
 const ROLE_INHERITANCE: Record<string, string[]> = {
   compliance: ["guest"],
+  superguest: ["guest"],
 };
 
 function collectRoles(role: string, roles: Set<string>) {

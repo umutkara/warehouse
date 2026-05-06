@@ -376,11 +376,12 @@ export async function GET() {
         unitInfo?.meta && typeof unitInfo.meta === "object"
           ? (unitInfo.meta as Record<string, unknown>)
           : {};
+      // Use the latest unit-level OPS status first so map colors
+      // immediately reflect status changes made from order screens.
       const opsStatus =
-        extractOpsStatus(event.proof_meta) ||
         (typeof unitMeta.ops_status === "string" && unitMeta.ops_status.trim()
           ? unitMeta.ops_status.trim()
-          : null);
+          : null) || extractOpsStatus(event.proof_meta);
       const color = resolveDropColor({
         opsStatus,
         overrideColorKey: unitMeta.drop_point_color_override,
