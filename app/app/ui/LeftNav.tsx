@@ -241,6 +241,7 @@ export default function LeftNav({ role }: { role: string }) {
   const canMerchantRejections = ["ops", "logistics", "manager", "head", "admin", "compliance"].includes(role);
   const canViewTasks = ["worker", "ops", "manager", "head", "admin"].includes(role);
   const canLogistics = ["logistics", "admin", "head"].includes(role);
+  const canRoutePlanning = canLogistics || role === "superguest";
   const isLogisticsOnly = role === "logistics";
   const isHubWorker = role === "hub_worker";
   const isCompliance = role === "compliance";
@@ -369,18 +370,22 @@ export default function LeftNav({ role }: { role: string }) {
         )}
 
         {/* Logistics section (only for logistics, admin, head) */}
-        {canLogistics && !isHubWorker && (
+        {canRoutePlanning && !isHubWorker && (
           <>
             <SectionTitle isCollapsed={!shouldExpand}>ЛОГИСТИКА</SectionTitle>
-            <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
-              Отправка заказов
-            </NavButton>
+            {canLogistics && (
+              <NavButton href="/app/logistics" icon={<Icons.Truck />} isCollapsed={!shouldExpand}>
+                Отправка заказов
+              </NavButton>
+            )}
             <NavButton href="/routeplanning" icon={<Icons.Courier />} isCollapsed={!shouldExpand}>
               Route Planning
             </NavButton>
-            <NavButton href="/app/outbound" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
-              OUT (В доставке)
-            </NavButton>
+            {canLogistics && (
+              <NavButton href="/app/outbound" icon={<Icons.Out />} isCollapsed={!shouldExpand}>
+                OUT (В доставке)
+              </NavButton>
+            )}
           </>
         )}
 
