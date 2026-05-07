@@ -8,7 +8,6 @@ import '../../map/domain/geo_models.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
 import '../../shared/widgets/section_card.dart';
 import '../../tasks/domain/courier_task.dart';
-import '../../../debug/agent_debug_log.dart';
 
 const String _warehouseZoneCode = 'geri-qaytarmalar-anbar';
 
@@ -114,17 +113,6 @@ class _SelfPickupPageState extends State<SelfPickupPage> {
       ),
     );
     if (confirm != true || !mounted) return;
-    // #region agent log
-    await agentDebugLog(
-      location: 'self_pickup_page.dart:_removeFromHands',
-      message: 'confirmed_before_controller',
-      hypothesisId: 'H3',
-      data: {
-        'taskIdLen': task.id.length,
-        'barcodeLen': task.barcode.length,
-      },
-    );
-    // #endregion agent log
     await widget.controller.removeTaskFromHands(task);
     if (!mounted) return;
     if (widget.controller.error == null) {

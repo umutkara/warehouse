@@ -19,15 +19,8 @@ class TasksPage extends StatefulWidget {
 }
 
 class _TasksPageState extends State<TasksPage> {
-  final _confirmScanController = TextEditingController();
   final Set<String> _selectedPendingIds = <String>{};
   final Set<String> _selectedTaskIds = <String>{};
-
-  @override
-  void dispose() {
-    _confirmScanController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +49,6 @@ class _TasksPageState extends State<TasksPage> {
           children: [
             _PendingAssignmentsSection(
               controller: widget.controller,
-              scanController: _confirmScanController,
               selectedIds: _selectedPendingIds,
               onToggleSelected: (shipmentId, selected) {
                 setState(() {
@@ -522,7 +514,6 @@ class _MyTasksEmptyPlaceholder extends StatelessWidget {
 class _PendingAssignmentsSection extends StatelessWidget {
   const _PendingAssignmentsSection({
     required this.controller,
-    required this.scanController,
     required this.selectedIds,
     required this.onToggleSelected,
     required this.onConfirmSelected,
@@ -530,7 +521,6 @@ class _PendingAssignmentsSection extends StatelessWidget {
   });
 
   final CourierAppController controller;
-  final TextEditingController scanController;
   final Set<String> selectedIds;
   final void Function(String shipmentId, bool selected) onToggleSelected;
   final Future<void> Function() onConfirmSelected;
@@ -551,182 +541,160 @@ class _PendingAssignmentsSection extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            cs.tertiaryContainer.withValues(alpha: 0.42),
-            cs.surfaceContainerHighest.withValues(alpha: 0.9),
+            cs.primary.withValues(alpha: 0.09),
+            cs.primaryContainer.withValues(alpha: 0.26),
           ],
         ),
         border: Border.all(
-          color: cs.tertiary.withValues(alpha: 0.38),
+          color: cs.primary.withValues(alpha: 0.22),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.22),
-            blurRadius: 26,
-            offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 24,
+            offset: const Offset(0, 11),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: cs.tertiary.withValues(alpha: 0.22),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Icon(
-                      Icons.local_shipping_rounded,
-                      color: cs.tertiary,
-                      size: 22,
-                    ),
-                  ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            maintainState: true,
+            tilePadding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+            childrenPadding: EdgeInsets.zero,
+            iconColor: cs.primary,
+            collapsedIconColor: cs.primary,
+            shape: const Border(),
+            collapsedShape: const Border(),
+            leading: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: cs.primary.withValues(alpha: 0.12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Icon(
+                  Icons.local_shipping_rounded,
+                  color: cs.primary,
+                  size: 22,
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        tr(context.t('tasks.pending.title'), {'count': count}),
-                        style: tt.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.3,
+              ),
+            ),
+            title: Text(
+              tr(context.t('tasks.pending.title'), {'count': count}),
+              style: tt.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.25,
+              ),
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 6, right: 4),
+              child: Text(
+                context.t('tasks.pending.section_hint'),
+                style: tt.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  height: 1.32,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.t('tasks.pending.body'),
+                      style: tt.bodyMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        height: 1.38,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () async => _scanConfirm(context),
+                        icon: const Icon(Icons.qr_code_scanner_rounded),
+                        label: Text(context.t('tasks.pending.scan_confirm')),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        context.t('tasks.pending.section_hint'),
-                        style: tt.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.35,
+                    ),
+                    const SizedBox(height: 18),
+                    if (assignments.isEmpty)
+                      const _PendingLogisticsEmpty()
+                    else
+                      ...assignments.map(
+                        (assignment) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _PendingAssignmentTile(
+                            assignment: assignment,
+                            selected: selectedIds.contains(assignment.id),
+                            formatter: formatter,
+                            onToggle: (value) =>
+                                onToggleSelected(assignment.id, value),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    color: cs.tertiaryContainer.withValues(alpha: 0.65),
-                    border: Border.all(
-                      color: cs.tertiary.withValues(alpha: 0.42),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: selectedIds.isEmpty
+                                ? null
+                                : () async => onConfirmSelected(),
+                            style: FilledButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              tr(context.t('tasks.pending.confirm_bulk'), {
+                                'count': selectedIds.length,
+                              }),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: selectedIds.isEmpty
+                                ? null
+                                : () async => onRejectSelected(),
+                            style: OutlinedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              tr(context.t('tasks.pending.reject_bulk'), {
+                                'count': selectedIds.length,
+                              }),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  child: Text(
-                    '$count',
-                    style: tt.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onTertiaryContainer,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              context.t('tasks.pending.body'),
-              style: tt.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.38,
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: scanController,
-              decoration: InputDecoration(
-                labelText: context.t('tasks.pending.scan_label'),
-                filled: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-              onSubmitted: (_) async => _scanConfirm(context),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () async => _scanConfirm(context),
-                icon: const Icon(Icons.qr_code_scanner_rounded),
-                label: Text(context.t('tasks.pending.scan_confirm')),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            if (assignments.isEmpty)
-              const _PendingLogisticsEmpty()
-            else
-              ...assignments.map(
-                (assignment) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _PendingAssignmentTile(
-                    assignment: assignment,
-                    selected: selectedIds.contains(assignment.id),
-                    formatter: formatter,
-                    onToggle: (value) =>
-                        onToggleSelected(assignment.id, value),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    onPressed: selectedIds.isEmpty
-                        ? null
-                        : () async => onConfirmSelected(),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: Text(
-                      tr(context.t('tasks.pending.confirm_bulk'), {
-                        'count': selectedIds.length,
-                      }),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: selectedIds.isEmpty
-                        ? null
-                        : () async => onRejectSelected(),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: Text(
-                      tr(context.t('tasks.pending.reject_bulk'), {
-                        'count': selectedIds.length,
-                      }),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -741,11 +709,9 @@ class _PendingAssignmentsSection extends StatelessWidget {
       ),
     );
     if (scanned == null || scanned.isEmpty) return;
-    scanController.text = scanned;
     await controller.scanConfirmAssignment(scanned);
     if (!context.mounted) return;
     if (controller.error == null) {
-      scanController.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -788,6 +754,79 @@ class _PendingLogisticsEmpty extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Длинный «Сценарий: …» — две строки и кнопка развернуть.
+class _ExpandablePendingScenario extends StatefulWidget {
+  const _ExpandablePendingScenario({required this.fullText});
+
+  final String fullText;
+
+  @override
+  State<_ExpandablePendingScenario> createState() =>
+      _ExpandablePendingScenarioState();
+}
+
+class _ExpandablePendingScenarioState extends State<_ExpandablePendingScenario> {
+  bool expanded = false;
+
+  static const int _shortEnough = 72;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final style = tt.labelSmall?.copyWith(
+      height: 1.38,
+      fontWeight: FontWeight.w500,
+    );
+    final decor = BoxDecoration(
+      borderRadius: BorderRadius.circular(10),
+      color: cs.secondaryContainer.withValues(alpha: 0.45),
+      border: Border.all(
+        color: cs.outlineVariant.withValues(alpha: 0.35),
+      ),
+    );
+
+    final needToggle = widget.fullText.length > _shortEnough;
+
+    final inner = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: needToggle && !expanded
+          ? Text(
+              widget.fullText,
+              style: style,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            )
+          : SelectableText(widget.fullText, style: style),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DecoratedBox(decoration: decor, child: inner),
+        if (needToggle)
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.only(top: 2, bottom: 0),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () => setState(() => expanded = !expanded),
+            child: Text(
+              expanded
+                  ? context.t('tasks.pending.scenario_collapse')
+                  : context.t('tasks.pending.scenario_expand'),
+              style: tt.labelMedium?.copyWith(
+                color: cs.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -887,31 +926,12 @@ class _PendingAssignmentTile extends StatelessWidget {
                     ),
                   ],
                   if (assignment.scenario != null &&
-                      assignment.scenario!.isNotEmpty) ...[
+                      assignment.scenario!.trim().isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        color: cs.secondaryContainer.withValues(alpha: 0.45),
-                        border: Border.all(
-                          color: cs.outlineVariant.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        child: SelectableText(
-                          tr(context.t('tasks.pending.scenario'), {
-                            'scenario': assignment.scenario,
-                          }),
-                          style: tt.labelSmall?.copyWith(
-                            height: 1.3,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
+                    _ExpandablePendingScenario(
+                      fullText: tr(context.t('tasks.pending.scenario'), {
+                        'scenario': assignment.scenario!.trim(),
+                      }),
                     ),
                   ],
                 ],

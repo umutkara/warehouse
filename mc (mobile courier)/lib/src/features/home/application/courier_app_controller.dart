@@ -9,7 +9,6 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/background/offline_location_task.dart';
 import '../../../core/network/api_client.dart';
-import '../../../debug/agent_debug_log.dart';
 import '../../../core/offline/offline_event_queue.dart';
 import '../../map/domain/geo_models.dart';
 import '../../shift/domain/current_shift.dart';
@@ -380,30 +379,8 @@ class CourierAppController extends ChangeNotifier {
     try {
       await _taskRepository.removeFromHands(task, reason: reason);
       await _syncCoreAfterFlush();
-      // #region agent log
-      final stillThere = tasks.any((t) => t.id == task.id && t.selfPickup);
-      await agentDebugLog(
-        location: 'courier_app_controller.dart:removeTaskFromHands',
-        message: 'after_sync_ok',
-        hypothesisId: 'H1',
-        runId: 'post-fix',
-        data: {
-          'stillInSelfPickupList': stillThere,
-          'tasksSelfPickupCount':
-              tasks.where((t) => t.selfPickup).length,
-        },
-      );
-      // #endregion agent log
     } catch (e) {
       error = e.toString();
-      // #region agent log
-      await agentDebugLog(
-        location: 'courier_app_controller.dart:removeTaskFromHands',
-        message: 'catch',
-        hypothesisId: 'H2',
-        data: {'errType': e.runtimeType.toString()},
-      );
-      // #endregion agent log
     } finally {
       syncing = false;
       notifyListeners();

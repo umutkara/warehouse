@@ -134,6 +134,8 @@ const Map<String, String> _ru = <String, String>{
   'common.no': 'Нет',
   'tasks.pickup_reject_saved_for': 'Незабор сохранен: {barcode}',
   'tasks.pickup_confirm_dialog.title': 'Забрать?',
+  'tasks.pending.scenario_expand': 'Показать полностью',
+  'tasks.pending.scenario_collapse': 'Свернуть',
   'tasks.pending.section_hint':
       'Подтвердите забор сканом или выбором в списке — заказы появятся в «Мои задачи».',
   'tasks.pending.title': 'Задания от логистов — неподтвержденные ({count})',
@@ -355,6 +357,8 @@ const Map<String, String> _az = <String, String>{
   'common.no': 'Xeyr',
   'tasks.pickup_reject_saved_for': 'Götürülmədi saxlanıldı: {barcode}',
   'tasks.pickup_confirm_dialog.title': 'Götürülsün?',
+  'tasks.pending.scenario_expand': 'Tam göstər',
+  'tasks.pending.scenario_collapse': 'Yığışdır',
   'tasks.pending.section_hint':
       'Skan və ya siyahıdan seçimlə götürməni təsdiqləyin — sifarişlər «Mənim tapşırıqlarım»da görünəcək.',
   'tasks.pending.title': 'Loqistikdən tapşırıqlar — təsdiqlənməyən ({count})',
