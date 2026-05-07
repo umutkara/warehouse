@@ -48,8 +48,9 @@ class _MobileCourierAppState extends State<MobileCourierApp> {
           theme: ThemeData(
             brightness: Brightness.dark,
             colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFF4285F4),
+              seedColor: const Color(0xFF5B8DEF),
               brightness: Brightness.dark,
+              dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
             ),
             useMaterial3: true,
             appBarTheme: const AppBarTheme(
@@ -60,7 +61,7 @@ class _MobileCourierAppState extends State<MobileCourierApp> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
-              color: const Color(0xFF2D2D3A),
+              color: const Color(0xFF2A2A38),
             ),
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
@@ -76,7 +77,9 @@ class _MobileCourierAppState extends State<MobileCourierApp> {
               ),
             ),
           ),
-          home: const _BootstrapPage(),
+          home: SelectionArea(
+            child: const _BootstrapPage(),
+          ),
         ),
       ),
     );

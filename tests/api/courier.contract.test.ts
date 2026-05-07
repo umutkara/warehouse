@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { callCourierShiftStart, callCourierTaskClaim } from "../helpers/api-callers";
+import {
+  callCourierShiftStart,
+  callCourierTaskClaim,
+  callCourierTasksScanClaim,
+} from "../helpers/api-callers";
 import { createAdminFromMock, createQueryChain } from "../helpers/supabase-mocks";
 import { mockServerUnauthorized, mockServerAuthOnly } from "../helpers/server-auth";
 
@@ -83,6 +87,45 @@ describe("Courier API contracts", () => {
     expect(res.status).toBe(410);
     await expect(res.json()).resolves.toMatchObject({
       error: "Pool claim flow is disabled. Use assignments confirm or scan-claim.",
+    });
+  });
+
+  it("POST /api/courier/tasks/scan-claim succeeds without giver_signature (new external unit)", async () => {
+    mockServerAuthOnly({ supabaseServerMock, userId: "courier-1" });
+    const { supabaseAdmin } = await import("../../lib/supabase/admin");
+    const adminMock = createAdminFromMock({
+      profiles: [
+        {
+          data: { warehouse_id: "w1", role: "courier", full_name: "Courier One" },
+          error: null,
+        },
+      ],
+      units: [
+        { data: null, error: null },
+        {
+          data: { id: "unit-new", barcode: "EXT-001", status: "out" },
+          error: null,
+        },
+      ],
+      outbound_shipments: [{ data: null, error: null }, { data: null, error: null }],
+      courier_tasks: [
+        { data: null, error: null },
+        { data: { id: "task-scan-1" }, error: null },
+      ],
+      courier_shifts: [{ data: { id: "shift-1" }, error: null }],
+      courier_task_events: [{ data: null, error: null }],
+    });
+    vi.mocked(supabaseAdmin.from).mockImplementation(adminMock.from as any);
+    vi.mocked(supabaseAdmin.rpc).mockResolvedValue({ data: null, error: null } as any);
+
+    const res = await callCourierTasksScanClaim({ barcode: "EXT-001" });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      task_id: "task-scan-1",
+      barcode: "EXT-001",
+      unit_created: true,
     });
   });
 });

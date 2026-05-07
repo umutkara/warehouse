@@ -4,9 +4,9 @@ import 'package:intl/intl.dart';
 import '../../../core/i18n/app_i18n.dart';
 import '../../home/application/courier_app_controller.dart';
 import '../../../shared/widgets/barcode_scanner_sheet.dart';
-import '../../shared/widgets/section_card.dart';
 import '../../shared/widgets/status_chip.dart';
 import '../domain/courier_task.dart';
+import '../domain/pending_assignment.dart';
 import 'task_details_page.dart';
 
 class TasksPage extends StatefulWidget {
@@ -71,11 +71,11 @@ class _TasksPageState extends State<TasksPage> {
               onRejectSelected: () async => _rejectSelected(context),
             ),
             SizedBox(height: tasksEmpty ? 20 : 12),
-            SectionCard(
+            _PremiumMyTasksSection(
               title: context.t('tasks.my_tasks'),
-              dense: !tasksEmpty,
+              taskCount: widget.controller.tasks.length,
               child: tasksEmpty
-                  ? Text(context.t('tasks.no_active_tasks'))
+                  ? const _MyTasksEmptyPlaceholder()
                   : _TasksGroupedByScenario(
                       tasks: widget.controller.tasks,
                       selectedIds: _selectedTaskIds,
@@ -372,6 +372,153 @@ class _TasksPageState extends State<TasksPage> {
   }
 }
 
+/// Каркас секции «Мои задачи»: спокойный градиент, чёткая иерархия, бейдж счётчика.
+class _PremiumMyTasksSection extends StatelessWidget {
+  const _PremiumMyTasksSection({
+    required this.title,
+    required this.taskCount,
+    required this.child,
+  });
+
+  final String title;
+  final int taskCount;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cs.surfaceContainerHighest.withValues(alpha: 0.92),
+            cs.surface.withValues(alpha: 0.88),
+          ],
+        ),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.55),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.26),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: cs.primary.withValues(alpha: 0.14),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.inventory_2_rounded,
+                      color: cs.primary,
+                      size: 22,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: tt.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      Text(
+                        context.t('tasks.my_tasks_hint'),
+                        style: tt.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (taskCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: cs.primaryContainer.withValues(alpha: 0.55),
+                      border: Border.all(
+                        color: cs.primary.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Text(
+                      '$taskCount',
+                      style: tt.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MyTasksEmptyPlaceholder extends StatelessWidget {
+  const _MyTasksEmptyPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              Icons.task_alt_rounded,
+              size: 44,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.65),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.t('tasks.no_active_tasks'),
+              textAlign: TextAlign.center,
+              style: tt.bodyLarge?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PendingAssignmentsSection extends StatelessWidget {
   const _PendingAssignmentsSection({
     required this.controller,
@@ -394,145 +541,193 @@ class _PendingAssignmentsSection extends StatelessWidget {
     final assignments = controller.pendingAssignments;
     final formatter = DateFormat('dd.MM HH:mm');
     final count = assignments.length;
-    final colorScheme = Theme.of(context).colorScheme;
-    final highlighted = count > 0;
-    return Card(
-      color: highlighted
-          ? colorScheme.primaryContainer.withValues(alpha: 0.3)
-          : null,
-      elevation: highlighted ? 2 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: highlighted
-            ? BorderSide(
-                color: colorScheme.primary.withValues(alpha: 0.6),
-                width: 2,
-              )
-            : BorderSide.none,
-      ),
-      child: ExpansionTile(
-        initiallyExpanded: false,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        title: Text(
-          tr(context.t('tasks.pending.title'), {'count': count}),
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: highlighted ? FontWeight.bold : null,
-          ),
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cs.tertiaryContainer.withValues(alpha: 0.42),
+            cs.surfaceContainerHighest.withValues(alpha: 0.9),
+          ],
         ),
-        subtitle: Text(context.t('tasks.pending.subtitle')),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
+        border: Border.all(
+          color: cs.tertiary.withValues(alpha: 0.38),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 26,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(context.t('tasks.pending.body')),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: scanController,
-                  decoration: InputDecoration(
-                    labelText: context.t('tasks.pending.scan_label'),
-                    border: OutlineInputBorder(),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: cs.tertiary.withValues(alpha: 0.22),
                   ),
-                  onSubmitted: (_) async => _scanConfirm(context),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.local_shipping_rounded,
+                      color: cs.tertiary,
+                      size: 22,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: () async => _scanConfirm(context),
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: Text(context.t('tasks.pending.scan_confirm')),
-                ),
-                const SizedBox(height: 12),
-                if (assignments.isEmpty)
-                  Text(context.t('tasks.pending.none'))
-                else
-                  ...assignments.map((assignment) {
-                    final selected = selectedIds.contains(assignment.id);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Checkbox(
-                            value: selected,
-                            onChanged: (value) =>
-                                onToggleSelected(assignment.id, value ?? false),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  assignment.barcode,
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                Text(
-                                  tr(context.t('tasks.pending.out_at'), {
-                                    'dt': formatter.format(
-                                      assignment.outAt.toLocal(),
-                                    ),
-                                  }),
-                                ),
-                                if (assignment.productName != null)
-                                  Text(
-                                    tr(context.t('tasks.pending.product'), {
-                                      'name': assignment.productName,
-                                    }),
-                                  ),
-                                if (assignment.partnerName != null)
-                                  Text(
-                                    tr(context.t('tasks.pending.partner'), {
-                                      'name': assignment.partnerName,
-                                    }),
-                                  ),
-                                if (assignment.scenario != null &&
-                                    assignment.scenario!.isNotEmpty)
-                                  Text(
-                                    tr(context.t('tasks.pending.scenario'), {
-                                      'scenario': assignment.scenario,
-                                    }),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: selectedIds.isEmpty
-                            ? null
-                            : () async => onConfirmSelected(),
-                        child: Text(
-                          tr(context.t('tasks.pending.confirm_bulk'), {
-                            'count': selectedIds.length,
-                          }),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tr(context.t('tasks.pending.title'), {'count': count}),
+                        style: tt.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: selectedIds.isEmpty
-                            ? null
-                            : () async => onRejectSelected(),
-                        child: Text(
-                          tr(context.t('tasks.pending.reject_bulk'), {
-                            'count': selectedIds.length,
-                          }),
+                      const SizedBox(height: 4),
+                      Text(
+                        context.t('tasks.pending.section_hint'),
+                        style: tt.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.35,
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: cs.tertiaryContainer.withValues(alpha: 0.65),
+                    border: Border.all(
+                      color: cs.tertiary.withValues(alpha: 0.42),
                     ),
-                  ],
+                  ),
+                  child: Text(
+                    '$count',
+                    style: tt.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: cs.onTertiaryContainer,
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Text(
+              context.t('tasks.pending.body'),
+              style: tt.bodyMedium?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.38,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: scanController,
+              decoration: InputDecoration(
+                labelText: context.t('tasks.pending.scan_label'),
+                filled: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              onSubmitted: (_) async => _scanConfirm(context),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () async => _scanConfirm(context),
+                icon: const Icon(Icons.qr_code_scanner_rounded),
+                label: Text(context.t('tasks.pending.scan_confirm')),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (assignments.isEmpty)
+              const _PendingLogisticsEmpty()
+            else
+              ...assignments.map(
+                (assignment) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _PendingAssignmentTile(
+                    assignment: assignment,
+                    selected: selectedIds.contains(assignment.id),
+                    formatter: formatter,
+                    onToggle: (value) =>
+                        onToggleSelected(assignment.id, value),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: selectedIds.isEmpty
+                        ? null
+                        : () async => onConfirmSelected(),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      tr(context.t('tasks.pending.confirm_bulk'), {
+                        'count': selectedIds.length,
+                      }),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: selectedIds.isEmpty
+                        ? null
+                        : () async => onRejectSelected(),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      tr(context.t('tasks.pending.reject_bulk'), {
+                        'count': selectedIds.length,
+                      }),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -561,6 +756,171 @@ class _PendingAssignmentsSection extends StatelessWidget {
         ),
       );
     }
+  }
+}
+
+class _PendingLogisticsEmpty extends StatelessWidget {
+  const _PendingLogisticsEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              Icons.inbox_rounded,
+              size: 46,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.55),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.t('tasks.pending.none'),
+              textAlign: TextAlign.center,
+              style: tt.bodyLarge?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingAssignmentTile extends StatelessWidget {
+  const _PendingAssignmentTile({
+    required this.assignment,
+    required this.selected,
+    required this.formatter,
+    required this.onToggle,
+  });
+
+  final PendingAssignment assignment;
+  final bool selected;
+  final DateFormat formatter;
+  final ValueChanged<bool> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final small = tt.bodySmall?.copyWith(
+      color: cs.onSurfaceVariant,
+      height: 1.35,
+    );
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selected
+              ? cs.primary.withValues(alpha: 0.58)
+              : cs.outlineVariant.withValues(alpha: 0.42),
+          width: selected ? 1.5 : 1,
+        ),
+        color: selected
+            ? cs.primary.withValues(alpha: 0.09)
+            : cs.surfaceContainerHighest.withValues(alpha: 0.52),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.11),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 10, 14, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Checkbox(
+                value: selected,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                onChanged: (value) => onToggle(value ?? false),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    assignment.barcode,
+                    style: tt.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    tr(context.t('tasks.pending.out_at'), {
+                      'dt': formatter.format(assignment.outAt.toLocal()),
+                    }),
+                    style: small,
+                  ),
+                  if (assignment.productName != null) ...[
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      tr(context.t('tasks.pending.product'), {
+                        'name': assignment.productName,
+                      }),
+                      style: small?.copyWith(color: cs.onSurface),
+                    ),
+                  ],
+                  if (assignment.partnerName != null) ...[
+                    const SizedBox(height: 2),
+                    SelectableText(
+                      tr(context.t('tasks.pending.partner'), {
+                        'name': assignment.partnerName,
+                      }),
+                      style: small,
+                    ),
+                  ],
+                  if (assignment.scenario != null &&
+                      assignment.scenario!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: cs.secondaryContainer.withValues(alpha: 0.45),
+                        border: Border.all(
+                          color: cs.outlineVariant.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        child: SelectableText(
+                          tr(context.t('tasks.pending.scenario'), {
+                            'scenario': assignment.scenario,
+                          }),
+                          style: tt.labelSmall?.copyWith(
+                            height: 1.3,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -597,32 +957,56 @@ class _TasksGroupedByScenario extends StatelessWidget {
       children: [
         for (final scenarioKey in sortedKeys) ...[
           Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Text(
-              scenarioKey.isEmpty
-                  ? context.t('tasks.no_scenario')
-                  : scenarioKey,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
+            padding: const EdgeInsets.only(bottom: 10, top: 2),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    colors: [
+                      Theme.of(context).colorScheme.primary.withValues(
+                            alpha: 0.22,
+                          ),
+                      Theme.of(context).colorScheme.secondary.withValues(
+                            alpha: 0.12,
+                          ),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  child: Text(
+                    scenarioKey.isEmpty
+                        ? context.t('tasks.no_scenario')
+                        : scenarioKey,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.35,
+                        ),
+                  ),
+                ),
               ),
             ),
           ),
           ...groups[scenarioKey]!.map(
-            (task) => Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: _TaskCard(
-                task: task,
-                selected: selectedIds.contains(task.id),
-                onToggleSelected: (selected) =>
-                    onToggleSelected(task.id, selected),
-                onOpen: () => onOpenTask(task),
-                dense: true,
-              ),
+            (task) => _TaskCard(
+              task: task,
+              selected: selectedIds.contains(task.id),
+              onToggleSelected: (selected) =>
+                  onToggleSelected(task.id, selected),
+              onOpen: () => onOpenTask(task),
+              dense: true,
             ),
           ),
-          if (scenarioKey != sortedKeys.last) const SizedBox(height: 6),
+          if (scenarioKey != sortedKeys.last) const SizedBox(height: 12),
         ],
       ],
     );
@@ -648,101 +1032,180 @@ class _TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final formatter = DateFormat('dd.MM HH:mm');
     final theme = Theme.of(context);
-    final smallStyle = theme.textTheme.bodySmall?.copyWith(fontSize: 12);
+    final cs = theme.colorScheme;
+    final smallStyle = theme.textTheme.bodySmall?.copyWith(
+      fontSize: 12.5,
+      height: 1.35,
+      color: cs.onSurfaceVariant,
+    );
     final showNotPicked = task.assignedByLogistics && !task.pickupConfirmed;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Checkbox(
-            value: selected,
-            onChanged: (value) => onToggleSelected(value ?? false),
-          ),
-        ),
-        Expanded(
-          child: SectionCard(
-            title: task.barcode,
-            action: StatusChip(
-              status: task.status,
-              opsStatus: task.opsStatus,
-              label: showNotPicked ? context.t('task.not_picked') : null,
-              color: showNotPicked ? Colors.red.shade700 : null,
+
+    final cardSurface = selected
+        ? cs.primary.withValues(alpha: 0.10)
+        : cs.surfaceContainerHighest.withValues(alpha: 0.48);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Checkbox(
+              value: selected,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(5),
+              ),
+              onChanged: (value) => onToggleSelected(value ?? false),
             ),
-            dense: dense,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (task.assignedByLogistics)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: dense ? 2 : 4),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: dense ? 6 : 8,
-                        vertical: dense ? 2 : 3,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: selected
+                      ? cs.primary.withValues(alpha: 0.62)
+                      : cs.outlineVariant.withValues(alpha: 0.40),
+                  width: selected ? 1.5 : 1,
+                ),
+                color: cardSurface,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.16),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(14, 12, 14, dense ? 10 : 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SelectableText(
+                            task.barcode,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.15,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        StatusChip(
+                          status: task.status,
+                          opsStatus: task.opsStatus,
+                          label: showNotPicked
+                              ? context.t('task.not_picked')
+                              : null,
+                          color: showNotPicked ? Colors.red.shade700 : null,
+                        ),
+                      ],
+                    ),
+                    if (task.assignedByLogistics) ...[
+                      SizedBox(height: dense ? 8 : 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cs.tertiaryContainer.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: SelectableText(
+                          tr(context.t('task.assigned_by_logistics'), {
+                            'suffix': task.assignedCourierName != null
+                                ? tr(context.t('task.assigned_suffix_name'), {
+                                    'name': task.assignedCourierName,
+                                  })
+                                : '',
+                          }),
+                          style: smallStyle?.copyWith(
+                            color: cs.onTertiaryContainer,
+                          ),
+                        ),
                       ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.tertiaryContainer,
-                        borderRadius: BorderRadius.circular(6),
+                    ],
+                    if (task.productName != null ||
+                        task.partnerName != null ||
+                        (task.scenario != null &&
+                            task.scenario!.isNotEmpty)) ...[
+                      SizedBox(height: dense ? 8 : 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: [
+                          if (task.productName != null)
+                            SelectableText(
+                              task.productName!,
+                              style: smallStyle,
+                            ),
+                          if (task.partnerName != null)
+                            SelectableText(
+                              '• ${task.partnerName}',
+                              style: smallStyle,
+                            ),
+                          if (task.scenario != null &&
+                              task.scenario!.isNotEmpty)
+                            SelectableText(
+                              '• ${task.scenario}',
+                              style: smallStyle,
+                            ),
+                        ],
                       ),
-                      child: Text(
-                        tr(context.t('task.assigned_by_logistics'), {
-                          'suffix': task.assignedCourierName != null
-                              ? tr(context.t('task.assigned_suffix_name'), {
-                                  'name': task.assignedCourierName,
-                                })
-                              : '',
-                        }),
-                        style: smallStyle,
+                    ],
+                    SizedBox(height: dense ? 8 : 10),
+                    SelectableText(
+                      tr(context.t('task.claimed_short'), {
+                        'dt': formatter.format(task.claimedAt.toLocal()),
+                      }),
+                      style: smallStyle?.copyWith(
+                        color: cs.onSurfaceVariant.withValues(alpha: 0.92),
                       ),
                     ),
-                  ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 0,
-                  children: [
-                    if (task.productName != null)
-                      Text('${task.productName}', style: smallStyle),
-                    if (task.partnerName != null)
-                      Text('• ${task.partnerName}', style: smallStyle),
-                    if (task.scenario != null && task.scenario!.isNotEmpty)
-                      Text('• ${task.scenario}', style: smallStyle),
+                    SizedBox(height: dense ? 10 : 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonal(
+                        onPressed: onOpen,
+                        style: FilledButton.styleFrom(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: dense ? 14 : 18,
+                            vertical: dense ? 8 : 12,
+                          ),
+                          minimumSize: dense ? Size.zero : null,
+                          tapTargetSize: dense
+                              ? MaterialTapTargetSize.shrinkWrap
+                              : null,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: Text(context.t('common.open')),
+                      ),
+                    ),
                   ],
                 ),
-                if ((task.productName != null ||
-                    task.partnerName != null ||
-                    (task.scenario != null && task.scenario!.isNotEmpty)))
-                  const SizedBox(height: 2),
-                Text(
-                  tr(context.t('task.claimed_short'), {
-                    'dt': formatter.format(task.claimedAt.toLocal()),
-                  }),
-                  style: smallStyle,
-                ),
-                SizedBox(height: dense ? 4 : 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.tonal(
-                    onPressed: onOpen,
-                    style: dense
-                        ? FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          )
-                        : null,
-                    child: Text(context.t('common.open')),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

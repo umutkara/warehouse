@@ -153,7 +153,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ShiftPage(controller: _controller),
         ];
 
-        final gate = !_controller.hasActiveWorkShift;
+        // Не показываем гейт «смена не начата», пока идёт полная загрузка — иначе мелькает попап при каждом запуске.
+        final gate =
+            !_controller.hasActiveWorkShift && !_controller.loading;
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight;
 
@@ -221,7 +223,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ),
           body: Column(
             children: [
-              if (_controller.syncing)
+              if (_controller.loading || _controller.syncing)
                 const LinearProgressIndicator(minHeight: 2),
               Expanded(child: pages[_selectedIndex]),
             ],

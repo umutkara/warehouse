@@ -257,8 +257,11 @@ export async function GET(req: Request) {
         taskMeta?.assigned_via === "logistics" ||
         taskMeta?.source === "api.logistics.ship_out";
       const hiddenFromCourier = taskMeta?.hidden_from_courier === true;
+      // Скрытая курьером задача (remove-from-hands) не должна возвращаться даже при pickupConfirmed —
+      // иначе старый pickupConfirmed || … полностью игнорировал hidden_from_courier.
       const visibleToCourier =
-        pickupConfirmed || (!hiddenFromCourier && !assignedByLogistics);
+        !hiddenFromCourier &&
+        (pickupConfirmed || !assignedByLogistics);
       return {
         ...task,
         visible_to_courier: visibleToCourier,

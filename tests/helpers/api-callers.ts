@@ -72,3 +72,13 @@ export async function callCourierTaskClaim(body: Record<string, unknown>) {
     }),
   );
 }
+
+export async function callCourierTasksScanClaim(body: Record<string, unknown>) {
+  const { POST } = await import("../../app/api/courier/tasks/scan-claim/route");
+  return POST(
+    new Request("http://localhost/api/courier/tasks/scan-claim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}

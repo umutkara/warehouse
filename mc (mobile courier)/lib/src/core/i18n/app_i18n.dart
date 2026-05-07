@@ -110,6 +110,7 @@ const Map<String, String> _ru = <String, String>{
 
   'tasks.load_error': 'Не удалось загрузить задачи:\n{error}',
   'tasks.my_tasks': 'Мои задачи',
+  'tasks.my_tasks_hint': 'Забор подтверждён — заказы для маршрута',
   'tasks.no_active_tasks': 'Пока нет активных задач',
   'tasks.transfer_selected': 'Передать выбранные ({count})',
   'tasks.finish_route_none': 'Нет выбранных заказов для завершения рейса',
@@ -133,6 +134,8 @@ const Map<String, String> _ru = <String, String>{
   'common.no': 'Нет',
   'tasks.pickup_reject_saved_for': 'Незабор сохранен: {barcode}',
   'tasks.pickup_confirm_dialog.title': 'Забрать?',
+  'tasks.pending.section_hint':
+      'Подтвердите забор сканом или выбором в списке — заказы появятся в «Мои задачи».',
   'tasks.pending.title': 'Задания от логистов — неподтвержденные ({count})',
   'tasks.pending.subtitle': 'Подтвердите забор или укажите незабор с причиной',
   'tasks.pending.body':
@@ -189,6 +192,13 @@ const Map<String, String> _ru = <String, String>{
       'Чтобы видеть задачи и работать в приложении, откройте смену.',
   'shift.gate.start_button': 'Начать смену',
 
+  'shift.page.screen_title': 'Смена',
+  'shift.page.screen_subtitle': 'Статус рейса, сводка и безопасное закрытие смены.',
+  'shift.hero.empty_hint':
+      'После начала смены здесь появятся время старта и счётчики.',
+  'shift.hero.id_label': 'Идентификатор',
+  'shift.hero.started_label': 'Начало',
+  'shift.hero.tasks_label': 'Активных задач',
   'shift.current.title': 'Текущая смена',
   'shift.current.none': 'Открытая смена не найдена',
   'shift.current.id': 'ID смены: {id}',
@@ -321,6 +331,7 @@ const Map<String, String> _az = <String, String>{
 
   'tasks.load_error': 'Tapşırıqlar yüklənmədi:\n{error}',
   'tasks.my_tasks': 'Mənim tapşırıqlarım',
+  'tasks.my_tasks_hint': 'Götürmə təsdiqlənib — marşrut üçün sifarişlər',
   'tasks.no_active_tasks': 'Aktiv tapşırıq yoxdur',
   'tasks.transfer_selected': 'Seçilənləri ötür ({count})',
   'tasks.finish_route_none': 'Reysi bağlamaq üçün seçilmiş sifariş yoxdur',
@@ -344,6 +355,8 @@ const Map<String, String> _az = <String, String>{
   'common.no': 'Xeyr',
   'tasks.pickup_reject_saved_for': 'Götürülmədi saxlanıldı: {barcode}',
   'tasks.pickup_confirm_dialog.title': 'Götürülsün?',
+  'tasks.pending.section_hint':
+      'Skan və ya siyahıdan seçimlə götürməni təsdiqləyin — sifarişlər «Mənim tapşırıqlarım»da görünəcək.',
   'tasks.pending.title': 'Loqistikdən tapşırıqlar — təsdiqlənməyən ({count})',
   'tasks.pending.subtitle':
       'Götürməni təsdiqləyin və ya səbəb göstərərək “götürülmədi” edin',
@@ -401,6 +414,14 @@ const Map<String, String> _az = <String, String>{
       'Tapşırıqları görmək və tətbiqdə işləmək üçün növbəni açın.',
   'shift.gate.start_button': 'Növbəyə başla',
 
+  'shift.page.screen_title': 'Növbə',
+  'shift.page.screen_subtitle':
+      'Reys statusu, xülasə və növbənin təhlükəsiz bağlanması.',
+  'shift.hero.empty_hint':
+      'Növbə başladıqda burada başlama vaxtı və sayğaclar görünəcək.',
+  'shift.hero.id_label': 'İdentifikator',
+  'shift.hero.started_label': 'Başlanğıc',
+  'shift.hero.tasks_label': 'Aktiv tapşırıq',
   'shift.current.title': 'Cari növbə',
   'shift.current.none': 'Açıq növbə tapılmadı',
   'shift.current.id': 'Növbə ID: {id}',

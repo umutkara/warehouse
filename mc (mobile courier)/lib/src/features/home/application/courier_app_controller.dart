@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/background/offline_location_task.dart';
 import '../../../core/network/api_client.dart';
+import '../../../debug/agent_debug_log.dart';
 import '../../../core/offline/offline_event_queue.dart';
 import '../../map/domain/geo_models.dart';
 import '../../shift/domain/current_shift.dart';
@@ -45,7 +46,9 @@ class CourierAppController extends ChangeNotifier {
     'delivered_to_pudo',
   };
 
-  bool loading = false;
+  /// Стартует в `true`: пока первая синхронизация не завершена, нельзя считать смену «не начатой»
+  /// (иначе на холодном старте на 1–2 с показывается ложный гейт смены).
+  bool loading = true;
   /// Узкая полоска прогресса (не блокирует экран задач целиком).
   bool syncing = false;
   String? error;
@@ -377,8 +380,30 @@ class CourierAppController extends ChangeNotifier {
     try {
       await _taskRepository.removeFromHands(task, reason: reason);
       await _syncCoreAfterFlush();
+      // #region agent log
+      final stillThere = tasks.any((t) => t.id == task.id && t.selfPickup);
+      await agentDebugLog(
+        location: 'courier_app_controller.dart:removeTaskFromHands',
+        message: 'after_sync_ok',
+        hypothesisId: 'H1',
+        runId: 'post-fix',
+        data: {
+          'stillInSelfPickupList': stillThere,
+          'tasksSelfPickupCount':
+              tasks.where((t) => t.selfPickup).length,
+        },
+      );
+      // #endregion agent log
     } catch (e) {
       error = e.toString();
+      // #region agent log
+      await agentDebugLog(
+        location: 'courier_app_controller.dart:removeTaskFromHands',
+        message: 'catch',
+        hypothesisId: 'H2',
+        data: {'errType': e.runtimeType.toString()},
+      );
+      // #endregion agent log
     } finally {
       syncing = false;
       notifyListeners();
@@ -454,14 +479,14 @@ class CourierAppController extends ChangeNotifier {
     }
   }
 
+  /// Подтверждение забора сканом — без [syncing], чтобы не было полоски
+  /// прогресса и лишнего перерисовывания всего shell при каждом скане.
   Future<void> scanConfirmAssignment(
     String barcode, {
     String? giverSignature,
     String? note,
   }) async {
-    syncing = true;
     error = null;
-    notifyListeners();
     try {
       await _taskRepository.scanConfirmAssignment(
         barcode: barcode,
@@ -474,7 +499,6 @@ class CourierAppController extends ChangeNotifier {
     } catch (e) {
       error = e.toString();
     } finally {
-      syncing = false;
       notifyListeners();
     }
   }
