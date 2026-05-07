@@ -629,7 +629,7 @@ export async function GET(req: Request) {
   const createdUnitIdsArray = Array.from(createdUnitIds);
   const [unitsMetaRes, createdUnitShipmentsRes, binCellIdsRes] = await Promise.all([
     fetchUnitsMeta(createdUnitIdsArray),
-    fetchAllShipmentsByUnitIds(createdUnitIdsArray, dateRange.fromIso, dateRange.toIso),
+    fetchAllShipmentsByUnitIds(createdUnitIdsArray, queryFromIso, queryToIso),
     fetchBinCellIds(auth.profile.warehouse_id),
   ]);
   if (unitsMetaRes.error) return NextResponse.json({ error: unitsMetaRes.error }, { status: 400 });
@@ -659,9 +659,6 @@ export async function GET(req: Request) {
   for (const shipment of createdUnitShipmentsRes.data) {
     if (!shipment.unit_id || !shipment.out_at) continue;
     const day = dayInTimeZone(shipment.out_at);
-    if (!dateKeySet.has(day)) {
-      continue;
-    }
     const byDay = outTimesByUnitAndDay.get(shipment.unit_id) || new Map<string, string[]>();
     const times = byDay.get(day) || [];
     times.push(shipment.out_at);
@@ -779,7 +776,7 @@ export async function GET(req: Request) {
     if (!byDay) return null;
     const onTimeTimes: string[] = [];
     for (const [outDay, times] of byDay.entries()) {
-      if (outDay <= day && dateKeySet.has(outDay)) {
+      if (outDay <= day) {
         onTimeTimes.push(...times);
       }
     }
@@ -831,10 +828,18 @@ export async function GET(req: Request) {
     for (const task of dayTasks) {
       const taskCreatedAt = createdTaskById.get(task.taskId)?.created_at || null;
       const getEarliestOutOnOrBeforeDayForTask = (unitId: string) => {
-        const outAt = getEarliestOutOnOrBeforeDayInPeriod(unitId, day);
-        if (!outAt) return null;
-        if (!taskCreatedAt) return outAt;
-        return outAt >= taskCreatedAt ? outAt : null;
+        const byDay = outTimesByUnitAndDay.get(unitId);
+        if (!byDay) return null;
+        const candidates: string[] = [];
+        for (const [outDay, times] of byDay.entries()) {
+          if (outDay <= day) {
+            candidates.push(...times);
+          }
+        }
+        if (candidates.length === 0) return null;
+        candidates.sort((a, b) => a.localeCompare(b));
+        if (!taskCreatedAt) return candidates[0];
+        return candidates.find((outAt) => outAt >= taskCreatedAt) || null;
       };
       const getEarliestOutAfterDayForTask = (unitId: string) => {
         const outAt = getEarliestOutAfterDayInPeriod(unitId, day);
